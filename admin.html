@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>预约系统后台管理</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .admin-header { display: flex; justify-content: space-between; align-items: center; }
+        .control-panel { display: flex; gap: 10px; margin-bottom: 10px;}
+    </style>
+</head>
+<body>
+    <div class="container" style="max-width: 800px;">
+        <div class="admin-header">
+            <h1>专业课辅导 - 后台管理</h1>
+        </div>
+
+        <h2>🕒 时间段管理</h2>
+        <div class="control-panel">
+            <input type="text" id="new-slot-time" placeholder="如：7月15日 14:00-15:00">
+            <button onclick="addSlot()" style="width: auto;">新增时间</button>
+        </div>
+        <div id="admin-slots-container">加载中...</div>
+
+        <h2>⏳ 截止时间设置</h2>
+        <div class="control-panel">
+            <input type="datetime-local" id="deadline-input">
+            <button onclick="setDeadline()" style="width: auto;">保存截止时间</button>
+        </div>
+<h2>🔑 预约口令设置</h2>
+<div class="control-panel">
+    <input type="text" id="code-input" placeholder="设置新口令，如：Optic2026">
+    <button onclick="setCode()" style="width: auto;">保存口令</button>
+</div>
+        <h2>📋 预约情况</h2>
+        <div class="control-panel">
+            <button onclick="exportCSV()" style="background:#52c41a; width:auto;">导出表格 (CSV)</button>
+            <button onclick="clearData()" class="danger">清空上一轮数据</button>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>预约时间</th>
+                        <th>昵称</th>
+                        <th>提交时间</th>
+                    </tr>
+                </thead>
+                <tbody id="reservations-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>
