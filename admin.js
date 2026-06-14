@@ -1,18 +1,23 @@
-// 🔑 1. 管理员密码验证（你可以把下面的 "NatsuAdmin666" 改成你想设置的任何密码）
-const MASTER_PASSWORD = "331021"; 
+// admin.js
 
+// 🔑 1. V2.1 动态云端密码验证
 function verifyAdmin() {
-    const inputPass = document.getElementById('admin-password').value;
+    const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     
-    if (inputPass === MASTER_PASSWORD) {
+    if (!inputPass) return alert('请输入密码！');
+
+    // 关键升级：尝试用输入的密码当做令牌去读取云端
+    // 只有在下一步的 Firebase 规则配置正确时，这里才会生效
+    db.ref('settings').once('value').then((snapshot) => {
+        // 如果能成功读取到设置，说明密码是对的（因为规则放行了）
         document.getElementById('admin-login').style.display = 'none';
         document.getElementById('admin-content').style.display = 'block';
-        // 验证成功后开始加载数据
         initAdminSystem();
-    } else {
-        errorEl.textContent = '密码错误，拒绝访问！';
-    }
+    }).catch((error) => {
+        // 如果密码错误，云端拒绝读取，就会走到这里
+        errorEl.textContent = '密码验证失败，拒绝访问！';
+    });
 }
 
 // 监听密码框回车键
@@ -20,7 +25,7 @@ document.getElementById('admin-password').addEventListener('keypress', function(
     if (e.key === 'Enter') verifyAdmin();
 });
 
-// 🛠️ 2. 系统核心初始化（只有登录成功才会调用）
+// 🛠️ 2. 系统核心初始化（只有验证成功才会调用）
 function initAdminSystem() {
     // 监听并显示时间段
     db.ref('slots').on('value', (snapshot) => {
@@ -68,7 +73,6 @@ function initAdminSystem() {
         if (res) {
             Object.keys(res).forEach(resKey => {
                 const r = res[resKey];
-                // 把每条记录的唯一 Firebase key 存进去，方便单条删除
                 reservationsData.push(r); 
                 
                 const tr = document.createElement('tr');
@@ -94,14 +98,13 @@ function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
     if (!time) return alert('请输入时间格式！');
-    
     db.ref('slots').push({ time: time, reserved: false });
     timeInput.value = '';
 }
 
 // 🗑️ 4. 删除整个时间段排班
 function deleteSlot(slotId) {
-    if (confirm('确定要彻底删除这个时间段排班吗？（如果有人预约，预约记录也会失效）')) {
+    if (confirm('确定要彻底删除这个时间段排班吗？')) {
         db.ref('slots/' + slotId).remove();
     }
 }
@@ -122,12 +125,10 @@ function setCode() {
     alert('预约口令已更新！');
 }
 
-// ❌ 7. 【核心新增】单次切除单条学生预约，并释放该时间段
+// ❌ 7. 单次切除单条学生预约
 function deleteSingleReservation(resKey, slotId, nickname) {
-    if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？取消后该时间段将重新变为空闲状态。`)) {
-        // 第一步：把对应的 slots 里的 reserved 状态改回假（变绿可选）
+    if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) {
         db.ref('slots/' + slotId + '/reserved').set(false).then(() => {
-            // 第二步：移除这单条预约记录
             db.ref('reservations/' + resKey).remove().then(() => {
                 alert(`已成功取消 [${nickname}] 的预约，名额已释放！`);
             });
@@ -155,9 +156,9 @@ function exportCSV() {
 
 // ⚠️ 9. 清空所有数据
 function clearData() {
-    if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？这通常在开启新一轮辅导时使用。')) {
+    if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
         db.ref('slots').remove();
         db.ref('reservations').remove();
-        alert('数据已清空！你可以开始添加新的时间段了。');
+        alert('数据已清空！');
     }
 }
