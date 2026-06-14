@@ -1,66 +1,103 @@
 // admin.js
 
-// 🔑 1. V2.1 动态云端密码验证
+// 🔑 1. V2.1 验证逻辑
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
-    
     if (!inputPass) return alert('请输入密码！');
 
-    // 关键升级：尝试用输入的密码当做令牌去读取云端
-    // 只有在下一步的 Firebase 规则配置正确时，这里才会生效
     db.ref('settings').once('value').then((snapshot) => {
-        // 如果能成功读取到设置，说明密码是对的（因为规则放行了）
         document.getElementById('admin-login').style.display = 'none';
         document.getElementById('admin-content').style.display = 'block';
         initAdminSystem();
     }).catch((error) => {
-        // 如果密码错误，云端拒绝读取，就会走到这里
         errorEl.textContent = '密码验证失败，拒绝访问！';
     });
 }
 
-// 监听密码框回车键
 document.getElementById('admin-password').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') verifyAdmin();
 });
 
-// 🛠️ 2. 系统核心初始化（只有验证成功才会调用）
+// 📁 记录各个日期折叠面板的展开/收起状态 (全局变量)
+let dateCollapseState = {};
+
+// 🛠️ 2. 系统核心初始化
 function initAdminSystem() {
-    // 监听并显示时间段
+    // 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
         container.innerHTML = '';
         
-        if (slots) {
-            Object.keys(slots).forEach(slotId => {
-                const slot = slots[slotId];
-                const div = document.createElement('div');
-                div.className = 'slot-item';
-                div.innerHTML = `
-                    <span>${slot.time} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
-                    <button class="danger" onclick="deleteSlot('${slotId}')">删除排班</button>
-                `;
-                container.appendChild(div);
-            });
-        } else {
+        if (!slots) {
             container.innerHTML = '<p>暂无排班时间段。</p>';
+            return;
         }
+
+        // 核心归类：按日期 (mm/dd) 把 slots 分组
+        const groups = {};
+        Object.keys(slots).forEach(slotId => {
+            const slot = slots[slotId];
+            // 提取开头的 mm/dd (以空格或非数字作为分界)
+            const match = slot.time.match(/^(\d{1,2}\/\d{1,2})/);
+            const dateKey = match ? match[1] : "其他日期格式";
+            
+            if (!groups[dateKey]) groups[dateKey] = [];
+            groups[dateKey].push({ id: slotId, data: slot });
+        });
+
+        // 渲染折叠手风琴面板
+        Object.keys(groups).sort().forEach(dateKey => {
+            const dateGroupDiv = document.createElement('div');
+            dateGroupDiv.className = 'date-group';
+
+            // 如果该日期之前没有记录状态，默认设置为展开 (false 代表不折叠)
+            if (dateCollapseState[dateKey] === undefined) {
+                dateCollapseState[dateKey] = false; 
+            }
+
+            // 头部（可点击）
+            const header = document.createElement('div');
+            header.className = 'date-header';
+            header.innerHTML = `<span>📅 ${dateKey} 排班列表</span> <span>${dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖'}</span>`;
+            
+            // 内容体
+            const body = document.createElement('div');
+            body.className = `date-body ${dateCollapseState[dateKey] ? 'collapsed' : ''}`;
+
+            // 点击头部切换折叠状态
+            header.onclick = () => {
+                dateCollapseState[dateKey] = !dateCollapseState[dateKey];
+                body.classList.toggle('collapsed');
+                header.querySelector('span:last-child').textContent = dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖';
+            };
+
+            // 往内容体内塞入属于这个日期的具体时间段段
+            groups[dateKey].forEach(item => {
+                const slotDiv = document.createElement('div');
+                slotDiv.className = 'slot-item';
+                slotDiv.innerHTML = `
+                    <span>${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+                    <button class="danger" onclick="deleteSlot('${item.id}')">删除排班</button>
+                `;
+                body.appendChild(slotDiv);
+            });
+
+            dateGroupDiv.appendChild(header);
+            dateGroupDiv.appendChild(body);
+            container.appendChild(dateGroupDiv);
+        });
     });
 
     // 监听与设置截止时间
     db.ref('settings/deadline').on('value', (snapshot) => {
-        if (snapshot.val()) {
-            document.getElementById('deadline-input').value = snapshot.val();
-        }
+        if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val();
     });
 
     // 监听与设置口令
     db.ref('settings/accessCode').on('value', (snapshot) => {
-        if (snapshot.val()) {
-            document.getElementById('code-input').value = snapshot.val();
-        }
+        if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
     // 监听并显示预约名单
@@ -74,7 +111,6 @@ function initAdminSystem() {
             Object.keys(res).forEach(resKey => {
                 const r = res[resKey];
                 reservationsData.push(r); 
-                
                 const tr = document.createElement('tr');
                 const date = new Date(r.timestamp).toLocaleString();
                 tr.innerHTML = `
@@ -93,23 +129,61 @@ function initAdminSystem() {
     });
 }
 
-// 🕒 3. 添加时间段
+// 📐 3. 【核心校验规则】添加单次时间段
 function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
-    if (!time) return alert('请输入时间格式！');
+    
+    // 正则表达式验证：必须以 数字/数字 开头
+    const datePattern = /^^\d{1,2}\/\d{1,2}/;
+    if (!datePattern.test(time)) {
+        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
+    }
+    
     db.ref('slots').push({ time: time, reserved: false });
     timeInput.value = '';
 }
 
-// 🗑️ 4. 删除整个时间段排班
+// ⚡ 4. 【核心新增】一键当日批量自动排班系统
+function generateDayTemplate() {
+    const dateInput = document.getElementById('template-date').value;
+    if (!dateInput) return alert('请先选择需要批量排班的日期！');
+
+    // 解析出月和日 (把 2026-06-19 转成 6/19)
+    const dateObj = new Date(dateInput);
+    const month = dateObj.getMonth() + 1;
+    const day = dateObj.getDate();
+    const prefix = `${month}/${day}`;
+
+    // 定义你要的 5 个经典时间段模板
+    const templates = [
+        "0800-1015",
+        "1030-1245",
+        "1330-1545",
+        "1600-1815",
+        "1930-2145"
+    ];
+
+    if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个标准辅导时间段吗？`)) {
+        // 循环推送到云端
+        templates.forEach(t => {
+            db.ref('slots').push({
+                time: `${prefix} ${t}`,
+                reserved: false
+            });
+        });
+        alert(`⚡ ${prefix} 的排班模板已一键部署成功！`);
+    }
+}
+
+// 🗑️ 5. 删除整个时间段排班
 function deleteSlot(slotId) {
     if (confirm('确定要彻底删除这个时间段排班吗？')) {
         db.ref('slots/' + slotId).remove();
     }
 }
 
-// ⏳ 5. 设置截止时间
+// ⏳ 6. 设置截止时间
 function setDeadline() {
     const deadline = document.getElementById('deadline-input').value;
     if (!deadline) return alert('请选择时间！');
@@ -117,7 +191,7 @@ function setDeadline() {
     alert('截止时间已保存！');
 }
 
-// 🔑 6. 设置口令
+// 🔑 7. 设置口令
 function setCode() {
     const newCode = document.getElementById('code-input').value.trim();
     if (!newCode) return alert('口令不能为空！');
@@ -125,7 +199,7 @@ function setCode() {
     alert('预约口令已更新！');
 }
 
-// ❌ 7. 单次切除单条学生预约
+// ❌ 8. 单次切除单条学生预约
 function deleteSingleReservation(resKey, slotId, nickname) {
     if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) {
         db.ref('slots/' + slotId + '/reserved').set(false).then(() => {
@@ -136,7 +210,7 @@ function deleteSingleReservation(resKey, slotId, nickname) {
     }
 }
 
-// 📊 8. 导出 CSV
+// 📊 9. 导出 CSV
 let reservationsData = [];
 function exportCSV() {
     if (reservationsData.length === 0) return alert('当前无数据可导出');
@@ -154,7 +228,7 @@ function exportCSV() {
     document.body.removeChild(link);
 }
 
-// ⚠️ 9. 清空所有数据
+// ⚠️ 10. 清空所有数据
 function clearData() {
     if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
         db.ref('slots').remove();
