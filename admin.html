@@ -7,17 +7,28 @@
     <link rel="stylesheet" href="style.css">
     <style>
         .admin-header { display: flex; justify-content: space-between; align-items: center; }
-        .control-panel { display: flex; gap: 10px; margin-bottom: 10px;}
-        /* 🔑 登录遮罩样式 */
+        .control-panel { display: flex; gap: 10px; margin-bottom: 15px; align-items: center;}
         #admin-login {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: #f5f7fa; display: flex; justify-content: center; align-items: center; z-index: 9999;
         }
-        #admin-content { display: none; } /* 默认隐藏主体 */
+        #admin-content { display: none; }
+        
+        /* 📁 优雅折叠面板样式 */
+        .date-group { margin-bottom: 15px; border: 1px solid #dcdfe6; border-radius: 8px; overflow: hidden; background: #fff; }
+        .date-header { 
+            background: #f5f7fa; padding: 12px 20px; font-weight: bold; color: #409eff; 
+            cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid #e4e7ed; user-select: none;
+        }
+        .date-header:hover { background: #edf5ff; }
+        .date-body { padding: 10px 15px; display: block; }
+        .date-body.collapsed { display: none; }
+        .template-panel { background: #f0f9eb; border: 1px solid #c2e7b0; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .template-panel h4 { margin: 0 0 10px 0; color: #67c23a; }
     </style>
 </head>
 <body>
-    <!-- 🔑 管理员登录卡片 -->
     <div id="admin-login">
         <div class="container" style="max-width: 400px; text-align: center;">
             <h1>管理员认证</h1>
@@ -29,17 +40,27 @@
         </div>
     </div>
 
-    <!-- 🛠️ 后台管理主体（验证成功后可见） -->
     <div id="admin-content" class="container" style="max-width: 800px;">
         <div class="admin-header">
             <h1>专业课辅导 - 后台管理</h1>
         </div>
 
         <h2>🕒 时间段管理</h2>
-        <div class="control-panel">
-            <input type="text" id="new-slot-time" placeholder="如：7月15日 14:00-15:00">
-            <button onclick="addSlot()" style="width: auto;">新增时间</button>
+        
+        <div class="template-panel">
+            <h4>⚡ 一键生成当日排班模板</h4>
+            <div class="control-panel">
+                <input type="date" id="template-date" style="width: auto; padding: 8px;">
+                <button onclick="generateDayTemplate()" style="background:#67c23a; width: auto;">生成该日黄金时间段</button>
+            </div>
+            <small style="color: #666;">自动生成：08:00-10:15、10:30-12:45、13:30-15:45、16:00-18:15、19:30-21:45 共5个班次</small>
         </div>
+
+        <div class="control-panel">
+            <input type="text" id="new-slot-time" placeholder="必须以月/日开头，如：6/19 14:00-15:00">
+            <button onclick="addSlot()" style="width: auto; white-space: nowrap;">新增单次</button>
+        </div>
+        
         <div id="admin-slots-container">加载中...</div>
 
         <h2>⏳ 截止时间设置</h2>
@@ -66,7 +87,7 @@
                         <th>预约时间</th>
                         <th>昵称</th>
                         <th>提交时间</th>
-                        <th>操作</th> <!-- 👉 新增：操作列 -->
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody id="reservations-body"></tbody>
