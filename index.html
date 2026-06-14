@@ -13,13 +13,13 @@
 
         <div id="booking-form">
             <div class="form-group">
-                <label for="nickname">请输入姓名：</label>
+                <label for="nickname">请输入昵称（虚拟名称）：</label>
                 <input type="text" id="nickname" placeholder="例如：小猫" required>
             </div>
             
             <div class="form-group">
                 <label for="access-code">请输入班级预约口令：</label>
-                <input type="text" id="access-code" placeholder="周中会发送本周口令" required>
+                <input type="text" id="access-code" placeholder="向老师获取专属口令" required>
             </div>
             
             <div class="form-group">
@@ -33,9 +33,15 @@
         <div class="cancel-section">
             <h3>想取消预约？</h3>
             <div class="form-group">
-                <input type="text" id="cancel-nickname" placeholder="输入你预约时的姓名">
+                <label style="font-size: 14px; color: #666; font-weight: normal;">1. 输入你的虚拟昵称：</label>
+                <input type="text" id="cancel-nickname" placeholder="输入预约时的昵称">
             </div>
             <div class="form-group">
+                <label style="font-size: 14px; color: #666; font-weight: normal;">2. 选择要取消哪天的课程：</label>
+                <input type="date" id="cancel-date" style="padding: 10px;">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 14px; color: #666; font-weight: normal;">3. 输入班级预约口令：</label>
                 <input type="text" id="cancel-code" placeholder="输入班级预约口令">
             </div>
             <button id="cancel-btn" class="danger-outline" onclick="cancelBooking()">确认取消我的预约</button>
