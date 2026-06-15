@@ -50,7 +50,7 @@ function submitBooking() {
     const accessCode = document.getElementById('access-code').value.trim();
     const selectedSlot = document.querySelector('input[name="slot"]:checked');
 
-    if (!nickname) return showMessage('请输入昵称！', false);
+    if (!nickname) return showMessage('请输入姓名！', false);
     if (!accessCode) return showMessage('请输入预约口令！', false);
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
 
@@ -93,7 +93,7 @@ function submitBooking() {
                 }).then(() => {
                     document.getElementById('booking-form').innerHTML = `
                         <h2 style="text-align:center; color:#52c41a;">预约成功！</h2>
-                        <p style="text-align:center;">你的昵称: <b>${nickname}</b></p>
+                        <p style="text-align:center;">你的姓名: <b>${nickname}</b></p>
                         <p style="text-align:center;">预约时间: <b>${slotTime}</b></p>
                     `;
                 });
@@ -102,23 +102,23 @@ function submitBooking() {
     });
 }
 
-// ❌ 升级版：精准识别日期的取消预约功能
+// ❌ 升级修正版：精准识别日期的取消预约功能
 function cancelBooking() {
     const cancelNickname = document.getElementById('cancel-nickname').value.trim();
     const cancelDateInput = document.getElementById('cancel-date').value;
     const cancelCode = document.getElementById('cancel-code').value.trim();
 
-    if (!cancelNickname) return showMessage('请输入你想取消的昵称！', false);
+    if (!cancelNickname) return showMessage('请输入你想取消的姓名！', false);
     if (!cancelDateInput) return showMessage('请选择你想取消哪一天的课程！', false);
     if (!cancelCode) return showMessage('请输入口令以验证身份！', false);
 
-    // 自动将日期选择器的格式转换为云端标准 (例如把 2026-06-19 提取为 6/19)
-    const dateObj = new Date(cancelDateInput);
-    const month = dateObj.getMonth() + 1;
-    const day = dateObj.getDate();
-    const targetDatePrefix = `${month}/${day}`; // 得到 "6/19"
+    // 🔒 优化：改用切字符串法提取日期，彻底规避跨时区天数减一的底层 Bug
+    const dateParts = cancelDateInput.split('-'); // 把 "2026-06-19" 切开
+    const month = parseInt(dateParts[1], 10);
+    const day = parseInt(dateParts[2], 10);
+    const targetDatePrefix = `${month}/${day}`; // 稳稳得到 "6/19"
 
-    if (!confirm(`确定要取消昵称为 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
+    if (!confirm(`确定要取消姓名为 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
 
     const cancelBtn = document.getElementById('cancel-btn');
     cancelBtn.disabled = true;
@@ -134,7 +134,7 @@ function cancelBooking() {
             return;
         }
 
-        // 2. 寻找匹配的预约单（双重校验：昵称 ＋ 日期前缀）
+        // 2. 寻找匹配的预约单
         db.ref('reservations').once('value').then((resSnapshot) => {
             const reservations = resSnapshot.val();
             if (!reservations) {
@@ -147,12 +147,9 @@ function cancelBooking() {
             let targetResKey = null;
             let targetSlotId = null;
 
-            // 遍历查找
             Object.keys(reservations).forEach(key => {
                 const r = reservations[key];
-                // 检查昵称是否相同
                 if (r.nickname === cancelNickname) {
-                    // 检查这条记录的时间，是不是以同学选择的 "6/19" 开头
                     if (r.time.startsWith(targetDatePrefix)) {
                         targetResKey = key;
                         targetSlotId = r.slotId;
@@ -160,9 +157,8 @@ function cancelBooking() {
                 }
             });
 
-            // 如果没找到同时满足这两个条件的记录
             if (!targetResKey || !targetSlotId) {
-                showMessage(`未找到 [${cancelNickname}] 在 ${targetDatePrefix} 的预约，请核对日期或昵称。`, false);
+                showMessage(`未找到 [${cancelNickname}] 在 ${targetDatePrefix} 的预约，请核对日期或姓名。`, false);
                 cancelBtn.disabled = false;
                 cancelBtn.textContent = '确认取消我的预约';
                 return;
@@ -173,7 +169,6 @@ function cancelBooking() {
                 db.ref('reservations/' + targetResKey).remove().then(() => {
                     showMessage(`成功取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约！该时间段已重新开放。`, true);
                     
-                    // 清空输入框并复原按钮
                     document.getElementById('cancel-nickname').value = '';
                     document.getElementById('cancel-date').value = '';
                     document.getElementById('cancel-code').value = '';
