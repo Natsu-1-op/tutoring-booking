@@ -21,7 +21,6 @@ document.getElementById('admin-password').addEventListener('keypress', function(
 let dateCollapseState = {};
 
 function initAdminSystem() {
-    // 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -66,10 +65,8 @@ function initAdminSystem() {
             groups[dateKey].forEach(item => {
                 const slotDiv = document.createElement('div');
                 slotDiv.className = 'slot-item';
-                // 给每一行绑定一个唯一的 ID，方便后面行内直接改文字
                 slotDiv.id = `slot-row-${item.id}`; 
                 
-                // 👉 核心修改：增加“修改排班”按钮组合
                 slotDiv.innerHTML = `
                     <span class="slot-text-span">${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
                     <div class="btn-group">
@@ -126,7 +123,6 @@ function initAdminSystem() {
     });
 }
 
-// 📁 新增函数A：将某一行切换为“编辑输入框”状态
 function startEditSlot(slotId, currentTime) {
     const row = document.getElementById(`slot-row-${slotId}`);
     row.innerHTML = `
@@ -138,20 +134,13 @@ function startEditSlot(slotId, currentTime) {
     `;
 }
 
-// 📁 新增函数B：保存修改并推送至 Firebase 云端
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
-    
-    // 依然维持之前的月/日强制校验规则，防手抖
     const datePattern = /^\d{1,2}\/\d{1,2}/;
     if (!datePattern.test(newTime)) {
         return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
     }
-
-    // 更新到云端数据库（只修改时间文字，不影响 reserved 预约状态）
-    db.ref('slots/' + slotId).update({
-        time: newTime
-    }).then(() => {
+    db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
         alert('时间段文字修改成功！');
     });
 }
@@ -174,6 +163,7 @@ function addSlot() {
     timeInput.value = '';
 }
 
+// 👉 核心修改：从动态输入框抓取微调后的批量时间段
 function generateDayTemplate() {
     const dateInput = document.getElementById('template-date').value;
     if (!dateInput) return alert('请先选择需要批量排班的日期！');
@@ -183,22 +173,23 @@ function generateDayTemplate() {
     const day = dateObj.getDate();
     const prefix = `${month}/${day}`;
 
-    const templates = [
-        "0800-1015",
-        "1030-1245",
-        "1330-1545",
-        "1600-1815",
-        "1930-2145"
-    ];
+    // 实时抓取页面里 5 个框框输入的内容
+    const templates = [];
+    for (let i = 1; i <= 5; i++) {
+        const val = document.getElementById(`tpl-time-${i}`).value.trim();
+        if (val) templates.push(val); // 留空的不算
+    }
 
-    if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个标准辅导时间段吗？`)) {
+    if (templates.length === 0) return alert('请至少填写一个时间段！');
+
+    if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个自定义辅导时间段吗？`)) {
         templates.forEach(t => {
             db.ref('slots').push({
-                time: `${prefix} ${t}`,
+                time: `${prefix} ${t}`, // 自动拼上选中的月/日
                 reserved: false
             });
         });
-        alert(`⚡ ${prefix} 的排班模板已一键部署成功！`);
+        alert(`⚡ ${prefix} 的排班模板已成功按你的微调部署！`);
     }
 }
 
