@@ -72,7 +72,7 @@ function submitBooking() {
             showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return;
         }
 
-        // 同日防刷锁（限约一次）
+        // 同日防刷拦截锁
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
             if (currentRes && targetDate) {
@@ -88,7 +88,7 @@ function submitBooking() {
                     showMessage('口令错误，无法提交！', false); btn.disabled = false; return;
                 }
 
-                // 并发原子锁
+                // 并发原子并发锁
                 db.ref('slots/' + slotId).transaction((currentData) => {
                     if (currentData === null) return currentData;
                     if (!currentData.reserved) { currentData.reserved = true; return currentData; }
@@ -97,8 +97,8 @@ function submitBooking() {
                     if (error || !committed) {
                         showMessage('手慢了，该时间已被预约！', false); btn.disabled = false;
                     } else {
-                        // 🌟 修复④：采用极难碰撞的高强度 8 位字母数字组合作为退课凭证
-                        const randomCancelCode = Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+                        // 🌟 核心修改：生成 5 位数极高密度的 字母+数字 专属取消验证码（如：A8K3D）
+                        const randomCancelCode = (Math.random().toString(36).substring(2, 4) + Math.random().toString(36).substring(2, 5)).toUpperCase().slice(0, 5);
 
                         db.ref('reservations').push({
                             nickname: nickname, slotId: slotId, time: slotTime, cancelCode: randomCancelCode, timestamp: new Date().toISOString()
@@ -108,9 +108,9 @@ function submitBooking() {
                                 <p style="text-align:center;">你的姓名: <b>${nickname}</b></p>
                                 <p style="text-align:center;">预约时间: <b>${slotTime}</b></p>
                                 <div style="background:#fff7e6; border:1px solid #ffd591; padding:15px; border-radius:6px; margin-top:15px; text-align:center;">
-                                    <span style="color:#d46b08; font-size:14px;">⚠️ <b>专属凭证取消码（防代退）</b></span><br>
+                                    <span style="color:#d46b08; font-size:14px;">⚠️ <b>5位专属取消凭证码</b></span><br>
                                     <b style="font-size:26px; color:#ff4d4f; letter-spacing:2px;">${randomCancelCode}</b><br>
-                                    <small style="color:#666;">临时调整必须输入此码，请截图或复制妥善保存。</small>
+                                    <small style="color:#666;">临时调整必须输入此码，请截图妥善保存。</small>
                                 </div>`;
                         });
                     }
@@ -146,10 +146,10 @@ function cancelBooking() {
         });
 
         if (!targetResKey) {
-            showMessage(`验证失败：姓名、日期或专属凭证码不匹配！`, false); cancelBtn.disabled = false; return;
+            showMessage(`验证失败：姓名、日期或 5 位凭证码不匹配！`, false); cancelBtn.disabled = false; return;
         }
 
-        // 🌟 修复⑤：退课完美切换为 Multi-location updates 多路径提交，多节点强一致原子变更！
+        // 🌟 多路径原子删除：同步撤回预约，避免数据产生逻辑坏账
         const updates = {};
         updates[`slots/${targetSlotId}/reserved`] = false;
         updates[`reservations/${targetResKey}`] = null;
