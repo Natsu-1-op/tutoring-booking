@@ -14,7 +14,6 @@
         }
         #admin-content { display: none; }
         
-        /* 📁 优雅折叠面板通用样式 */
         .date-group { margin-bottom: 15px; border: 1px solid #dcdfe6; border-radius: 8px; overflow: hidden; background: #fff; }
         .date-header { 
             background: #f5f7fa; padding: 12px 20px; font-weight: bold; color: #409eff; 
@@ -25,7 +24,6 @@
         .date-body { padding: 10px 15px; display: block; }
         .date-body.collapsed { display: none; }
         
-        /* 📋 预约记录折叠面板专属颜色（用橘黄色区分排班） */
         .res-group { border-color: #ffd591; }
         .res-header { background: #fff7e6; color: #d46b08; border-bottom-color: #ffd591; }
         .res-header:hover { background: #fff2e8; }
@@ -67,7 +65,7 @@
         <h2>🕒 时间段管理</h2>
         
         <div class="template-panel">
-            <h4>⚡ 一键生成当日排班模板（可在框内直接修改时间）</h4>
+            <h4>⚡ 一键生成当日排班</h4>
             <div class="control-panel" style="margin-bottom: 5px;">
                 <label style="font-size: 14px; color: #4f8234;">选择日期：</label>
                 <input type="date" id="template-date" style="width: auto; padding: 8px;">
@@ -79,7 +77,7 @@
                 <input type="text" id="tpl-time-4" value="1600-1815">
                 <input type="text" id="tpl-time-5" value="1900-2115">
             </div>
-            <button onclick="generateDayTemplate()" style="background:#67c23a; width: 100%;">生成该日排班（使用上方时段）</button>
+            <button onclick="generateDayTemplate()" style="background:#67c23a; width: 100%;">生成该日排班</button>
         </div>
 
         <div class="control-panel">
