@@ -1,5 +1,18 @@
 let isDeadlined = false;
 
+// 📢 新增：实时监听并渲染公告栏
+db.ref('settings/notice').on('value', (snapshot) => {
+    const notice = snapshot.val();
+    const board = document.getElementById('notice-board');
+    const content = document.getElementById('notice-content');
+    if (notice && notice.trim() !== "") {
+        content.innerHTML = notice.replace(/\n/g, '<br>'); // 支持后台换行
+        board.style.display = 'block';
+    } else {
+        board.style.display = 'none'; // 没公告时自动隐藏
+    }
+});
+
 db.ref('settings/deadline').on('value', (snapshot) => {
     const deadline = snapshot.val();
     if (deadline && new Date() > new Date(deadline)) {
@@ -102,7 +115,6 @@ function submitBooking() {
     });
 }
 
-// ❌ 升级修正版：精准识别日期的取消预约功能
 function cancelBooking() {
     const cancelNickname = document.getElementById('cancel-nickname').value.trim();
     const cancelDateInput = document.getElementById('cancel-date').value;
@@ -112,11 +124,10 @@ function cancelBooking() {
     if (!cancelDateInput) return showMessage('请选择你想取消哪一天的课程！', false);
     if (!cancelCode) return showMessage('请输入口令以验证身份！', false);
 
-    // 🔒 优化：改用切字符串法提取日期，彻底规避跨时区天数减一的底层 Bug
-    const dateParts = cancelDateInput.split('-'); // 把 "2026-06-19" 切开
+    const dateParts = cancelDateInput.split('-');
     const month = parseInt(dateParts[1], 10);
     const day = parseInt(dateParts[2], 10);
-    const targetDatePrefix = `${month}/${day}`; // 稳稳得到 "6/19"
+    const targetDatePrefix = `${month}/${day}`;
 
     if (!confirm(`确定要取消姓名为 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
 
@@ -124,7 +135,6 @@ function cancelBooking() {
     cancelBtn.disabled = true;
     cancelBtn.textContent = '正在取消...';
 
-    // 1. 验证口令
     db.ref('settings/accessCode').once('value').then((snapshot) => {
         const correctCode = snapshot.val() || "123456";
         if (cancelCode !== correctCode) {
@@ -134,7 +144,6 @@ function cancelBooking() {
             return;
         }
 
-        // 2. 寻找匹配的预约单
         db.ref('reservations').once('value').then((resSnapshot) => {
             const reservations = resSnapshot.val();
             if (!reservations) {
@@ -164,7 +173,6 @@ function cancelBooking() {
                 return;
             }
 
-            // 3. 执行精准取消
             db.ref('slots/' + targetSlotId + '/reserved').set(false).then(() => {
                 db.ref('reservations/' + targetResKey).remove().then(() => {
                     showMessage(`成功取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约！该时间段已重新开放。`, true);
