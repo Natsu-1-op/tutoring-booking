@@ -97,7 +97,6 @@ function submitBooking() {
                     if (error || !committed) {
                         showMessage('手慢了，该时间已被预约！', false); btn.disabled = false;
                     } else {
-                        // 🌟 生成 5 位大写字母+数字 专属取消验证码
                         const randomCancelCode = (Math.random().toString(36).substring(2, 4) + Math.random().toString(36).substring(2, 5)).toUpperCase().slice(0, 5);
 
                         db.ref('reservations').push({
@@ -123,7 +122,7 @@ function submitBooking() {
 function cancelBooking() {
     const cancelNickname = document.getElementById('cancel-nickname').value.trim();
     const cancelDateInput = document.getElementById('cancel-date').value;
-    const cancelCodeInput = document.getElementById('cancel-code').value.trim().toUpperCase();
+    const cancelCodeInput = document.getElementById('cancel-code').value.trim().toUpperCase(); // 输入自动转大写
 
     if (!cancelNickname || !cancelDateInput || !cancelCodeInput) return showMessage('请完整填写姓名、日期和凭证码！', false);
     const dateParts = cancelDateInput.split('-');
@@ -140,13 +139,13 @@ function cancelBooking() {
         let targetResKey = null; let targetSlotId = null;
         Object.keys(reservations).forEach(key => {
             const r = reservations[key];
-            if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix) && r.cancelCode === cancelCodeInput) {
+            // 🌟 核心改进：比对时将云端的 cancelCode 也一并转为大写，达成无视大小写核对
+            if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix) && r.cancelCode.toUpperCase() === cancelCodeInput) {
                 targetResKey = key; targetSlotId = r.slotId;
             }
         });
 
         if (!targetResKey) {
-            // 🌟 帮您把这里的失败弹窗文案也同步成 5位
             showMessage(`验证失败：姓名、日期或 5 位凭证码不匹配！`, false); cancelBtn.disabled = false; return;
         }
 
