@@ -5,11 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>专业课辅导预约</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* 📢 公告栏专属样式 */
+        .notice-board {
+            background: #fff7e6; border: 1px solid #ffd591; padding: 15px 20px; 
+            border-radius: 8px; margin-bottom: 20px; color: #d46b08; font-size: 14px; line-height: 1.6;
+        }
+        .notice-board h4 { margin: 0 0 5px 0; font-size: 15px; display: flex; align-items: center; gap: 5px; }
+    </style>
 </head>
 <body>
     <div class="container" id="app-container">
         <h1>专业课辅导预约</h1>
         <div id="message"></div>
+
+        <div class="notice-board" id="notice-board" style="display: none;">
+            <h4>公告：</h4>
+            <div id="notice-content">加载中...</div>
+        </div>
 
         <div id="booking-form">
             <div class="form-group">
