@@ -26,6 +26,10 @@
         .template-panel { background: #f0f9eb; border: 1px solid #c2e7b0; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .template-panel h4 { margin: 0 0 10px 0; color: #67c23a; }
         textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: inherit;}
+        
+        /* 🛠️ 新增：行内编辑时的输入框精细样式 */
+        .edit-input { padding: 6px 10px; border: 1px solid #409eff; border-radius: 4px; font-size: 14px; width: 60%; box-sizing: border-box; }
+        .btn-group { display: flex; gap: 5px; }
     </style>
 </head>
 <body>
@@ -51,7 +55,7 @@
             <button onclick="setNotice()" style="background:#e6a23c; margin-top: 8px; width: auto;">发布/更新公告</button>
         </div>
 
-        <h2>🕒 时间段管理</h2>
+        <h2>🕒 时间段 management</h2>
         
         <div class="template-panel">
             <h4>⚡ 一键生成当日排班模板</h4>
