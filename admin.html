@@ -14,7 +14,6 @@
         }
         #admin-content { display: none; }
         
-        /* 📁 优雅折叠面板样式 */
         .date-group { margin-bottom: 15px; border: 1px solid #dcdfe6; border-radius: 8px; overflow: hidden; background: #fff; }
         .date-header { 
             background: #f5f7fa; padding: 12px 20px; font-weight: bold; color: #409eff; 
@@ -26,6 +25,7 @@
         .date-body.collapsed { display: none; }
         .template-panel { background: #f0f9eb; border: 1px solid #c2e7b0; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         .template-panel h4 { margin: 0 0 10px 0; color: #67c23a; }
+        textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: inherit;}
     </style>
 </head>
 <body>
@@ -43,6 +43,12 @@
     <div id="admin-content" class="container" style="max-width: 800px;">
         <div class="admin-header">
             <h1>专业课辅导 - 后台管理</h1>
+        </div>
+
+        <h2>📢 约课端公告设置</h2>
+        <div class="form-group">
+            <textarea id="notice-input" rows="3" placeholder="在此输入公告内容（支持换行）。留空并保存可隐藏学生端的公告栏。"></textarea>
+            <button onclick="setNotice()" style="background:#e6a23c; margin-top: 8px; width: auto;">发布/更新公告</button>
         </div>
 
         <h2>🕒 时间段管理</h2>
