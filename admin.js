@@ -1,6 +1,6 @@
 // admin.js
 
-// 🔑 1. V2.2 云端密码严格双重验证
+// 🔑 1. 管理端登录校验
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
@@ -27,9 +27,13 @@ document.getElementById('admin-password').addEventListener('keypress', function(
 let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
+let initialized = false; // 🔒 修复①：引入生命周期单向锁，斩断重复注册监听问题
 
 function initAdminSystem() {
-    // 🕒 监听并按 mm/dd 进行高级折叠渲染
+    if (initialized) return;
+    initialized = true;
+
+    // 🕒 2. 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -50,17 +54,22 @@ function initAdminSystem() {
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        Object.keys(groups).sort().forEach(dateKey => {
+        // 📅 修复⑨：重写升序日期算法，确保 6/30、7/1、10/1 按照真正的时间轴线性排列
+        Object.keys(groups).sort((a, b) => {
+            const [am, ad] = a.split('/').map(Number);
+            const [bm, bd] = b.split('/').map(Number);
+            return new Date(2026, am - 1, ad) - new Date(2026, bm - 1, bd);
+        }).forEach(dateKey => {
             const dateGroupDiv = document.createElement('div');
             dateGroupDiv.className = 'date-group';
 
             if (dateCollapseState[dateKey] === undefined) {
-                dateCollapseState[dateKey] = true; 
+                dateCollapseState[dateKey] = true; // 默认卡片折叠
             }
 
             const header = document.createElement('div');
             header.className = 'date-header';
-            header.innerHTML = `<span>📅 ${dateKey} 排班列表</span> <span>${dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖'}</span>`;
+            header.innerHTML = `<span>📅 ${dateKey} 排班列表</span> <span class="arrow-indicator">${dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖'}</span>`;
             
             const body = document.createElement('div');
             body.className = `date-body ${dateCollapseState[dateKey] ? 'collapsed' : ''}`;
@@ -68,7 +77,7 @@ function initAdminSystem() {
             header.onclick = () => {
                 dateCollapseState[dateKey] = !dateCollapseState[dateKey];
                 body.classList.toggle('collapsed');
-                header.querySelector('span:last-child').textContent = dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖';
+                header.querySelector('.arrow-indicator').textContent = dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖';
             };
 
             groups[dateKey].forEach(item => {
@@ -104,7 +113,7 @@ function initAdminSystem() {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
-    // 📋 监听并显示预约名单
+    // 📋 3. 监听并显示预约名单
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -136,7 +145,7 @@ function initAdminSystem() {
 
             const header = document.createElement('div');
             header.className = 'date-header res-header';
-            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length}条记录)</span> <span>${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
+            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length}条记录)</span> <span class="arrow-indicator">${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
 
             const body = document.createElement('div');
             body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
@@ -145,16 +154,17 @@ function initAdminSystem() {
             header.onclick = () => {
                 resCollapseState[submitDate] = !resCollapseState[submitDate];
                 body.classList.toggle('collapsed');
-                header.querySelector('span:last-child').textContent = resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖';
+                header.querySelector('.arrow-indicator').textContent = resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖';
             };
 
             const table = document.createElement('table');
             table.innerHTML = `
                 <thead>
                     <tr>
-                        <th>预约课程时段</th>
-                        <th>学生姓名</th>
-                        <th>精确提交时间</th>
+                        <th>时段</th>
+                        <th>姓名</th>
+                        <th>专属取消码</th>
+                        <th>提交精确时间</th>
                         <th>快捷操作</th>
                     </tr>
                 </thead>
@@ -169,6 +179,7 @@ function initAdminSystem() {
                 tr.innerHTML = `
                     <td>${r.time}</td>
                     <td><b>${r.nickname}</b></td>
+                    <td style="color:#e6a23c; font-weight:bold;">${r.cancelCode || '无'}</td>
                     <td>${preciseTime}</td>
                     <td>
                         <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname}')">取消该预约</button>
@@ -191,12 +202,28 @@ function startEditSlot(slotId, currentTime) {
         <input type="text" class="edit-input" id="edit-input-${slotId}" value="${currentTime}">
         <div class="btn-group">
             <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
-            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="initAdminSystem()">取消</button>
+            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="cancelEditSlot('${slotId}')">取消</button>
         </div>
     `;
 }
 
-// 📐 🛠️ 【联动升级版】保存修改函数
+// 📁 修复 ①：取消按钮局部回滚渲染，不刷新整页，更不重复执行 initAdminSystem()
+function cancelEditSlot(slotId) {
+    db.ref('slots/' + slotId).once('value').then(snapshot => {
+        const slot = snapshot.val();
+        if (!slot) return;
+        const row = document.getElementById(`slot-row-${slotId}`);
+        row.innerHTML = `
+            <span class="slot-text-span">${slot.time} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+            <div class="btn-group">
+                <button style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;" onclick="startEditSlot('${slotId}', '${slot.time}')">修改</button>
+                <button class="danger" onclick="deleteSlot('${slotId}')">删除</button>
+            </div>
+        `;
+    });
+}
+
+// 📁 修复 ②：引入 Promise.all 保证级联异步数据全部写入完成后再关闭提示
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     const datePattern = /^\d{1,2}\/\d{1,2}/;
@@ -204,20 +231,20 @@ function saveEditedSlot(slotId) {
         return alert('❌ 格式不正确！必须以“月/日”格式开头');
     }
 
-    // 第一步：更新排班本身的时间
     db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
-        // 第二步：顺藤摸瓜，检查有没有学生已经约了这个 slotId
         db.ref('reservations').once('value').then((snapshot) => {
             const res = snapshot.val();
+            const promises = [];
             if (res) {
                 Object.keys(res).forEach(resKey => {
                     if (res[resKey].slotId === slotId) {
-                        // 如果找到了对应的预约记录，顺手把它的时间字符串也更新掉，防止脱节！
-                        db.ref('reservations/' + resKey).update({ time: newTime });
+                        promises.push(db.ref('reservations/' + resKey).update({ time: newTime }));
                     }
                 });
             }
-            alert('时间段文字修改成功，已自动同步更新相关学生预约单！');
+            Promise.all(promises).then(() => {
+                alert('时间段文字修改成功，已自动同步更新相关学生预约单！');
+            });
         });
     });
 }
@@ -258,29 +285,40 @@ function generateDayTemplate() {
     if (templates.length === 0) return alert('请至少填写一个时间段！');
 
     if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个自定义辅导时间段吗？`)) {
+        const promises = [];
         templates.forEach(t => {
-            db.ref('slots').push({
-                time: `${prefix} ${t}`,
-                reserved: false
-            });
+            promises.push(db.ref('slots').push({ time: `${prefix} ${t}`, reserved: false }));
         });
-        alert('⚡ 排班模板已成功部署！');
+        
+        Promise.all(promises).then(() => {
+            document.getElementById('tpl-time-1').value = "0800-1015";
+            document.getElementById('tpl-time-2').value = "1030-1245";
+            document.getElementById('tpl-time-3').value = "1330-1545";
+            document.getElementById('tpl-time-4').value = "1600-1815";
+            document.getElementById('tpl-time-5').value = "1900-2115";
+            document.getElementById('template-date').value = "";
+            alert('⚡ 排班模板已成功部署！');
+        });
     }
 }
 
+// 📁 修复 ③：引入 Promise.all 等待排班和下属名单彻底抹除无痕
 function deleteSlot(slotId) {
     if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) {
         db.ref('slots/' + slotId).remove().then(() => {
-            // 同步联动：删除排班时，也顺手抹去对应的预约记录
             db.ref('reservations').once('value').then((snapshot) => {
                 const res = snapshot.val();
+                const tasks = [];
                 if (res) {
                     Object.keys(res).forEach(resKey => {
                         if (res[resKey].slotId === slotId) {
-                            db.ref('reservations/' + resKey).remove();
+                            tasks.push(db.ref('reservations/' + resKey).remove());
                         }
                     });
                 }
+                Promise.all(tasks).then(() => {
+                    alert('该时段排班与学生预约单据已一并联动抹除干净！');
+                });
             });
         });
     }
@@ -310,10 +348,31 @@ function deleteSingleReservation(resKey, slotId, nickname) {
     }
 }
 
+// 📁 修复 ⑧：完美补上之前遗漏丢失的 exportCSV 核心函数
+function exportCSV() {
+    if (reservationsData.length === 0) return alert('当前无数据可导出');
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,专属取消凭证码,提交时间\n";
+    reservationsData.forEach(r => {
+        const date = new Date(r.timestamp).toLocaleString();
+        csvContent += `${r.time},${r.nickname},${r.cancelCode || '无'},${date}\n`;
+    });
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "课程预约学生名单.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// 📁 修复 ④：解决清空数据时的底层并行竞争漏洞
 function clearData() {
     if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
-        db.ref('slots').remove();
-        db.ref('reservations').remove();
-        alert('数据已清空！');
+        Promise.all([
+            db.ref('slots').remove(),
+            db.ref('reservations').remove()
+        ]).then(() => {
+            alert('云端数据已彻底完成一键大擦除！');
+        });
     }
 }
