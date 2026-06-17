@@ -1,6 +1,6 @@
 let isDeadlined = false;
 
-// 📢 新增：实时监听并渲染公告栏
+// 📢 实时监听并渲染公告栏
 db.ref('settings/notice').on('value', (snapshot) => {
     const notice = snapshot.val();
     const board = document.getElementById('notice-board');
@@ -21,6 +21,7 @@ db.ref('settings/deadline').on('value', (snapshot) => {
     }
 });
 
+// 📅 实时监听排班数据并执行“已满沉底”智能排序渲染
 db.ref('slots').on('value', (snapshot) => {
     if (isDeadlined) return;
     const slots = snapshot.val();
@@ -32,8 +33,27 @@ db.ref('slots').on('value', (snapshot) => {
         return;
     }
 
+    // 💡 核心改动：创建两个临时数组，分别存放空闲时段和已满时段
+    const availableSlots = [];
+    const reservedSlots = [];
+
+    // 遍历原始数据，进行分类拆分
     Object.keys(slots).forEach(slotId => {
         const slot = slots[slotId];
+        if (slot.reserved) {
+            reservedSlots.push({ id: slotId, data: slot });
+        } else {
+            availableSlots.push({ id: slotId, data: slot });
+        }
+    });
+
+    // 组合数组：空闲的永远在前半部分，已满的永远接在后半部分（实现沉底）
+    const sortedSlots = [...availableSlots, ...reservedSlots];
+
+    // 开始按新顺序渲染网页卡片
+    sortedSlots.forEach(item => {
+        const slotId = item.id;
+        const slot = item.data;
         const div = document.createElement('div');
         div.className = `slot-item ${slot.reserved ? 'disabled' : ''}`;
 
