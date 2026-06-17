@@ -67,12 +67,12 @@ function submitBooking() {
     const btn = document.getElementById('submit-btn');
     btn.disabled = true; btn.textContent = '提交中...';
 
-    // 🔒 实时双重校验
     db.ref('settings/deadline').once('value').then((dlSnap) => {
         if (dlSnap.val() && new Date() > new Date(dlSnap.val())) {
             showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return;
         }
 
+        // 同日防刷锁（限约一次）
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
             if (currentRes && targetDate) {
@@ -97,7 +97,7 @@ function submitBooking() {
                     if (error || !committed) {
                         showMessage('手慢了，该时间已被预约！', false); btn.disabled = false;
                     } else {
-                        // 🌟 修复④：生成 8 位几乎不可能碰撞的工业级大写高强度指纹取消码
+                        // 🌟 修复④：采用极难碰撞的高强度 8 位字母数字组合作为退课凭证
                         const randomCancelCode = Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
                         db.ref('reservations').push({
@@ -149,7 +149,7 @@ function cancelBooking() {
             showMessage(`验证失败：姓名、日期或专属凭证码不匹配！`, false); cancelBtn.disabled = false; return;
         }
 
-        // 🌟 修复④：退课改用多路径更新 updates 提交，彻底杜绝单边账崩溃
+        // 🌟 修复⑤：退课完美切换为 Multi-location updates 多路径提交，多节点强一致原子变更！
         const updates = {};
         updates[`slots/${targetSlotId}/reserved`] = false;
         updates[`reservations/${targetResKey}`] = null;
