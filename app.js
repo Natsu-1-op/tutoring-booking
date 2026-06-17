@@ -1,17 +1,13 @@
 // app.js
 let isDeadlined = false;
 
-// 📢 实时监听并渲染公告栏
 db.ref('settings/notice').on('value', (snapshot) => {
     const notice = snapshot.val();
     const board = document.getElementById('notice-board');
     const content = document.getElementById('notice-content');
     if (notice && notice.trim() !== "") {
-        content.innerHTML = notice.replace(/\n/g, '<br>'); 
-        board.style.display = 'block';
-    } else {
-        board.style.display = 'none'; 
-    }
+        content.innerHTML = notice.replace(/\n/g, '<br>'); board.style.display = 'block';
+    } else { board.style.display = 'none'; }
 });
 
 db.ref('settings/deadline').on('value', (snapshot) => {
@@ -22,47 +18,28 @@ db.ref('settings/deadline').on('value', (snapshot) => {
     }
 });
 
-// 📅 实时监听排班数据并执行“已满沉底”智能排序渲染
 db.ref('slots').on('value', (snapshot) => {
     if (isDeadlined) return;
     const slots = snapshot.val();
     const container = document.getElementById('slots-container');
     container.innerHTML = '';
+    if (!slots) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
 
-    if (!slots) {
-        container.innerHTML = '<p>暂无开放的时间段。</p>';
-        return;
-    }
-
-    const availableSlots = [];
-    const reservedSlots = [];
-
+    const availableSlots = []; const reservedSlots = [];
     Object.keys(slots).forEach(slotId => {
         const slot = slots[slotId];
-        if (slot.reserved) {
-            reservedSlots.push({ id: slotId, data: slot });
-        } else {
-            availableSlots.push({ id: slotId, data: slot });
-        }
+        if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
+        else availableSlots.push({ id: slotId, data: slot });
     });
 
-    const sortedSlots = [...availableSlots, ...reservedSlots];
-
-    sortedSlots.forEach(item => {
-        const slotId = item.id;
-        const slot = item.data;
+    [...availableSlots, ...reservedSlots].forEach(item => {
         const div = document.createElement('div');
-        div.className = `slot-item ${slot.reserved ? 'disabled' : ''}`;
-
-        if (slot.reserved) {
-            div.innerHTML = `<span>${slot.time}</span> <span style="color:#ff4d4f;">(已满)</span>`;
+        div.className = `slot-item ${item.data.reserved ? 'disabled' : ''}`;
+        if (item.data.reserved) {
+            div.innerHTML = `<span>${item.data.time}</span> <span style="color:#ff4d4f;">(已满)</span>`;
         } else {
-            div.innerHTML = `
-                <label style="display:flex; align-items:center; width:100%; cursor:pointer; font-weight:normal; margin:0;">
-                    <input type="radio" name="slot" value="${slotId}" data-time="${slot.time}" style="margin-right:10px;">
-                    ${slot.time}
-                </label>
-            `;
+            div.innerHTML = `<label style="display:flex; align-items:center; width:100%; cursor:pointer; font-weight:normal; margin:0;">
+                <input type="radio" name="slot" value="${item.id}" data-time="${item.data.time}" style="margin-right:10px;">${item.data.time}</label>`;
         }
         container.appendChild(div);
     });
@@ -70,9 +47,7 @@ db.ref('slots').on('value', (snapshot) => {
 
 function showMessage(msg, isSuccess) {
     const msgEl = document.getElementById('message');
-    msgEl.textContent = msg;
-    msgEl.className = isSuccess ? 'success' : 'error';
-    window.scrollTo(0, 0);
+    msgEl.textContent = msg; msgEl.className = isSuccess ? 'success' : 'error'; window.scrollTo(0, 0);
 }
 
 function submitBooking() {
@@ -86,84 +61,57 @@ function submitBooking() {
 
     const slotId = selectedSlot.value;
     const slotTime = selectedSlot.getAttribute('data-time');
+    const match = slotTime.match(/^(\d{1,2}\/\d{1,2})/);
+    const targetDate = match ? match[1] : '';
+
     const btn = document.getElementById('submit-btn');
-    
-    const dateMatch = slotTime.match(/^(\d{1,2}\/\d{1,2})/);
-    const targetDatePrefix = dateMatch ? dateMatch[1] : '';
+    btn.disabled = true; btn.textContent = '提交中...';
 
-    btn.disabled = true;
-    btn.textContent = '提交中...';
-
-    // 🔒 连环锁第一重：防止挂机绕过，提交瞬间再次比对最新的截止时间
+    // 🔒 实时双重校验
     db.ref('settings/deadline').once('value').then((dlSnap) => {
-        const currentDeadline = dlSnap.val();
-        if (currentDeadline && new Date() > new Date(currentDeadline)) {
-            showMessage('抱歉，本轮预约在刚刚已经截止了！', false);
-            btn.disabled = false;
-            btn.textContent = '提交预约';
-            return;
+        if (dlSnap.val() && new Date() > new Date(dlSnap.val())) {
+            showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return;
         }
 
-        // 🔒 连环锁第二重：同日防刷锁
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
-            if (currentRes && targetDatePrefix) {
-                const hasBookedToday = Object.values(currentRes).some(r => 
-                    r.nickname === nickname && r.time.startsWith(targetDatePrefix)
-                );
+            if (currentRes && targetDate) {
+                const hasBookedToday = Object.values(currentRes).some(r => r.nickname === nickname && r.time.startsWith(targetDate));
                 if (hasBookedToday) {
-                    showMessage(`❌ 拦截：[${nickname}] 同学，你在 ${targetDatePrefix} 这一天已经预约过了。同一天内无法重复预约！`, false);
-                    btn.disabled = false;
-                    btn.textContent = '提交预约';
-                    return;
+                    showMessage(`❌ 拦截：您在 ${targetDate} 这天已有预约，同日限约一节！`, false);
+                    btn.disabled = false; btn.textContent = '提交预约'; return;
                 }
             }
 
-            // 验证班级统一口令
             db.ref('settings/accessCode').once('value').then((snapshot) => {
-                const correctCode = snapshot.val() || "123456";
-                if (accessCode !== correctCode) {
-                    showMessage('口令错误，无法提交！请向老师核对。', false);
-                    btn.disabled = false;
-                    btn.textContent = '提交预约';
-                    return;
+                if (accessCode !== (snapshot.val() || "123456")) {
+                    showMessage('口令错误，无法提交！', false); btn.disabled = false; return;
                 }
 
-                const slotRef = db.ref('slots/' + slotId);
-                slotRef.transaction((currentData) => {
+                // 并发原子锁
+                db.ref('slots/' + slotId).transaction((currentData) => {
                     if (currentData === null) return currentData;
-                    if (!currentData.reserved) {
-                        currentData.reserved = true;
-                        return currentData;
-                    } else {
-                        return; 
-                    }
+                    if (!currentData.reserved) { currentData.reserved = true; return currentData; }
+                    return; 
                 }, (error, committed) => {
                     if (error || !committed) {
-                        showMessage('手慢了，该时间已被预约，请重新选择！', false);
-                        btn.disabled = false;
-                        btn.textContent = '提交预约';
+                        showMessage('手慢了，该时间已被预约！', false); btn.disabled = false;
                     } else {
-                        // 🌟 优化②：生成 6 位极难碰撞的 字母+数字 专属取消凭证码
-                        const randomCancelCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                        // 🌟 修复④：生成 8 位几乎不可能碰撞的工业级大写高强度指纹取消码
+                        const randomCancelCode = Math.random().toString(36).substring(2, 6).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
                         db.ref('reservations').push({
-                            nickname: nickname,
-                            slotId: slotId,
-                            time: slotTime,
-                            cancelCode: randomCancelCode,
-                            timestamp: new Date().toISOString()
+                            nickname: nickname, slotId: slotId, time: slotTime, cancelCode: randomCancelCode, timestamp: new Date().toISOString()
                         }).then(() => {
                             document.getElementById('booking-form').innerHTML = `
                                 <h2 style="text-align:center; color:#52c41a;">🎉 预约成功！</h2>
                                 <p style="text-align:center;">你的姓名: <b>${nickname}</b></p>
                                 <p style="text-align:center;">预约时间: <b>${slotTime}</b></p>
                                 <div style="background:#fff7e6; border:1px solid #ffd591; padding:15px; border-radius:6px; margin-top:15px; text-align:center;">
-                                    <span style="color:#d46b08; font-size:14px;">⚠️ <b>重要：专属取消凭证码</b></span><br>
+                                    <span style="color:#d46b08; font-size:14px;">⚠️ <b>专属凭证取消码（防代退）</b></span><br>
                                     <b style="font-size:26px; color:#ff4d4f; letter-spacing:2px;">${randomCancelCode}</b><br>
-                                    <small style="color:#666;">如果后面需要临时取消，必须输入此验证码。<br>请截图保存。</small>
-                                </div>
-                            `;
+                                    <small style="color:#666;">临时调整必须输入此码，请截图或复制妥善保存。</small>
+                                </div>`;
                         });
                     }
                 });
@@ -175,78 +123,41 @@ function submitBooking() {
 function cancelBooking() {
     const cancelNickname = document.getElementById('cancel-nickname').value.trim();
     const cancelDateInput = document.getElementById('cancel-date').value;
-    const cancelCodeInput = document.getElementById('cancel-code').value.trim();
+    const cancelCodeInput = document.getElementById('cancel-code').value.trim().toUpperCase();
 
-    if (!cancelNickname) return showMessage('请输入你想取消的姓名！', false);
-    if (!cancelDateInput) return showMessage('请选择你想取消哪一天的课程！', false);
-    if (!cancelCodeInput) return showMessage('请输入你的6位专属取消凭证码！', false);
-
+    if (!cancelNickname || !cancelDateInput || !cancelCodeInput) return showMessage('请完整填写姓名、日期和凭证码！', false);
     const dateParts = cancelDateInput.split('-');
-    const month = parseInt(dateParts[1], 10);
-    const day = parseInt(dateParts[2], 10);
-    const targetDatePrefix = `${month}/${day}`;
+    const targetDatePrefix = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
 
-    if (!confirm(`确定要取消姓名为 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
-
+    if (!confirm(`确定要取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
     const cancelBtn = document.getElementById('cancel-btn');
     cancelBtn.disabled = true;
-    cancelBtn.textContent = '正在取消...';
 
     db.ref('reservations').once('value').then((resSnapshot) => {
         const reservations = resSnapshot.val();
-        if (!reservations) {
-            showMessage('没有找到相关的预约记录。', false);
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = '确认取消我的预约';
-            return;
-        }
+        if (!reservations) { showMessage('没有找到相关的预约记录。', false); cancelBtn.disabled = false; return; }
 
-        let targetResKey = null;
-        let targetSlotId = null;
-        let hasMatchedUser = false;
-        let isCodeCorrect = false;
-
+        let targetResKey = null; let targetSlotId = null;
         Object.keys(reservations).forEach(key => {
             const r = reservations[key];
-            if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix)) {
-                hasMatchedUser = true;
-                if (r.cancelCode && r.cancelCode.toString().toUpperCase() === cancelCodeInput.toUpperCase()) {
-                    isCodeCorrect = true;
-                    targetResKey = key;
-                    targetSlotId = r.slotId;
-                }
+            if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix) && r.cancelCode === cancelCodeInput) {
+                targetResKey = key; targetSlotId = r.slotId;
             }
         });
 
-        if (!hasMatchedUser) {
-            showMessage(`未找到 [${cancelNickname}] 在 ${targetDatePrefix} 的预约，请核对信息。`, false);
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = '确认取消我的预约';
-            return;
+        if (!targetResKey) {
+            showMessage(`验证失败：姓名、日期或专属凭证码不匹配！`, false); cancelBtn.disabled = false; return;
         }
 
-        if (!isCodeCorrect) {
-            showMessage(`❌ 验证失败：你输入的专属取消凭证码不正确！`, false);
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = '确认取消我的预约';
-            return;
-        }
+        // 🌟 修复④：退课改用多路径更新 updates 提交，彻底杜绝单边账崩溃
+        const updates = {};
+        updates[`slots/${targetSlotId}/reserved`] = false;
+        updates[`reservations/${targetResKey}`] = null;
 
-        // 🌟 优化④：使用 Promise.all 保证两个原子节点同时修改成功，拒绝死账产生
-        Promise.all([
-            db.ref('slots/' + targetSlotId + '/reserved').set(false),
-            db.ref('reservations/' + targetResKey).remove()
-        ]).then(() => {
-            showMessage(`成功取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约！该时间段已重新开放。`, true);
-            document.getElementById('cancel-nickname').value = '';
-            document.getElementById('cancel-date').value = '';
-            document.getElementById('cancel-code').value = '';
+        db.ref().update(updates).then(() => {
+            showMessage(`成功取消预约！该时间段已重新开放。`, true);
+            document.getElementById('cancel-nickname').value = ''; document.getElementById('cancel-date').value = ''; document.getElementById('cancel-code').value = '';
             cancelBtn.disabled = false;
-            cancelBtn.textContent = '确认取消我的预约';
-        }).catch(() => {
-            showMessage('取消失败，请刷新页面重试。', false);
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = '确认取消我的预约';
-        });
+        }).catch(() => { alert('系统异常！'); cancelBtn.disabled = false; });
     });
 }
