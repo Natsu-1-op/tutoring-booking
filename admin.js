@@ -6,7 +6,7 @@ let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
 
-// 🔑 1. 探测路径登录（利用你的云端门禁卡进行路径匹配）
+// 🔑 1. 探测路径登录
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
@@ -125,7 +125,7 @@ function initAdminSystem() {
             body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
 
             const table = document.createElement('table');
-            table.innerHTML = `<thead><tr><th>时段</th><th>姓名</th><th>专属取消凭证</th><th>提交时间</th><th>操作</th></tr></thead><tbody></tbody>`;
+            table.innerHTML = `<thead><tr><th>时段</th><th>姓名</th><th>专属取消码</th><th>提交时间</th><th>操作</th></tr></thead><tbody></tbody>`;
             const tbody = table.querySelector('tbody');
 
             resGroups[submitDate].forEach(item => {
@@ -160,7 +160,7 @@ function cancelEditSlot(slotId) {
     });
 }
 
-// 🛠️ 原子更新修改时间：通过 admin_actions 隐秘通道提交，完美穿透 rules
+// 🛠️ 原子级多路径更新修改时间
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     if (!/^\d{1,2}\/\d{1,2}/.test(newTime)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
@@ -168,32 +168,35 @@ function saveEditedSlot(slotId) {
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
-        updates[`slots/${slotId}/time`] = newTime;
+        // 🌟 核心：穿透进对应密码路径里的独立 slots/reservations 子节点，完成原子更新
+        updates[`admin_actions/${MASTER_PASSWORD}/slots/${slotId}/time`] = newTime;
         if (res) {
             Object.keys(res).forEach(resKey => {
-                if (res[resKey].slotId === slotId) updates[`reservations/${resKey}/time`] = newTime;
+                if (res[resKey].slotId === slotId) {
+                    updates[`admin_actions/${MASTER_PASSWORD}/reservations/${resKey}/time`] = newTime;
+                }
             });
         }
         
-        db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        db.ref().update(updates).then(() => {
             alert('时间段修改成功，云端已原子级同步完成！');
         }).catch(() => alert('无权操作！'));
     });
 }
 
-// 🛠️ 原子更新删除排班：通过 admin_actions 隐秘通道提交
+// 🛠️ 原子级多路径删除排班与预约单
 function deleteSlot(slotId) {
     if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并原子删除）')) return;
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
-        updates[`slots/${slotId}`] = null; 
+        updates[`admin_actions/${MASTER_PASSWORD}/slots/${slotId}`] = null; 
         if (res) {
             Object.keys(res).forEach(resKey => {
-                if (res[resKey].slotId === slotId) updates[`reservations/${resKey}`] = null;
+                if (res[resKey].slotId === slotId) updates[`admin_actions/${MASTER_PASSWORD}/reservations/${resKey}`] = null;
             });
         }
-        db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        db.ref().update(updates).then(() => {
             alert('该排班及时单数据已原子级一并安全清除！');
         }).catch(() => alert('操作失败，权限不足！'));
     });
@@ -201,7 +204,9 @@ function deleteSlot(slotId) {
 
 function setNotice() {
     const txt = document.getElementById('notice-input').value;
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/notice": txt }).then(() => alert('公告更新成功！')).catch(() => alert('权限错误！'));
+    const updates = {};
+    updates[`admin_actions/${MASTER_PASSWORD}/settings/notice`] = txt;
+    db.ref().update(updates).then(() => alert('公告更新成功！')).catch(() => alert('权限错误！'));
 }
 
 function addSlot() {
@@ -211,9 +216,9 @@ function addSlot() {
     
     const newKey = db.ref().child('slots').push().key;
     const updates = {};
-    updates[`slots/${newKey}`] = { time: time, reserved: false };
+    updates[`admin_actions/${MASTER_PASSWORD}/slots/${newKey}`] = { time: time, reserved: false };
     
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+    db.ref().update(updates).then(() => {
         timeInput.value = '';
     }).catch(() => alert('权限错误！'));
 }
@@ -229,10 +234,10 @@ function generateDayTemplate() {
     const updates = {};
     times.forEach(t => {
         const newKey = db.ref().child('slots').push().key;
-        updates[`slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false };
+        updates[`admin_actions/${MASTER_PASSWORD}/slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false };
     });
 
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+    db.ref().update(updates).then(() => {
         document.getElementById('template-date').value = "";
         alert('⚡ 批量排班已原子级无缝部署！');
     }).catch(() => alert('权限错误！'));
@@ -241,22 +246,26 @@ function generateDayTemplate() {
 function setDeadline() {
     const dl = document.getElementById('deadline-input').value;
     if (!dl) return alert('请选择时间！');
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/deadline": dl }).then(() => alert('截止时间已保存！')).catch(() => alert('权限错误！'));
+    const updates = {};
+    updates[`admin_actions/${MASTER_PASSWORD}/settings/deadline`] = dl;
+    db.ref().update(updates).then(() => alert('截止时间已保存！')).catch(() => alert('权限错误！'));
 }
 
 function setCode() {
     const code = document.getElementById('code-input').value.trim();
     if (!code) return alert('口令不能为空！');
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/accessCode": code }).then(() => alert('预约口令已更新！')).catch(() => alert('权限错误！'));
+    const updates = {};
+    updates[`admin_actions/${MASTER_PASSWORD}/settings/accessCode`] = code;
+    db.ref().update(updates).then(() => alert('预约口令已更新！')).catch(() => alert('权限错误！'));
 }
 
 function deleteSingleReservation(resKey, slotId, nickname) {
     if (!confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) return;
     const updates = {};
-    updates[`slots/${slotId}/reserved`] = false;
-    updates[`reservations/${resKey}`] = null;
+    updates[`admin_actions/${MASTER_PASSWORD}/slots/${slotId}/reserved`] = false;
+    updates[`admin_actions/${MASTER_PASSWORD}/reservations/${resKey}`] = null;
 
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+    db.ref().update(updates).then(() => {
         alert(`已成功原子级取消 [${nickname}] 的预约，名额已释放！`);
     }).catch(() => alert('权限错误！'));
 }
@@ -275,8 +284,10 @@ function exportCSV() {
 
 function clearData() {
     if (!confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) return;
-    const updates = { slots: null, reservations: null };
-    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+    const updates = {};
+    updates[`admin_actions/${MASTER_PASSWORD}/slots`] = null;
+    updates[`admin_actions/${MASTER_PASSWORD}/reservations`] = null;
+    db.ref().update(updates).then(() => {
         alert('云端数据已彻底原子级擦除！');
     }).catch(() => alert('权限错误！'));
 }
