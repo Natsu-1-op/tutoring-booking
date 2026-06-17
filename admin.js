@@ -6,16 +6,15 @@ let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
 
-// 🔑 1. 探测路径登录（利用你的云端门禁卡进行路径匹配）
+// 🔑 1. 探测路径登录
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    // 探测 admin_auth/密码 路径是否放行
     db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
         if (snapshot.exists() && snapshot.val() === true) {
-            MASTER_PASSWORD = inputPass; // 锁死本次操作的暗道钥匙
+            MASTER_PASSWORD = inputPass; 
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-content').style.display = 'block';
             initAdminSystem();
@@ -31,12 +30,22 @@ document.getElementById('admin-password').addEventListener('keypress', function(
     if (e.key === 'Enter') verifyAdmin();
 });
 
+// 📅 💡 辅助函数：严格验证真实世界日历的合法性（拦截 6/31, 2/30 等）
+function isValidCalendarDate(month, day) {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+    // 每个月份的最大天数映射表
+    const monthDaysMapping = {
+        1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
+        7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
+    };
+    return day <= monthDaysMapping[month];
+}
+
 // 🛠️ 2. 初始化系统监听
 function initAdminSystem() {
     if (initialized) return;
     initialized = true;
 
-    // 🕒 监听并按 mm/dd 进行高级折叠渲染（默认已折叠）
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -46,13 +55,12 @@ function initAdminSystem() {
         const groups = {};
         Object.keys(slots).forEach(slotId => {
             const slot = slots[slotId];
-            const match = slot.time.match(/^(\d{1,2}\/\d{1,2})/);
-            const dateKey = match ? match[1] : "其他日期格式";
+            const match = slot.time.match(/^(\d{1,2})\/(\d{1,2})/);
+            const dateKey = match ? `${match[1]}/${match[2]}` : "其他日期格式";
             if (!groups[dateKey]) groups[dateKey] = [];
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        // 📅 智能排序：按真实日期时间轴线性排列，跨月跨年不乱序
         Object.keys(groups).sort((a, b) => {
             const [am, ad] = a.split('/').map(Number);
             const [bm, bd] = b.split('/').map(Number);
@@ -97,7 +105,6 @@ function initAdminSystem() {
     db.ref('settings/deadline').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val(); });
     db.ref('settings/accessCode').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('code-input').value = snapshot.val(); });
 
-    // 📋 监听预约情况
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -160,18 +167,16 @@ function cancelEditSlot(slotId) {
     });
 }
 
-// 🛠️ 原子更新修改时间
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
-    
-    // 📢 增加验证：提取并严格核对是否为真实合法的日期
     const dateMatch = newTime.match(/^(\d{1,2})\/(\d{1,2})/);
-    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头，如: "6/19 14:00-15:00"');
+    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头');
     
+    // 🌟 修复：精细化校验修改后的日历边界
     const month = parseInt(dateMatch[1], 10);
     const day = parseInt(dateMatch[2], 10);
-    if (month < 1 || month > 12 || day < 1 || day > 31) {
-        return alert(`❌ 添加失败：不存在 ${month}月${day}日 这种魔法日期！请重新输入。`);
+    if (!isValidCalendarDate(month, day)) {
+        return alert(`❌ 修改失败：日历中不存在 ${month}月${day}日！请重新核对。`);
     }
 
     db.ref('reservations').once('value').then((snapshot) => {
@@ -190,7 +195,6 @@ function saveEditedSlot(slotId) {
     });
 }
 
-// 🛠️ 原子更新删除排班与预约单
 function deleteSlot(slotId) {
     if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并原子删除）')) return;
     db.ref('reservations').once('value').then((snapshot) => {
@@ -215,22 +219,19 @@ function setNotice() {
     db.ref().update(updates).then(() => alert('公告更新成功！')).catch(() => alert('权限错误！'));
 }
 
-// 🛠️ 核心修改：为“单次新增”配备严格的真实日历逻辑校验，拦截火星日期！
 function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
-    
-    // 第一步：初步检验是否为 数组/数字 结构
     const dateMatch = time.match(/^(\d{1,2})\/(\d{1,2})/);
     if (!dateMatch) {
         return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
     }
     
-    // 第二步：深度检验日历数字合理性，拦截 6/99、13/20 等错误数据
+    // 🌟 修复：精细化校验单次新增的日历边界，拦截 6/31, 2/30 等火星数据
     const month = parseInt(dateMatch[1], 10);
     const day = parseInt(dateMatch[2], 10);
-    if (month < 1 || month > 12 || day < 1 || day > 31) {
-        return alert(`❌ 添加失败：地球上可没有 ${month}月${day}日 这种日期！请检查后重新输入。`);
+    if (!isValidCalendarDate(month, day)) {
+        return alert(`❌ 添加失败：真实日历中可没有 ${month}月${day}日！请检查后重新输入。`);
     }
     
     const newKey = db.ref().child('slots').push().key;
@@ -256,7 +257,7 @@ function generateDayTemplate() {
         updates[`admin_actions/${MASTER_PASSWORD}/slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false };
     });
 
-    db.ref().update(updates).then(() => {
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
         document.getElementById('template-date').value = "";
         alert('⚡ 批量排班已原子级无缝部署！');
     }).catch(() => alert('权限错误！'));
