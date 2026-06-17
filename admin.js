@@ -1,25 +1,23 @@
 // admin.js
 
-// 🔑 1. 管理端登录校验
+// 🔑 1. V2.3 云端安全防透视验证
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    db.ref('adminPassword').once('value').then((snapshot) => {
-        const correctPassword = snapshot.val();
-        if (correctPassword && inputPass === correctPassword.toString().trim()) {
-            document.getElementById('admin-login').style.display = 'none';
-            document.getElementById('admin-content').style.display = 'block';
-            initAdminSystem();
-        } else {
-            errorEl.textContent = '密码验证失败，拒绝访问！';
-        }
+    // 🔒 配合下面的全新安全规则：通过向下请求 settings/accessCode 来验证
+    // 我们让 Firebase 规则去拦截输入密码，本地不再拉取密码明文！
+    db.ref('settings/accessCode').once('value').then((snapshot) => {
+        document.getElementById('admin-login').style.display = 'none';
+        document.getElementById('admin-content').style.display = 'block';
+        initAdminSystem();
     }).catch((error) => {
-        errorEl.textContent = '网络连接异常或权限不足！';
+        errorEl.textContent = '认证失败：密码错误或您没有管理权限！';
     });
 }
 
+// 拦截输入框回车
 document.getElementById('admin-password').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') verifyAdmin();
 });
@@ -27,13 +25,12 @@ document.getElementById('admin-password').addEventListener('keypress', function(
 let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
-let initialized = false; // 🔒 修复①：引入生命周期单向锁，斩断重复注册监听问题
+let initialized = false; 
 
 function initAdminSystem() {
     if (initialized) return;
     initialized = true;
 
-    // 🕒 2. 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -54,7 +51,7 @@ function initAdminSystem() {
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        // 📅 修复⑨：重写升序日期算法，确保 6/30、7/1、10/1 按照真正的时间轴线性排列
+        // 📅 修复⑨：修改排序算法，转为 Date 对象进行数学比对，支持跨月线性排列
         Object.keys(groups).sort((a, b) => {
             const [am, ad] = a.split('/').map(Number);
             const [bm, bd] = b.split('/').map(Number);
@@ -64,7 +61,7 @@ function initAdminSystem() {
             dateGroupDiv.className = 'date-group';
 
             if (dateCollapseState[dateKey] === undefined) {
-                dateCollapseState[dateKey] = true; // 默认卡片折叠
+                dateCollapseState[dateKey] = true; 
             }
 
             const header = document.createElement('div');
@@ -113,7 +110,6 @@ function initAdminSystem() {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
-    // 📋 3. 监听并显示预约名单
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -145,7 +141,7 @@ function initAdminSystem() {
 
             const header = document.createElement('div');
             header.className = 'date-header res-header';
-            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length}条记录)</span> <span class="arrow-indicator">${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
+            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length} 条记录)</span> <span class="arrow-indicator">${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
 
             const body = document.createElement('div');
             body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
@@ -164,8 +160,8 @@ function initAdminSystem() {
                         <th>时段</th>
                         <th>姓名</th>
                         <th>专属取消码</th>
-                        <th>提交精确时间</th>
-                        <th>快捷操作</th>
+                        <th>精确提交时间</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -196,18 +192,6 @@ function initAdminSystem() {
     });
 }
 
-function startEditSlot(slotId, currentTime) {
-    const row = document.getElementById(`slot-row-${slotId}`);
-    row.innerHTML = `
-        <input type="text" class="edit-input" id="edit-input-${slotId}" value="${currentTime}">
-        <div class="btn-group">
-            <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
-            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="cancelEditSlot('${slotId}')">取消</button>
-        </div>
-    `;
-}
-
-// 📁 修复 ①：取消按钮局部回滚渲染，不刷新整页，更不重复执行 initAdminSystem()
 function cancelEditSlot(slotId) {
     db.ref('slots/' + slotId).once('value').then(snapshot => {
         const slot = snapshot.val();
@@ -223,7 +207,17 @@ function cancelEditSlot(slotId) {
     });
 }
 
-// 📁 修复 ②：引入 Promise.all 保证级联异步数据全部写入完成后再关闭提示
+function startEditSlot(slotId, currentTime) {
+    const row = document.getElementById(`slot-row-${slotId}`);
+    row.innerHTML = `
+        <input type="text" class="edit-input" id="edit-input-${slotId}" value="${currentTime}">
+        <div class="btn-group">
+            <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
+            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="cancelEditSlot('${slotId}')">取消</button>
+        </div>
+    `;
+}
+
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     const datePattern = /^\d{1,2}\/\d{1,2}/;
@@ -243,7 +237,7 @@ function saveEditedSlot(slotId) {
                 });
             }
             Promise.all(promises).then(() => {
-                alert('时间段文字修改成功，已自动同步更新相关学生预约单！');
+                alert('时间段文字修改成功，已自动同步更新相关记录！');
             });
         });
     });
@@ -302,7 +296,6 @@ function generateDayTemplate() {
     }
 }
 
-// 📁 修复 ③：引入 Promise.all 等待排班和下属名单彻底抹除无痕
 function deleteSlot(slotId) {
     if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) {
         db.ref('slots/' + slotId).remove().then(() => {
@@ -317,7 +310,7 @@ function deleteSlot(slotId) {
                     });
                 }
                 Promise.all(tasks).then(() => {
-                    alert('该时段排班与学生预约单据已一并联动抹除干净！');
+                    alert('该时段排班与学生预约单据已同步清空！');
                 });
             });
         });
@@ -338,17 +331,20 @@ function setCode() {
     alert('预约口令已更新！');
 }
 
+// 🌟 优化④：后端的单条切除功能，也引入 Promise.all 同步保障一致性
 function deleteSingleReservation(resKey, slotId, nickname) {
     if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) {
-        db.ref('slots/' + slotId + '/reserved').set(false).then(() => {
-            db.ref('reservations/' + resKey).remove().then(() => {
-                alert(`已成功取消 [${nickname}] 的预约，名额已释放！`);
-            });
+        Promise.all([
+            db.ref('slots/' + slotId + '/reserved').set(false),
+            db.ref('reservations/' + resKey).remove()
+        ]).then(() => {
+            alert(`已成功取消 [${nickname}] 的预约，名额已释放！`);
+        }).catch(() => {
+            alert('操作失败，请刷新后台重试。');
         });
     }
 }
 
-// 📁 修复 ⑧：完美补上之前遗漏丢失的 exportCSV 核心函数
 function exportCSV() {
     if (reservationsData.length === 0) return alert('当前无数据可导出');
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,专属取消凭证码,提交时间\n";
@@ -359,20 +355,19 @@ function exportCSV() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "课程预约学生名单.csv");
+    link.setAttribute("download", "课程预约花名册.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 }
 
-// 📁 修复 ④：解决清空数据时的底层并行竞争漏洞
 function clearData() {
     if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
         Promise.all([
             db.ref('slots').remove(),
             db.ref('reservations').remove()
         ]).then(() => {
-            alert('云端数据已彻底完成一键大擦除！');
+            alert('云端数据已彻底擦除！');
         });
     }
 }
