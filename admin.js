@@ -6,15 +6,11 @@ function verifyAdmin() {
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    // 🌟 修改：先去读取云端存储的真实密码
     db.ref('adminPassword').once('value').then((snapshot) => {
         const correctPassword = snapshot.val();
-        
-        // 核心校验：将输入的密码与云端密码做绝对等于(===)比对
         if (correctPassword && inputPass === correctPassword.toString().trim()) {
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-content').style.display = 'block';
-            // 验证成功，开通数据监听
             initAdminSystem();
         } else {
             errorEl.textContent = '密码验证失败，拒绝访问！';
@@ -28,13 +24,12 @@ document.getElementById('admin-password').addEventListener('keypress', function(
     if (e.key === 'Enter') verifyAdmin();
 });
 
-// 📁 存储排班和预约记录各自的折叠状态
 let dateCollapseState = {};
 let resCollapseState = {}; 
-let reservationsData = []; // 用于 CSV 导出
+let reservationsData = []; 
 
 function initAdminSystem() {
-    // 🕒 监听并按 mm/dd 进行高级折叠渲染（默认已折叠）
+    // 🕒 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -109,7 +104,7 @@ function initAdminSystem() {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
-    // 📋 监听并显示预约名单：按提交日期分组且默认折叠
+    // 📋 监听并显示预约名单
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -201,14 +196,29 @@ function startEditSlot(slotId, currentTime) {
     `;
 }
 
+// 📐 🛠️ 【联动升级版】保存修改函数
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     const datePattern = /^\d{1,2}\/\d{1,2}/;
     if (!datePattern.test(newTime)) {
         return alert('❌ 格式不正确！必须以“月/日”格式开头');
     }
+
+    // 第一步：更新排班本身的时间
     db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
-        alert('时间段文字修改成功！');
+        // 第二步：顺藤摸瓜，检查有没有学生已经约了这个 slotId
+        db.ref('reservations').once('value').then((snapshot) => {
+            const res = snapshot.val();
+            if (res) {
+                Object.keys(res).forEach(resKey => {
+                    if (res[resKey].slotId === slotId) {
+                        // 如果找到了对应的预约记录，顺手把它的时间字符串也更新掉，防止脱节！
+                        db.ref('reservations/' + resKey).update({ time: newTime });
+                    }
+                });
+            }
+            alert('时间段文字修改成功，已自动同步更新相关学生预约单！');
+        });
     });
 }
 
@@ -259,8 +269,20 @@ function generateDayTemplate() {
 }
 
 function deleteSlot(slotId) {
-    if (confirm('确定要彻底删除这个时间段排班吗？')) {
-        db.ref('slots/' + slotId).remove();
+    if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) {
+        db.ref('slots/' + slotId).remove().then(() => {
+            // 同步联动：删除排班时，也顺手抹去对应的预约记录
+            db.ref('reservations').once('value').then((snapshot) => {
+                const res = snapshot.val();
+                if (res) {
+                    Object.keys(res).forEach(resKey => {
+                        if (res[resKey].slotId === slotId) {
+                            db.ref('reservations/' + resKey).remove();
+                        }
+                    });
+                }
+            });
+        });
     }
 }
 
@@ -286,22 +308,6 @@ function deleteSingleReservation(resKey, slotId, nickname) {
             });
         });
     }
-}
-
-function exportCSV() {
-    if (reservationsData.length === 0) return alert('当前无数据可导出');
-    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,提交时间\n";
-    reservationsData.forEach(r => {
-        const date = new Date(r.timestamp).toLocaleString();
-        csvContent += `${r.time},${r.nickname},${date}\n`;
-    });
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "预约名单.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
 }
 
 function clearData() {
