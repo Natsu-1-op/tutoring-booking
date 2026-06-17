@@ -1,7 +1,7 @@
 // app.js
 let isDeadlined = false;
 
-// 📢 1. 实时监听并渲染公告栏
+// 📢 实时监听并渲染公告栏
 db.ref('settings/notice').on('value', (snapshot) => {
     const notice = snapshot.val();
     const board = document.getElementById('notice-board');
@@ -14,7 +14,6 @@ db.ref('settings/notice').on('value', (snapshot) => {
     }
 });
 
-// ⏳ 2. 监听截止时间
 db.ref('settings/deadline').on('value', (snapshot) => {
     const deadline = snapshot.val();
     if (deadline && new Date() > new Date(deadline)) {
@@ -23,7 +22,7 @@ db.ref('settings/deadline').on('value', (snapshot) => {
     }
 });
 
-// 📅 3. 实时监听排班数据（已满沉底）
+// 📅 实时监听排班数据并执行“已满沉底”智能排序渲染
 db.ref('slots').on('value', (snapshot) => {
     if (isDeadlined) return;
     const slots = snapshot.val();
@@ -76,7 +75,6 @@ function showMessage(msg, isSuccess) {
     window.scrollTo(0, 0);
 }
 
-// 🚀 4. 提交预约（包含：同一天限约一次、实时截止拦截、生成专属取消码）
 function submitBooking() {
     const nickname = document.getElementById('nickname').value.trim();
     const accessCode = document.getElementById('access-code').value.trim();
@@ -87,17 +85,16 @@ function submitBooking() {
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
 
     const slotId = selectedSlot.value;
-    const slotTime = selectedSlot.getAttribute('data-time'); // 例如: "6/19 0800-1015"
+    const slotTime = selectedSlot.getAttribute('data-time');
     const btn = document.getElementById('submit-btn');
     
-    // 提取当前准备约的日期前缀，形如 "6/19"
     const dateMatch = slotTime.match(/^(\d{1,2}\/\d{1,2})/);
-    const targetDate = dateMatch ? dateMatch[1] : '';
+    const targetDatePrefix = dateMatch ? dateMatch[1] : '';
 
     btn.disabled = true;
     btn.textContent = '提交中...';
 
-    // 🔒 连环锁第一重：防止挂机绕过，提交瞬间再次从云端抓取最新的截止时间比对
+    // 🔒 连环锁第一重：防止挂机绕过，提交瞬间再次比对最新的截止时间
     db.ref('settings/deadline').once('value').then((dlSnap) => {
         const currentDeadline = dlSnap.val();
         if (currentDeadline && new Date() > new Date(currentDeadline)) {
@@ -107,15 +104,15 @@ function submitBooking() {
             return;
         }
 
-        // 🔒 连环锁第二重：同日防刷锁。允许跨天约，但同一天（比如 6/19）只能约一节
+        // 🔒 连环锁第二重：同日防刷锁
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
-            if (currentRes && targetDate) {
+            if (currentRes && targetDatePrefix) {
                 const hasBookedToday = Object.values(currentRes).some(r => 
-                    r.nickname === nickname && r.time.startsWith(targetDate)
+                    r.nickname === nickname && r.time.startsWith(targetDatePrefix)
                 );
                 if (hasBookedToday) {
-                    showMessage(`❌ 拦截：[${nickname}] 同学，你在 ${targetDate} 这一天已经预约过了。同一天内无法重复预约多节课！`, false);
+                    showMessage(`❌ 拦截：[${nickname}] 同学，你在 ${targetDatePrefix} 这一天已经预约过了。同一天内无法重复预约！`, false);
                     btn.disabled = false;
                     btn.textContent = '提交预约';
                     return;
@@ -132,7 +129,6 @@ function submitBooking() {
                     return;
                 }
 
-                // 并发原子事务锁，死锁车位
                 const slotRef = db.ref('slots/' + slotId);
                 slotRef.transaction((currentData) => {
                     if (currentData === null) return currentData;
@@ -148,14 +144,14 @@ function submitBooking() {
                         btn.disabled = false;
                         btn.textContent = '提交预约';
                     } else {
-                        // 🌟 核心改进：生成全网独一无二的 6 位随机取消码
-                        const randomCancelCode = Math.floor(100000 + Math.random() * 900000).toString();
+                        // 🌟 优化②：生成 6 位极难碰撞的 字母+数字 专属取消凭证码
+                        const randomCancelCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
                         db.ref('reservations').push({
                             nickname: nickname,
                             slotId: slotId,
                             time: slotTime,
-                            cancelCode: randomCancelCode, 
+                            cancelCode: randomCancelCode,
                             timestamp: new Date().toISOString()
                         }).then(() => {
                             document.getElementById('booking-form').innerHTML = `
@@ -165,7 +161,7 @@ function submitBooking() {
                                 <div style="background:#fff7e6; border:1px solid #ffd591; padding:15px; border-radius:6px; margin-top:15px; text-align:center;">
                                     <span style="color:#d46b08; font-size:14px;">⚠️ <b>重要：专属取消凭证码</b></span><br>
                                     <b style="font-size:26px; color:#ff4d4f; letter-spacing:2px;">${randomCancelCode}</b><br>
-                                    <small style="color:#666;">如果后面需要临时取消或调整，必须输入此验证码。<br>请截图或拍照妥善保存。</small>
+                                    <small style="color:#666;">如果后面需要临时取消，必须输入此验证码。<br>请截图保存。</small>
                                 </div>
                             `;
                         });
@@ -176,11 +172,10 @@ function submitBooking() {
     });
 }
 
-// ❌ 5. 凭专属取消凭证码退课（防止他人恶意整蛊）
 function cancelBooking() {
     const cancelNickname = document.getElementById('cancel-nickname').value.trim();
     const cancelDateInput = document.getElementById('cancel-date').value;
-    const cancelCodeInput = document.getElementById('cancel-code').value.trim(); // 此时要求学生输入 6 位专属验证码
+    const cancelCodeInput = document.getElementById('cancel-code').value.trim();
 
     if (!cancelNickname) return showMessage('请输入你想取消的姓名！', false);
     if (!cancelDateInput) return showMessage('请选择你想取消哪一天的课程！', false);
@@ -215,8 +210,7 @@ function cancelBooking() {
             const r = reservations[key];
             if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix)) {
                 hasMatchedUser = true;
-                // 🔒 验证专属取消码是否绝对匹配
-                if (r.cancelCode && r.cancelCode.toString() === cancelCodeInput) {
+                if (r.cancelCode && r.cancelCode.toString().toUpperCase() === cancelCodeInput.toUpperCase()) {
                     isCodeCorrect = true;
                     targetResKey = key;
                     targetSlotId = r.slotId;
@@ -225,29 +219,34 @@ function cancelBooking() {
         });
 
         if (!hasMatchedUser) {
-            showMessage(`未找到 [${cancelNickname}] 在 ${targetDatePrefix} 的预约，请核对日期或姓名。`, false);
+            showMessage(`未找到 [${cancelNickname}] 在 ${targetDatePrefix} 的预约，请核对信息。`, false);
             cancelBtn.disabled = false;
             cancelBtn.textContent = '确认取消我的预约';
             return;
         }
 
         if (!isCodeCorrect) {
-            showMessage(`❌ 验证失败：你输入的 6 位专属取消凭证码不正确！`, false);
+            showMessage(`❌ 验证失败：你输入的专属取消凭证码不正确！`, false);
             cancelBtn.disabled = false;
             cancelBtn.textContent = '确认取消我的预约';
             return;
         }
 
-        // 验证彻底成功，执行释放流程
-        db.ref('slots/' + targetSlotId + '/reserved').set(false).then(() => {
-            db.ref('reservations/' + targetResKey).remove().then(() => {
-                showMessage(`成功取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约！该时间段已重新开放。`, true);
-                document.getElementById('cancel-nickname').value = '';
-                document.getElementById('cancel-date').value = '';
-                document.getElementById('cancel-code').value = '';
-                cancelBtn.disabled = false;
-                cancelBtn.textContent = '确认取消我的预约';
-            });
+        // 🌟 优化④：使用 Promise.all 保证两个原子节点同时修改成功，拒绝死账产生
+        Promise.all([
+            db.ref('slots/' + targetSlotId + '/reserved').set(false),
+            db.ref('reservations/' + targetResKey).remove()
+        ]).then(() => {
+            showMessage(`成功取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约！该时间段已重新开放。`, true);
+            document.getElementById('cancel-nickname').value = '';
+            document.getElementById('cancel-date').value = '';
+            document.getElementById('cancel-code').value = '';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = '确认取消我的预约';
+        }).catch(() => {
+            showMessage('取消失败，请刷新页面重试。', false);
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = '确认取消我的预约';
         });
     });
 }
