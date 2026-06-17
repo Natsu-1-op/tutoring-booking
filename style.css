@@ -40,7 +40,6 @@ th { background: #f9f9f9; }
 .success { color: #52c41a; }
 .error { color: #ff4d4f; }
 
-/* ⬇️ 修复 ⑩：以下为新增样式，完整闭合注释 ⬇️ */
 .cancel-section {
     margin-top: 40px;
     padding: 20px;
