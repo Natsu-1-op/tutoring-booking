@@ -4,7 +4,7 @@ let initialized = false;
 let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
-let currentCloudImageBase64 = ""; // 临时缓存云端当前的图片数据
+let currentCloudImageBase64 = ""; 
 
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
@@ -91,14 +91,12 @@ function initAdminSystem() {
         });
     });
 
-    // 📢 1. 实时监听文字公告（百分之百在编辑框完美留存，绝不被清空）
     db.ref('settings/notice').on('value', (snapshot) => {
         if (snapshot.val() !== null) {
             document.getElementById('notice-input').value = snapshot.val();
         }
     });
 
-    // 📢 2. 实时监听图片公告并在后台生成独立预览，允许管理员随时查看或删除
     db.ref('settings/noticeImage').on('value', (snapshot) => {
         const previewContainer = document.getElementById('admin-img-preview-container');
         const previewImg = document.getElementById('admin-img-preview');
@@ -164,13 +162,70 @@ function initAdminSystem() {
     });
 }
 
-// 🌟 核心更新：发布/更新公告（完美支持：文字留存、图片覆盖或无缝继续留存）
+// 🌟 核心修正：修复函数声明格式，恢复行内排班“修改与取消”按钮的完整功能
+function cancelEditSlot(slotId) {
+    db.ref('slots/' + slotId).once('value').then(snapshot => {
+        const slot = snapshot.val();
+        if (!slot) return;
+        const row = document.getElementById(`slot-row-${slotId}`);
+        row.innerHTML = `
+            <span class="slot-text-span">${slot.time} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+            <div class="btn-group">
+                <button style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;" onclick="startEditSlot('${slotId}', '${slot.time}')">修改</button>
+                <button class="danger" onclick="deleteSlot('${slotId}')">删除</button>
+            </div>
+        `;
+    });
+}
+
+function startEditSlot(slotId, currentTime) {
+    const row = document.getElementById(`slot-row-${slotId}`);
+    row.innerHTML = `
+        <input type="text" class="edit-input" id="edit-input-${slotId}" value="${currentTime}">
+        <div class="btn-group">
+            <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
+            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="cancelEditSlot('${slotId}')">取消</button>
+        </div>
+    `;
+}
+
+function saveEditedSlot(slotId) {
+    const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
+    const dateMatch = newTime.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!dateMatch) {
+        return alert('❌ 格式不正确！必须以“月/日”格式开头，如 "6/19 14:00-15:00"');
+    }
+
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    if (!isValidCalendarDate(month, day)) {
+        return alert(`❌ 修改失败：日历中不存在 ${month}月${day}日！请重新核对。`);
+    }
+
+    db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
+        db.ref('reservations').once('value').then((snapshot) => {
+            const res = snapshot.val();
+            const updates = {};
+            if (res) {
+                Object.keys(res).forEach(resKey => {
+                    if (res[resKey].slotId === slotId) {
+                        updates[`reservations/${resKey}/time`] = newTime;
+                    }
+                });
+            }
+            db.ref().update(updates).then(() => {
+                alert('时间段文字修改成功，已自动同步预约单！');
+            });
+        });
+    });
+}
+
 function setNotice() {
-    const noticeText = document.getElementById('notice-input').value;
+    const noticeInputEl = document.getElementById('notice-input');
+    const noticeText = noticeInputEl.value;
     const fileInput = document.getElementById('notice-image-input');
     const file = fileInput.files[0];
 
-    // 分支 1：管理员选择了全新的本地图片，执行等比例调幅及画质压缩
     if (file) {
         const reader = new FileReader();
         reader.onload = function(e) {
@@ -178,7 +233,7 @@ function setNotice() {
             img.onload = function() {
                 const canvas = document.createElement('canvas');
                 let width = img.width; let height = img.height;
-                const MAX_WIDTH = 600; // 限制画幅最大宽度为 600px
+                const MAX_WIDTH = 600;
                 if (width > MAX_WIDTH) {
                     height = Math.round((height * MAX_WIDTH) / width);
                     width = MAX_WIDTH;
@@ -186,13 +241,12 @@ function setNotice() {
                 canvas.width = width; canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6); // 降低质量系数到 0.6 压缩体积
+                const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
-                // 分开安全独立存储，文字留存，图片上传
                 db.ref('settings/notice').set(noticeText).then(() => {
                     db.ref('settings/noticeImage').set(compressedBase64).then(() => {
                         fileInput.value = ''; 
-                        alert('公告文字与新附加图片发布成功！文本已原地留存。');
+                        alert('公告及附加图片更新成功！');
                     });
                 });
             };
@@ -200,14 +254,12 @@ function setNotice() {
         };
         reader.readAsDataURL(file);
     } else {
-        // 分支 2：没选新图片。文字正常更新，原图在云端稳固继续留存
         db.ref('settings/notice').set(noticeText).then(() => {
-            alert('公告文本更新成功！上一次的内容已完美留存。');
+            alert('公告文本更新成功！');
         });
     }
 }
 
-// 🌟 新增功能：允许管理员随时在后台单触一键“摘除并消灭图片缓存”
 function removeCurrentNoticeImage() {
     if (confirm('确定要清除当前的公告图片吗？（只保留文字）')) {
         db.ref('settings/noticeImage').remove().then(() => {
@@ -216,33 +268,19 @@ function removeCurrentNoticeImage() {
     }
 }
 
-function saveEditedSlot(slotId) {
-    const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
-    const dateMatch = newTime.match(/^(\d{1,2})\/(\d{1,2})/);
-    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头，如 "6/19 14:00-15:00"');
-    const month = parseInt(dateMatch[1], 10); const day = parseInt(dateMatch[2], 10);
-    if (!isValidCalendarDate(month, day)) return alert(`❌ 修改失败：日历中不存在 ${month}月${day}日！请重新核对。`);
-
-    db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
-        db.ref('reservations').once('value').then((snapshot) => {
-            const res = snapshot.val(); const updates = {};
-            if (res) {
-                Object.keys(res).forEach(resKey => {
-                    if (res[resKey].slotId === slotId) updates[`reservations/${resKey}/time`] = newTime;
-                });
-            }
-            db.ref().update(updates).then(() => alert('时间段文字修改成功，已自动同步预约单！'));
-        });
-    });
-}
-
 function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
     const dateMatch = time.match(/^(\d{1,2})\/(\d{1,2})/);
-    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 0800-1015"');
-    const month = parseInt(dateMatch[1], 10); const day = parseInt(dateMatch[2], 10);
-    if (!isValidCalendarDate(month, day)) return alert(`❌ 添加失败：公历中不存在 ${month}月${day}日！`);
+    if (!dateMatch) {
+        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 0800-1015"');
+    }
+
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    if (!isValidCalendarDate(month, day)) {
+        return alert(`❌ 添加失败：公历中不存在 ${month}月${day}日！`);
+    }
 
     db.ref('slots').push({ time: time, reserved: false }).then(() => { timeInput.value = ''; });
 }
