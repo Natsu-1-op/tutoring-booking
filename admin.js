@@ -1,21 +1,21 @@
 // admin.js
 
-let MASTER_PASSWORD = ""; // 动态存储本次登录输入的密码作为暗道钥匙
+let MASTER_PASSWORD = ""; // 动态存储管理员输入的密码作为暗道钥匙
 let initialized = false; 
 let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
 
-// 🔑 1. 探测路径登录（修复不验证密码的 Bug）
+// 🔑 1. 探测路径登录（利用你的云端门禁卡进行路径匹配）
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    // 🌟 通过验证该密码路径在 Rules 中是否放行来确认密码正确性
+    // 探测 admin_auth/密码 路径是否放行
     db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
         if (snapshot.exists() && snapshot.val() === true) {
-            MASTER_PASSWORD = inputPass; // 锁死钥匙
+            MASTER_PASSWORD = inputPass; // 锁死本次操作的暗道钥匙
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-content').style.display = 'block';
             initAdminSystem();
@@ -31,12 +31,12 @@ document.getElementById('admin-password').addEventListener('keypress', function(
     if (e.key === 'Enter') verifyAdmin();
 });
 
-// 🛠️ 2. 初始化监听（一阶锁，一生只注册一次）
+// 🛠️ 2. 初始化系统监听
 function initAdminSystem() {
     if (initialized) return;
     initialized = true;
 
-    // 🕒 监听排班并折叠
+    // 🕒 监听并按 mm/dd 进行高级折叠渲染（默认已折叠）
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -52,7 +52,7 @@ function initAdminSystem() {
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        // 📅 日期严格升序轴线性正确定位排序
+        // 📅 智能排序：按真实日期时间轴线性排列，跨月跨年不乱序
         Object.keys(groups).sort((a, b) => {
             const [am, ad] = a.split('/').map(Number);
             const [bm, bd] = b.split('/').map(Number);
@@ -97,7 +97,7 @@ function initAdminSystem() {
     db.ref('settings/deadline').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val(); });
     db.ref('settings/accessCode').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('code-input').value = snapshot.val(); });
 
-    // 📋 监听并显示预约名单
+    // 📋 监听预约情况
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -160,7 +160,7 @@ function cancelEditSlot(slotId) {
     });
 }
 
-// 🛠️ ③ 修复：多路径原子写入（Multi-location updates），绝不留单边死账
+// 🛠️ 原子更新修改时间：通过 admin_actions 隐秘通道提交，完美穿透 rules
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     if (!/^\d{1,2}\/\d{1,2}/.test(newTime)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
@@ -168,25 +168,22 @@ function saveEditedSlot(slotId) {
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
-        // 🌟 核心：向隐秘暗道打包提交，由云端 Rules 跨节点原子同步
         updates[`slots/${slotId}/time`] = newTime;
         if (res) {
             Object.keys(res).forEach(resKey => {
-                if (res[resKey].slotId === slotId) {
-                    updates[`reservations/${resKey}/time`] = newTime;
-                }
+                if (res[resKey].slotId === slotId) updates[`reservations/${resKey}/time`] = newTime;
             });
         }
         
         db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
-            alert('时间段修改成功，云端已原子级同步修改！');
-        }).catch(() => alert('无权操作或网络异常！'));
+            alert('时间段修改成功，云端已原子级同步完成！');
+        }).catch(() => alert('无权操作！'));
     });
 }
 
-// 🛠️ ⑤ 修复：原子级多路径删除，拒绝“孤儿记录”
+// 🛠️ 原子更新删除排班：通过 admin_actions 隐秘通道提交
 function deleteSlot(slotId) {
-    if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) return;
+    if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并原子删除）')) return;
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
@@ -197,7 +194,7 @@ function deleteSlot(slotId) {
             });
         }
         db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
-            alert('排班及名下关联单据已原子级无缝同步擦除！');
+            alert('该排班及时单数据已原子级一并安全清除！');
         }).catch(() => alert('操作失败，权限不足！'));
     });
 }
