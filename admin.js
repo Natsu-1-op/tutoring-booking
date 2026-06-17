@@ -1,57 +1,59 @@
 // admin.js
 
-// 🔑 1. V2.3 云端安全防透视验证
+let MASTER_PASSWORD = ""; // 动态存储管理员输入的密码
+let initialized = false; 
+let dateCollapseState = {};
+let resCollapseState = {}; 
+let reservationsData = []; 
+
+// 🔑 1. 专家级：隐秘路径探测登录
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    // 🔒 配合下面的全新安全规则：通过向下请求 settings/accessCode 来验证
-    // 我们让 Firebase 规则去拦截输入密码，本地不再拉取密码明文！
-    db.ref('settings/accessCode').once('value').then((snapshot) => {
-        document.getElementById('admin-login').style.display = 'none';
-        document.getElementById('admin-content').style.display = 'block';
-        initAdminSystem();
+    // 🌟 核心安全改动：尝试去读取只有正确密码作为路径才能访问的隐藏节点
+    // 这样云端不需要暴露密码明文，而是通过“你能不能找到这个房间”来判定你对不对
+    db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
+        if (snapshot.exists() && snapshot.val() === true) {
+            MASTER_PASSWORD = inputPass; // 锁死本次操作的密码钥匙
+            document.getElementById('admin-login').style.display = 'none';
+            document.getElementById('admin-content').style.display = 'block';
+            initAdminSystem();
+        } else {
+            errorEl.textContent = '认证失败：密码错误，拒绝访问！';
+        }
     }).catch((error) => {
-        errorEl.textContent = '认证失败：密码错误或您没有管理权限！';
+        errorEl.textContent = '认证失败：密码错误或无管理权限！';
     });
 }
 
-// 拦截输入框回车
 document.getElementById('admin-password').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') verifyAdmin();
 });
 
-let dateCollapseState = {};
-let resCollapseState = {}; 
-let reservationsData = []; 
-let initialized = false; 
-
+// 🛠️ 2. 系统核心实时监听（只读数据，写操作全部走隐秘通道）
 function initAdminSystem() {
     if (initialized) return;
     initialized = true;
 
+    // 🕒 监听并按 mm/dd 进行高级折叠渲染
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
         container.innerHTML = '';
-        
-        if (!slots) {
-            container.innerHTML = '<p>暂无排班时间段。</p>';
-            return;
-        }
+        if (!slots) { container.innerHTML = '<p>暂无排班时间段。</p>'; return; }
 
         const groups = {};
         Object.keys(slots).forEach(slotId => {
             const slot = slots[slotId];
             const match = slot.time.match(/^(\d{1,2}\/\d{1,2})/);
             const dateKey = match ? match[1] : "其他日期格式";
-            
             if (!groups[dateKey]) groups[dateKey] = [];
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        // 📅 修复⑨：修改排序算法，转为 Date 对象进行数学比对，支持跨月线性排列
+        // 📅 修复⑨：严格的按真实日期线性升序排序
         Object.keys(groups).sort((a, b) => {
             const [am, ad] = a.split('/').map(Number);
             const [bm, bd] = b.split('/').map(Number);
@@ -59,31 +61,26 @@ function initAdminSystem() {
         }).forEach(dateKey => {
             const dateGroupDiv = document.createElement('div');
             dateGroupDiv.className = 'date-group';
-
-            if (dateCollapseState[dateKey] === undefined) {
-                dateCollapseState[dateKey] = true; 
-            }
+            if (dateCollapseState[dateKey] === undefined) dateCollapseState[dateKey] = true; 
 
             const header = document.createElement('div');
             header.className = 'date-header';
-            header.innerHTML = `<span>📅 ${dateKey} 排班列表</span> <span class="arrow-indicator">${dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖'}</span>`;
-            
+            header.innerHTML = `<span>📅 ${dateKey} 排班列表</span> <span class="arrow">${dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖'}</span>`;
             const body = document.createElement('div');
             body.className = `date-body ${dateCollapseState[dateKey] ? 'collapsed' : ''}`;
 
             header.onclick = () => {
                 dateCollapseState[dateKey] = !dateCollapseState[dateKey];
                 body.classList.toggle('collapsed');
-                header.querySelector('.arrow-indicator').textContent = dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖';
+                header.querySelector('.arrow').textContent = dateCollapseState[dateKey] ? '展开 ➕' : '收起 ➖';
             };
 
             groups[dateKey].forEach(item => {
                 const slotDiv = document.createElement('div');
                 slotDiv.className = 'slot-item';
                 slotDiv.id = `slot-row-${item.id}`; 
-                
                 slotDiv.innerHTML = `
-                    <span class="slot-text-span">${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+                    <span>${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
                     <div class="btn-group">
                         <button style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;" onclick="startEditSlot('${item.id}', '${item.data.time}')">修改</button>
                         <button class="danger" onclick="deleteSlot('${item.id}')">删除</button>
@@ -91,42 +88,29 @@ function initAdminSystem() {
                 `;
                 body.appendChild(slotDiv);
             });
-
             dateGroupDiv.appendChild(header);
             dateGroupDiv.appendChild(body);
             container.appendChild(dateGroupDiv);
         });
     });
 
-    db.ref('settings/notice').on('value', (snapshot) => {
-        if (snapshot.val() !== null) document.getElementById('notice-input').value = snapshot.val();
-    });
+    // 监听公告、截止时间、口令
+    db.ref('settings/notice').on('value', (snapshot) => { if (snapshot.val() !== null) document.getElementById('notice-input').value = snapshot.val(); });
+    db.ref('settings/deadline').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val(); });
+    db.ref('settings/accessCode').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('code-input').value = snapshot.val(); });
 
-    db.ref('settings/deadline').on('value', (snapshot) => {
-        if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val();
-    });
-
-    db.ref('settings/accessCode').on('value', (snapshot) => {
-        if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
-    });
-
+    // 📋 监听预约名单（按提交日期分组且默认折叠）
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
         container.innerHTML = '';
         reservationsData = [];
-        
-        if (!res) {
-            container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">暂无同学预约记录</p>';
-            return;
-        }
+        if (!res) { container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">暂无同学预约记录</p>'; return; }
 
         const resGroups = {};
         Object.keys(res).forEach(resKey => {
-            const r = res[resKey];
-            reservationsData.push(r); 
+            const r = res[resKey]; reservationsData.push(r); 
             const submitDateStr = new Date(r.timestamp).toLocaleDateString();
-            
             if (!resGroups[submitDateStr]) resGroups[submitDateStr] = [];
             resGroups[submitDateStr].push({ key: resKey, data: r });
         });
@@ -134,76 +118,27 @@ function initAdminSystem() {
         Object.keys(resGroups).sort().reverse().forEach(submitDate => { 
             const resGroupDiv = document.createElement('div');
             resGroupDiv.className = 'date-group res-group';
-
-            if (resCollapseState[submitDate] === undefined) {
-                resCollapseState[submitDate] = true;
-            }
+            if (resCollapseState[submitDate] === undefined) resCollapseState[submitDate] = true;
 
             const header = document.createElement('div');
             header.className = 'date-header res-header';
-            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length} 条记录)</span> <span class="arrow-indicator">${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
-
+            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length}条记录)</span> <span class="arrow">${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
             const body = document.createElement('div');
             body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
-            body.style.overflowX = 'auto';
-
-            header.onclick = () => {
-                resCollapseState[submitDate] = !resCollapseState[submitDate];
-                body.classList.toggle('collapsed');
-                header.querySelector('.arrow-indicator').textContent = resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖';
-            };
 
             const table = document.createElement('table');
-            table.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>时段</th>
-                        <th>姓名</th>
-                        <th>专属取消码</th>
-                        <th>精确提交时间</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            `;
+            table.innerHTML = `<thead><tr><th>时段</th><th>姓名</th><th>取消码</th><th>提交时间</th><th>操作</th></tr></thead><tbody></tbody>`;
             const tbody = table.querySelector('tbody');
 
             resGroups[submitDate].forEach(item => {
                 const r = item.data;
                 const tr = document.createElement('tr');
-                const preciseTime = new Date(r.timestamp).toLocaleTimeString();
-                tr.innerHTML = `
-                    <td>${r.time}</td>
-                    <td><b>${r.nickname}</b></td>
-                    <td style="color:#e6a23c; font-weight:bold;">${r.cancelCode || '无'}</td>
-                    <td>${preciseTime}</td>
-                    <td>
-                        <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname}')">取消该预约</button>
-                    </td>
-                `;
+                tr.innerHTML = `<td>${r.time}</td><td><b>${r.nickname}</b></td><td style="color:#e6a23c;font-weight:bold;">${r.cancelCode || '无'}</td><td>${new Date(r.timestamp).toLocaleTimeString()}</td>
+                    <td><button class="danger" style="padding:4px 8px;font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname}')">取消该预约</button></td>`;
                 tbody.appendChild(tr);
             });
-
-            body.appendChild(table);
-            resGroupDiv.appendChild(header);
-            resGroupDiv.appendChild(body);
-            container.appendChild(resGroupDiv);
+            body.appendChild(table); resGroupDiv.appendChild(header); resGroupDiv.appendChild(body); container.appendChild(resGroupDiv);
         });
-    });
-}
-
-function cancelEditSlot(slotId) {
-    db.ref('slots/' + slotId).once('value').then(snapshot => {
-        const slot = snapshot.val();
-        if (!slot) return;
-        const row = document.getElementById(`slot-row-${slotId}`);
-        row.innerHTML = `
-            <span class="slot-text-span">${slot.time} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
-            <div class="btn-group">
-                <button style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;" onclick="startEditSlot('${slotId}', '${slot.time}')">修改</button>
-                <button class="danger" onclick="deleteSlot('${slotId}')">删除</button>
-            </div>
-        `;
     });
 }
 
@@ -218,156 +153,136 @@ function startEditSlot(slotId, currentTime) {
     `;
 }
 
+function cancelEditSlot(slotId) {
+    db.ref('slots/' + slotId).once('value').then(snapshot => {
+        const slot = snapshot.val(); if (!slot) return;
+        document.getElementById(`slot-row-${slotId}`).innerHTML = `
+            <span>${slot.time} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+            <div class="btn-group"><button style="background:#67c23a;width:auto;padding:8px 12px;font-size:14px;" onclick="startEditSlot('${slotId}', '${slot.time}')">修改</button><button class="danger" onclick="deleteSlot('${slotId}')">删除</button></div>`;
+    });
+}
+
+// 🛠️ ③ 修复：修改排班时，使用 Multi-location updates 保证绝对的分布式原子性
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
-    const datePattern = /^\d{1,2}\/\d{1,2}/;
-    if (!datePattern.test(newTime)) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头');
-    }
+    if (!/^\d{1,2}\/\d{1,2}/.test(newTime)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
 
-    db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
-        db.ref('reservations').once('value').then((snapshot) => {
-            const res = snapshot.val();
-            const promises = [];
-            if (res) {
-                Object.keys(res).forEach(resKey => {
-                    if (res[resKey].slotId === slotId) {
-                        promises.push(db.ref('reservations/' + resKey).update({ time: newTime }));
-                    }
-                });
-            }
-            Promise.all(promises).then(() => {
-                alert('时间段文字修改成功，已自动同步更新相关记录！');
+    db.ref('reservations').once('value').then((snapshot) => {
+        const res = snapshot.val();
+        const updates = {};
+        // 🌟 核心：所有修改打包进同一个对象，通过专属隐秘路径提交
+        updates[`slots/${slotId}/time`] = newTime;
+        if (res) {
+            Object.keys(res).forEach(resKey => {
+                if (res[resKey].slotId === slotId) {
+                    updates[`reservations/${resKey}/time`] = newTime;
+                }
             });
-        });
+        }
+        
+        db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+            alert('时间段修改成功，云端多节点已原子级同步完成！');
+        }).catch(() => alert('权限不足或网络异常！'));
+    });
+}
+
+// 🛠️ ⑤ 修复：删除排班时，使用多路径更新防止产生“孤儿记录”
+function deleteSlot(slotId) {
+    if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并原子级删除）')) return;
+    db.ref('reservations').once('value').then((snapshot) => {
+        const res = snapshot.val();
+        const updates = {};
+        updates[`slots/${slotId}`] = null; // null 代表在 Firebase 中删除
+        if (res) {
+            Object.keys(res).forEach(resKey => {
+                if (res[resKey].slotId === slotId) updates[`reservations/${resKey}`] = null;
+            });
+        }
+        db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+            alert('该排班及时单数据已原子级一并安全清除！');
+        }).catch(() => alert('操作失败，权限不足！'));
     });
 }
 
 function setNotice() {
-    const noticeText = document.getElementById('notice-input').value;
-    db.ref('settings/notice').set(noticeText).then(() => {
-        alert('公告更新成功！同学端已实时同步。');
-    });
+    const txt = document.getElementById('notice-input').value;
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/notice": txt }).then(() => alert('公告更新成功！')).catch(() => alert('权限错误！'));
 }
 
 function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
-    const datePattern = /^\d{1,2}\/\d{1,2}/;
-    if (!datePattern.test(time)) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头');
-    }
-    db.ref('slots').push({ time: time, reserved: false });
-    timeInput.value = '';
+    if (!/^\d{1,2}\/\d{1,2}/.test(time)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
+    
+    // 生成一个临时的 push key
+    const newKey = db.ref().child('slots').push().key;
+    const updates = {};
+    updates[`slots/${newKey}`] = { time: time, reserved: false };
+    
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        timeInput.value = '';
+    }).catch(() => alert('权限错误！'));
 }
 
 function generateDayTemplate() {
     const dateInput = document.getElementById('template-date').value;
-    if (!dateInput) return alert('请先选择需要批量排班的日期！');
-
+    if (!dateInput) return alert('请先选择日期！');
     const dateObj = new Date(dateInput);
-    const month = dateObj.getMonth() + 1;
-    const day = dateObj.getDate();
-    const prefix = `${month}/${day}`;
+    const prefix = `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
+    const times = ["0800-1015", "1030-1245", "1330-1545", "1600-1815", "1900-2115"];
 
-    const templates = [];
-    for (let i = 1; i <= 5; i++) {
-        const val = document.getElementById(`tpl-time-${i}`).value.trim();
-        if (val) templates.push(val);
-    }
+    if (!confirm(`确定要一键原子级生成 ${prefix} 的排班吗？`)) return;
+    const updates = {};
+    times.forEach(t => {
+        const newKey = db.ref().child('slots').push().key;
+        updates[`slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false };
+    });
 
-    if (templates.length === 0) return alert('请至少填写一个时间段！');
-
-    if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个自定义辅导时间段吗？`)) {
-        const promises = [];
-        templates.forEach(t => {
-            promises.push(db.ref('slots').push({ time: `${prefix} ${t}`, reserved: false }));
-        });
-        
-        Promise.all(promises).then(() => {
-            document.getElementById('tpl-time-1').value = "0800-1015";
-            document.getElementById('tpl-time-2').value = "1030-1245";
-            document.getElementById('tpl-time-3').value = "1330-1545";
-            document.getElementById('tpl-time-4').value = "1600-1815";
-            document.getElementById('tpl-time-5').value = "1900-2115";
-            document.getElementById('template-date').value = "";
-            alert('⚡ 排班模板已成功部署！');
-        });
-    }
-}
-
-function deleteSlot(slotId) {
-    if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) {
-        db.ref('slots/' + slotId).remove().then(() => {
-            db.ref('reservations').once('value').then((snapshot) => {
-                const res = snapshot.val();
-                const tasks = [];
-                if (res) {
-                    Object.keys(res).forEach(resKey => {
-                        if (res[resKey].slotId === slotId) {
-                            tasks.push(db.ref('reservations/' + resKey).remove());
-                        }
-                    });
-                }
-                Promise.all(tasks).then(() => {
-                    alert('该时段排班与学生预约单据已同步清空！');
-                });
-            });
-        });
-    }
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        document.getElementById('template-date').value = "";
+        alert('⚡ 批量排班已原子级无缝部署！');
+    }).catch(() => alert('权限错误！'));
 }
 
 function setDeadline() {
-    const deadline = document.getElementById('deadline-input').value;
-    if (!deadline) return alert('请选择时间！');
-    db.ref('settings/deadline').set(deadline);
-    alert('截止时间已保存！');
+    const dl = document.getElementById('deadline-input').value;
+    if (!dl) return alert('请选择时间！');
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/deadline": dl }).then(() => alert('截止时间已保存！')).catch(() => alert('权限错误！'));
 }
 
 function setCode() {
-    const newCode = document.getElementById('code-input').value.trim();
-    if (!newCode) return alert('口令不能为空！');
-    db.ref('settings/accessCode').set(newCode);
-    alert('预约口令已更新！');
+    const code = document.getElementById('code-input').value.trim();
+    if (!code) return alert('口令不能为空！');
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update({ "settings/accessCode": code }).then(() => alert('预约口令已更新！')).catch(() => alert('权限错误！'));
 }
 
-// 🌟 优化④：后端的单条切除功能，也引入 Promise.all 同步保障一致性
 function deleteSingleReservation(resKey, slotId, nickname) {
-    if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) {
-        Promise.all([
-            db.ref('slots/' + slotId + '/reserved').set(false),
-            db.ref('reservations/' + resKey).remove()
-        ]).then(() => {
-            alert(`已成功取消 [${nickname}] 的预约，名额已释放！`);
-        }).catch(() => {
-            alert('操作失败，请刷新后台重试。');
-        });
-    }
+    if (!confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) return;
+    const updates = {};
+    updates[`slots/${slotId}/reserved`] = false;
+    updates[`reservations/${resKey}`] = null;
+
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        alert(`已成功原子级取消 [${nickname}] 的预约，名额已释放！`);
+    }).catch(() => alert('权限错误！'));
 }
 
 function exportCSV() {
     if (reservationsData.length === 0) return alert('当前无数据可导出');
-    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,专属取消凭证码,提交时间\n";
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,专属取消码,提交时间\n";
     reservationsData.forEach(r => {
-        const date = new Date(r.timestamp).toLocaleString();
-        csvContent += `${r.time},${r.nickname},${r.cancelCode || '无'},${date}\n`;
+        csvContent += `${r.time},${r.nickname},${r.cancelCode || '无'},${new Date(r.timestamp).toLocaleString()}\n`;
     });
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", encodeURI(csvContent));
     link.setAttribute("download", "课程预约花名册.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
 }
 
 function clearData() {
-    if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
-        Promise.all([
-            db.ref('slots').remove(),
-            db.ref('reservations').remove()
-        ]).then(() => {
-            alert('云端数据已彻底擦除！');
-        });
-    }
+    if (!confirm('⚠️ 警告：确定要彻底清空所有排班和预约记录吗？')) return;
+    const updates = { slots: null, reservations: null };
+    db.ref(`admin_actions/${MASTER_PASSWORD}`).update(updates).then(() => {
+        alert('云端数据已彻底原子级擦除！');
+    }).catch(() => alert('权限错误！'));
 }
