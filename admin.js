@@ -1,16 +1,26 @@
 // admin.js
 
+// 🔑 1. V2.2 云端密码严格双重验证
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    db.ref('settings').once('value').then((snapshot) => {
-        document.getElementById('admin-login').style.display = 'none';
-        document.getElementById('admin-content').style.display = 'block';
-        initAdminSystem();
+    // 🌟 修改：先去读取云端存储的真实密码
+    db.ref('adminPassword').once('value').then((snapshot) => {
+        const correctPassword = snapshot.val();
+        
+        // 核心校验：将输入的密码与云端密码做绝对等于(===)比对
+        if (correctPassword && inputPass === correctPassword.toString().trim()) {
+            document.getElementById('admin-login').style.display = 'none';
+            document.getElementById('admin-content').style.display = 'block';
+            // 验证成功，开通数据监听
+            initAdminSystem();
+        } else {
+            errorEl.textContent = '密码验证失败，拒绝访问！';
+        }
     }).catch((error) => {
-        errorEl.textContent = '密码验证失败，拒绝访问！';
+        errorEl.textContent = '网络连接异常或权限不足！';
     });
 }
 
@@ -49,7 +59,6 @@ function initAdminSystem() {
             const dateGroupDiv = document.createElement('div');
             dateGroupDiv.className = 'date-group';
 
-            // 🌟 核心升级：默认值改为 true（代表默认折叠）
             if (dateCollapseState[dateKey] === undefined) {
                 dateCollapseState[dateKey] = true; 
             }
@@ -100,7 +109,7 @@ function initAdminSystem() {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
-    // 📋 【重大重构】监听并显示预约名单：按提交日期分组且默认折叠
+    // 📋 监听并显示预约名单：按提交日期分组且默认折叠
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -112,25 +121,20 @@ function initAdminSystem() {
             return;
         }
 
-        // 按提交日期（年/月/日）对数据进行归类分组
         const resGroups = {};
         Object.keys(res).forEach(resKey => {
             const r = res[resKey];
-            reservationsData.push(r); // 供导出使用
-            
-            // 提取提交时间的日期部分 (形如 "2026/6/17")
+            reservationsData.push(r); 
             const submitDateStr = new Date(r.timestamp).toLocaleDateString();
             
             if (!resGroups[submitDateStr]) resGroups[submitDateStr] = [];
             resGroups[submitDateStr].push({ key: resKey, data: r });
         });
 
-        // 渲染按提交日期分类的折叠卡片
-        Object.keys(resGroups).sort().reverse().forEach(submitDate => { // 倒序排，最近提交的日期在最上面
+        Object.keys(resGroups).sort().reverse().forEach(submitDate => { 
             const resGroupDiv = document.createElement('div');
             resGroupDiv.className = 'date-group res-group';
 
-            // 🌟 核心升级：默认值设为 true（默认已折叠）
             if (resCollapseState[submitDate] === undefined) {
                 resCollapseState[submitDate] = true;
             }
@@ -149,7 +153,6 @@ function initAdminSystem() {
                 header.querySelector('span:last-child').textContent = resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖';
             };
 
-            // 创建专属这个提交日期的精细表格
             const table = document.createElement('table');
             table.innerHTML = `
                 <thead>
@@ -164,7 +167,6 @@ function initAdminSystem() {
             `;
             const tbody = table.querySelector('tbody');
 
-            // 往表格塞入具体的记录
             resGroups[submitDate].forEach(item => {
                 const r = item.data;
                 const tr = document.createElement('tr');
@@ -252,7 +254,7 @@ function generateDayTemplate() {
                 reserved: false
             });
         });
-        alert(`⚡ ${prefix} 的排班模板已成功部署！`);
+        alert('⚡ 排班模板已成功部署！');
     }
 }
 
