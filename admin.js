@@ -18,9 +18,13 @@ document.getElementById('admin-password').addEventListener('keypress', function(
     if (e.key === 'Enter') verifyAdmin();
 });
 
+// 📁 存储排班和预约记录各自的折叠状态
 let dateCollapseState = {};
+let resCollapseState = {}; 
+let reservationsData = []; // 用于 CSV 导出
 
 function initAdminSystem() {
+    // 🕒 监听并按 mm/dd 进行高级折叠渲染（默认已折叠）
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -45,8 +49,9 @@ function initAdminSystem() {
             const dateGroupDiv = document.createElement('div');
             dateGroupDiv.className = 'date-group';
 
+            // 🌟 核心升级：默认值改为 true（代表默认折叠）
             if (dateCollapseState[dateKey] === undefined) {
-                dateCollapseState[dateKey] = false; 
+                dateCollapseState[dateKey] = true; 
             }
 
             const header = document.createElement('div');
@@ -95,31 +100,91 @@ function initAdminSystem() {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
+    // 📋 【重大重构】监听并显示预约名单：按提交日期分组且默认折叠
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
-        const tbody = document.getElementById('reservations-body');
-        tbody.innerHTML = '';
+        const container = document.getElementById('admin-reservations-container');
+        container.innerHTML = '';
         reservationsData = [];
         
-        if (res) {
-            Object.keys(res).forEach(resKey => {
-                const r = res[resKey];
-                reservationsData.push(r); 
+        if (!res) {
+            container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">暂无同学预约记录</p>';
+            return;
+        }
+
+        // 按提交日期（年/月/日）对数据进行归类分组
+        const resGroups = {};
+        Object.keys(res).forEach(resKey => {
+            const r = res[resKey];
+            reservationsData.push(r); // 供导出使用
+            
+            // 提取提交时间的日期部分 (形如 "2026/6/17")
+            const submitDateStr = new Date(r.timestamp).toLocaleDateString();
+            
+            if (!resGroups[submitDateStr]) resGroups[submitDateStr] = [];
+            resGroups[submitDateStr].push({ key: resKey, data: r });
+        });
+
+        // 渲染按提交日期分类的折叠卡片
+        Object.keys(resGroups).sort().reverse().forEach(submitDate => { // 倒序排，最近提交的日期在最上面
+            const resGroupDiv = document.createElement('div');
+            resGroupDiv.className = 'date-group res-group';
+
+            // 🌟 核心升级：默认值设为 true（默认已折叠）
+            if (resCollapseState[submitDate] === undefined) {
+                resCollapseState[submitDate] = true;
+            }
+
+            const header = document.createElement('div');
+            header.className = 'date-header res-header';
+            header.innerHTML = `<span>📝 ${submitDate} 提交的预约 (${resGroups[submitDate].length}条记录)</span> <span>${resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖'}</span>`;
+
+            const body = document.createElement('div');
+            body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
+            body.style.overflowX = 'auto';
+
+            header.onclick = () => {
+                resCollapseState[submitDate] = !resCollapseState[submitDate];
+                body.classList.toggle('collapsed');
+                header.querySelector('span:last-child').textContent = resCollapseState[submitDate] ? '展开 ➕' : '收起 ➖';
+            };
+
+            // 创建专属这个提交日期的精细表格
+            const table = document.createElement('table');
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>预约课程时段</th>
+                        <th>学生姓名</th>
+                        <th>精确提交时间</th>
+                        <th>快捷操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            const tbody = table.querySelector('tbody');
+
+            // 往表格塞入具体的记录
+            resGroups[submitDate].forEach(item => {
+                const r = item.data;
                 const tr = document.createElement('tr');
-                const date = new Date(r.timestamp).toLocaleString();
+                const preciseTime = new Date(r.timestamp).toLocaleTimeString();
                 tr.innerHTML = `
                     <td>${r.time}</td>
                     <td><b>${r.nickname}</b></td>
-                    <td>${date}</td>
+                    <td>${preciseTime}</td>
                     <td>
-                        <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${resKey}', '${r.slotId}', '${r.nickname}')">取消该预约</button>
+                        <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname}')">取消该预约</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             });
-        } else {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">暂无同学预约</td></tr>';
-        }
+
+            body.appendChild(table);
+            resGroupDiv.appendChild(header);
+            resGroupDiv.appendChild(body);
+            container.appendChild(resGroupDiv);
+        });
     });
 }
 
@@ -138,7 +203,7 @@ function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     const datePattern = /^\d{1,2}\/\d{1,2}/;
     if (!datePattern.test(newTime)) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
+        return alert('❌ 格式不正确！必须以“月/日”格式开头');
     }
     db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
         alert('时间段文字修改成功！');
@@ -157,13 +222,12 @@ function addSlot() {
     const time = timeInput.value.trim();
     const datePattern = /^\d{1,2}\/\d{1,2}/;
     if (!datePattern.test(time)) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
+        return alert('❌ 格式不正确！必须以“月/日”格式开头');
     }
     db.ref('slots').push({ time: time, reserved: false });
     timeInput.value = '';
 }
 
-// 👉 核心修改：从动态输入框抓取微调后的批量时间段
 function generateDayTemplate() {
     const dateInput = document.getElementById('template-date').value;
     if (!dateInput) return alert('请先选择需要批量排班的日期！');
@@ -173,11 +237,10 @@ function generateDayTemplate() {
     const day = dateObj.getDate();
     const prefix = `${month}/${day}`;
 
-    // 实时抓取页面里 5 个框框输入的内容
     const templates = [];
     for (let i = 1; i <= 5; i++) {
         const val = document.getElementById(`tpl-time-${i}`).value.trim();
-        if (val) templates.push(val); // 留空的不算
+        if (val) templates.push(val);
     }
 
     if (templates.length === 0) return alert('请至少填写一个时间段！');
@@ -185,11 +248,11 @@ function generateDayTemplate() {
     if (confirm(`确定要一键生成 ${prefix} 的这 ${templates.length} 个自定义辅导时间段吗？`)) {
         templates.forEach(t => {
             db.ref('slots').push({
-                time: `${prefix} ${t}`, // 自动拼上选中的月/日
+                time: `${prefix} ${t}`,
                 reserved: false
             });
         });
-        alert(`⚡ ${prefix} 的排班模板已成功按你的微调部署！`);
+        alert(`⚡ ${prefix} 的排班模板已成功部署！`);
     }
 }
 
@@ -223,10 +286,9 @@ function deleteSingleReservation(resKey, slotId, nickname) {
     }
 }
 
-let reservationsData = [];
 function exportCSV() {
     if (reservationsData.length === 0) return alert('当前无数据可导出');
-    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,昵称,提交时间\n";
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,提交时间\n";
     reservationsData.forEach(r => {
         const date = new Date(r.timestamp).toLocaleString();
         csvContent += `${r.time},${r.nickname},${date}\n`;
