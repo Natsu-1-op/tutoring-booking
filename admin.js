@@ -66,9 +66,16 @@ function initAdminSystem() {
             groups[dateKey].forEach(item => {
                 const slotDiv = document.createElement('div');
                 slotDiv.className = 'slot-item';
+                // 给每一行绑定一个唯一的 ID，方便后面行内直接改文字
+                slotDiv.id = `slot-row-${item.id}`; 
+                
+                // 👉 核心修改：增加“修改排班”按钮组合
                 slotDiv.innerHTML = `
-                    <span>${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
-                    <button class="danger" onclick="deleteSlot('${item.id}')">删除排班</button>
+                    <span class="slot-text-span">${item.data.time} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+                    <div class="btn-group">
+                        <button style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;" onclick="startEditSlot('${item.id}', '${item.data.time}')">修改</button>
+                        <button class="danger" onclick="deleteSlot('${item.id}')">删除</button>
+                    </div>
                 `;
                 body.appendChild(slotDiv);
             });
@@ -79,24 +86,18 @@ function initAdminSystem() {
         });
     });
 
-    // 📢 新增：监听公告内容并填入后台输入框
     db.ref('settings/notice').on('value', (snapshot) => {
-        if (snapshot.val() !== null) {
-            document.getElementById('notice-input').value = snapshot.val();
-        }
+        if (snapshot.val() !== null) document.getElementById('notice-input').value = snapshot.val();
     });
 
-    // 监听与设置截止时间
     db.ref('settings/deadline').on('value', (snapshot) => {
         if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val();
     });
 
-    // 监听与设置口令
     db.ref('settings/accessCode').on('value', (snapshot) => {
         if (snapshot.val()) document.getElementById('code-input').value = snapshot.val();
     });
 
-    // 监听并显示预约名单
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const tbody = document.getElementById('reservations-body');
@@ -125,7 +126,36 @@ function initAdminSystem() {
     });
 }
 
-// 📢 新增：发布/更新公告函数
+// 📁 新增函数A：将某一行切换为“编辑输入框”状态
+function startEditSlot(slotId, currentTime) {
+    const row = document.getElementById(`slot-row-${slotId}`);
+    row.innerHTML = `
+        <input type="text" class="edit-input" id="edit-input-${slotId}" value="${currentTime}">
+        <div class="btn-group">
+            <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
+            <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="initAdminSystem()">取消</button>
+        </div>
+    `;
+}
+
+// 📁 新增函数B：保存修改并推送至 Firebase 云端
+function saveEditedSlot(slotId) {
+    const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
+    
+    // 依然维持之前的月/日强制校验规则，防手抖
+    const datePattern = /^\d{1,2}\/\d{1,2}/;
+    if (!datePattern.test(newTime)) {
+        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
+    }
+
+    // 更新到云端数据库（只修改时间文字，不影响 reserved 预约状态）
+    db.ref('slots/' + slotId).update({
+        time: newTime
+    }).then(() => {
+        alert('时间段文字修改成功！');
+    });
+}
+
 function setNotice() {
     const noticeText = document.getElementById('notice-input').value;
     db.ref('settings/notice').set(noticeText).then(() => {
