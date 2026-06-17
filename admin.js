@@ -5,13 +5,13 @@ let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
 
-// 🔑 1. 直观的本地密码验证
+// 🔑 1. 本地密码验证登录
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
     if (!inputPass) return alert('请输入密码！');
 
-    // 探测 admin_auth/密码 路径是否放行
+    // 探测 admin_auth/密码 门禁路径是否放行
     db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
         if (snapshot.exists() && snapshot.val() === true) {
             document.getElementById('admin-login').style.display = 'none';
@@ -39,12 +39,12 @@ function isValidCalendarDate(month, day) {
     return day <= monthDaysMapping[month];
 }
 
-// 🛠️ 2. 初始化系统监听
+// 🛠️ 2. 初始化系统监听（彻底直连根目录，打通数据盲区）
 function initAdminSystem() {
     if (initialized) return;
     initialized = true;
 
-    // 🕒 监听并按 mm/dd 进行高级折叠渲染
+    // 🕒 监听并按 mm/dd 进行高级折叠渲染（根目录 slots）
     db.ref('slots').on('value', (snapshot) => {
         const slots = snapshot.val();
         const container = document.getElementById('admin-slots-container');
@@ -60,7 +60,7 @@ function initAdminSystem() {
             groups[dateKey].push({ id: slotId, data: slot });
         });
 
-        // 📅 智能排序：按真实日期线性升序排列
+        // 📅 智能排序：按真实日期时间轴线性排列
         Object.keys(groups).sort((a, b) => {
             const [am, ad] = a.split('/').map(Number);
             const [bm, bd] = b.split('/').map(Number);
@@ -105,7 +105,7 @@ function initAdminSystem() {
     db.ref('settings/deadline').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('deadline-input').value = snapshot.val(); });
     db.ref('settings/accessCode').on('value', (snapshot) => { if (snapshot.val()) document.getElementById('code-input').value = snapshot.val(); });
 
-    // 📋 监听预约单名单
+    // 📋 🌟 修正关键：让管理端也去直连监听大厅根目录下的 reservations 节点！
     db.ref('reservations').on('value', (snapshot) => {
         const res = snapshot.val();
         const container = document.getElementById('admin-reservations-container');
@@ -133,7 +133,7 @@ function initAdminSystem() {
             body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
 
             const table = document.createElement('table');
-            table.innerHTML = `<thead><tr><th>时段</th><th>姓名</th><th>专属取消码</th><th>提交时间</th><th>操作</th></tr></thead><tbody></tbody>`;
+            table.innerHTML = `<thead><tr><th>时段</th><th>姓名</th><th>专属取消凭证</th><th>提交时间</th><th>操作</th></tr></thead><tbody></tbody>`;
             const tbody = table.querySelector('tbody');
 
             resGroups[submitDate].forEach(item => {
@@ -181,7 +181,6 @@ function saveEditedSlot(slotId) {
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
-        // 🌟 直接投递到根目录下的相应位置
         updates[`slots/${slotId}/time`] = newTime;
         if (res) {
             Object.keys(res).forEach(resKey => {
@@ -225,7 +224,6 @@ function addSlot() {
     
     const newKey = db.ref().child('slots').push().key;
     const updates = {};
-    // 🌟 修正关键：直投根目录 slots
     updates[`slots/${newKey}`] = { time: time, reserved: false };
     
     db.ref().update(updates).then(() => { timeInput.value = ''; });
@@ -263,6 +261,7 @@ function setCode() {
     db.ref('settings').update({ accessCode: code }).then(() => alert('预约口令已更新！'));
 }
 
+// 🛠️ 🌟 修正关键：让后台点击“取消该预约”时，也通过多路径原子更新去直连清空根目录对应的名单！
 function deleteSingleReservation(resKey, slotId, nickname) {
     if (!confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) return;
     const updates = {};
