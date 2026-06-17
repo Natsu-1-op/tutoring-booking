@@ -97,7 +97,7 @@ function submitBooking() {
                     if (error || !committed) {
                         showMessage('手慢了，该时间已被预约！', false); btn.disabled = false;
                     } else {
-                        // 🌟 核心修改：生成 5 位大写字母+数字 专属取消码（不重复，好记）
+                        // 🌟 生成 5 位大写字母+数字 专属取消验证码
                         const randomCancelCode = (Math.random().toString(36).substring(2, 4) + Math.random().toString(36).substring(2, 5)).toUpperCase().slice(0, 5);
 
                         db.ref('reservations').push({
@@ -146,10 +146,11 @@ function cancelBooking() {
         });
 
         if (!targetResKey) {
+            // 🌟 帮您把这里的失败弹窗文案也同步成 5位
             showMessage(`验证失败：姓名、日期或 5 位凭证码不匹配！`, false); cancelBtn.disabled = false; return;
         }
 
-        // 🌟 多路径原子删除：同步撤回预约，多节点强一致原子变更！
+        // 多路径原子删除
         const updates = {};
         updates[`slots/${targetSlotId}/reserved`] = false;
         updates[`reservations/${targetResKey}`] = null;
