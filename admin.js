@@ -6,7 +6,7 @@ let dateCollapseState = {};
 let resCollapseState = {}; 
 let reservationsData = []; 
 
-// 🔑 1. 探测路径登录
+// 🔑 1. 探测路径登录（利用你的云端门禁卡进行路径匹配）
 function verifyAdmin() {
     const inputPass = document.getElementById('admin-password').value.trim();
     const errorEl = document.getElementById('login-error');
@@ -160,21 +160,27 @@ function cancelEditSlot(slotId) {
     });
 }
 
-// 🛠️ 原子级多路径更新修改时间
+// 🛠️ 原子更新修改时间
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
-    if (!/^\d{1,2}\/\d{1,2}/.test(newTime)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
+    
+    // 📢 增加验证：提取并严格核对是否为真实合法的日期
+    const dateMatch = newTime.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头，如: "6/19 14:00-15:00"');
+    
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return alert(`❌ 添加失败：不存在 ${month}月${day}日 这种魔法日期！请重新输入。`);
+    }
 
     db.ref('reservations').once('value').then((snapshot) => {
         const res = snapshot.val();
         const updates = {};
-        // 🌟 核心：穿透进对应密码路径里的独立 slots/reservations 子节点，完成原子更新
         updates[`admin_actions/${MASTER_PASSWORD}/slots/${slotId}/time`] = newTime;
         if (res) {
             Object.keys(res).forEach(resKey => {
-                if (res[resKey].slotId === slotId) {
-                    updates[`admin_actions/${MASTER_PASSWORD}/reservations/${resKey}/time`] = newTime;
-                }
+                if (res[resKey].slotId === slotId) updates[`admin_actions/${MASTER_PASSWORD}/reservations/${resKey}/time`] = newTime;
             });
         }
         
@@ -184,7 +190,7 @@ function saveEditedSlot(slotId) {
     });
 }
 
-// 🛠️ 原子级多路径删除排班与预约单
+// 🛠️ 原子更新删除排班与预约单
 function deleteSlot(slotId) {
     if (!confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并原子删除）')) return;
     db.ref('reservations').once('value').then((snapshot) => {
@@ -209,10 +215,23 @@ function setNotice() {
     db.ref().update(updates).then(() => alert('公告更新成功！')).catch(() => alert('权限错误！'));
 }
 
+// 🛠️ 核心修改：为“单次新增”配备严格的真实日历逻辑校验，拦截火星日期！
 function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
-    if (!/^\d{1,2}\/\d{1,2}/.test(time)) return alert('❌ 格式不正确！必须以“月/日”格式开头');
+    
+    // 第一步：初步检验是否为 数组/数字 结构
+    const dateMatch = time.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!dateMatch) {
+        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 14:00-15:00"');
+    }
+    
+    // 第二步：深度检验日历数字合理性，拦截 6/99、13/20 等错误数据
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return alert(`❌ 添加失败：地球上可没有 ${month}月${day}日 这种日期！请检查后重新输入。`);
+    }
     
     const newKey = db.ref().child('slots').push().key;
     const updates = {};
