@@ -48,6 +48,8 @@ function initAdminSystem() {
         const groups = {};
         Object.keys(slots).forEach(slotId => {
             const slot = slots[slotId];
+            if (!slot || !slot.time || slot.status === "hidden") return;
+
             const match = slot.time.match(/^(\d{1,2})\/(\d{1,2})/);
             const dateKey = match ? `${parseInt(match[1], 10)}/${parseInt(match[2], 10)}` : "其他日期格式";
             if (!groups[dateKey]) groups[dateKey] = [];
@@ -92,9 +94,7 @@ function initAdminSystem() {
     });
 
     db.ref('settings/notice').on('value', (snapshot) => {
-        if (snapshot.val() !== null) {
-            document.getElementById('notice-input').value = snapshot.val();
-        }
+        if (snapshot.val() !== null) document.getElementById('notice-input').value = snapshot.val();
     });
 
     db.ref('settings/noticeImage').on('value', (snapshot) => {
@@ -122,8 +122,18 @@ function initAdminSystem() {
 
         const resGroups = {};
         Object.keys(res).forEach(resKey => {
-            const r = res[resKey]; reservationsData.push(r); 
-            const submitDateStr = new Date(r.timestamp).toLocaleDateString();
+            const r = res[resKey];
+            if (!r) return;
+            reservationsData.push(r); 
+            
+            // 🌟 核心兼容：如果遇到不合规的历史时间戳数据，自动兜底，防止卡死
+            let submitDateStr = "历史记录";
+            if (r.timestamp) {
+                const parsedDate = new Date(r.timestamp);
+                if (!isNaN(parsedDate.getTime())) {
+                    submitDateStr = parsedDate.toLocaleDateString();
+                }
+            }
             if (!resGroups[submitDateStr]) resGroups[submitDateStr] = [];
             resGroups[submitDateStr].push({ key: resKey, data: r });
         });
@@ -153,8 +163,17 @@ function initAdminSystem() {
             resGroups[submitDate].forEach(item => {
                 const r = item.data;
                 const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${r.time}</td><td><b>${r.nickname}</b></td><td style="color:#e6a23c; font-weight:bold;">${r.cancelCode || '无'}</td><td>${new Date(r.timestamp).toLocaleTimeString()}</td>
-                    <td><button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname}')">取消该预约</button></td>`;
+                
+                // 🌟 核心兼容：提取显示保存的时间，即使 slot 被删也完美显示文本
+                let displayTimeText = r.time || "未知时间段";
+                let displayTimestamp = "未知时间";
+                if (r.timestamp) {
+                    const t = new Date(r.timestamp);
+                    if (!isNaN(t.getTime())) displayTimestamp = t.toLocaleTimeString();
+                }
+
+                tr.innerHTML = `<td>${displayTimeText}</td><td><b>${r.nickname || "匿名"}</b></td><td style="color:#e6a23c; font-weight:bold;">${r.cancelCode || '无'}</td><td>${displayTimestamp}</td>
+                    <td><button class="danger" style="padding:4px 8px; font-size:12px;" onclick="deleteSingleReservation('${item.key}', '${r.slotId}', '${r.nickname || "未知"}')">取消该预约</button></td>`;
                 tbody.appendChild(tr);
             });
             body.appendChild(table); resGroupDiv.appendChild(header); resGroupDiv.appendChild(body); container.appendChild(resGroupDiv);
@@ -191,30 +210,19 @@ function startEditSlot(slotId, currentTime) {
 function saveEditedSlot(slotId) {
     const newTime = document.getElementById(`edit-input-${slotId}`).value.trim();
     const dateMatch = newTime.match(/^(\d{1,2})\/(\d{1,2})/);
-    if (!dateMatch) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头，如 "6/19 14:00-15:00"');
-    }
-
-    const month = parseInt(dateMatch[1], 10);
-    const day = parseInt(dateMatch[2], 10);
-    if (!isValidCalendarDate(month, day)) {
-        return alert(`❌ 修改失败：日历中不存在 ${month}月${day}日！请重新核对。`);
-    }
+    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头');
+    const month = parseInt(dateMatch[1], 10); const day = parseInt(dateMatch[2], 10);
+    if (!isValidCalendarDate(month, day)) return alert(`❌ 修改失败：日历中不存在 ${month}月${day}日！`);
 
     db.ref('slots/' + slotId).update({ time: newTime }).then(() => {
         db.ref('reservations').once('value').then((snapshot) => {
-            const res = snapshot.val();
-            const updates = {};
+            const res = snapshot.val(); const updates = {};
             if (res) {
                 Object.keys(res).forEach(resKey => {
-                    if (res[resKey].slotId === slotId) {
-                        updates[`reservations/${resKey}/time`] = newTime;
-                    }
+                    if (res[resKey].slotId === slotId) updates[`reservations/${resKey}/time`] = newTime;
                 });
             }
-            db.ref().update(updates).then(() => {
-                alert('时间段文字修改成功，已自动同步预约单！');
-            });
+            db.ref().update(updates).then(() => alert('时间段文字修改成功，已自动同步预约单！'));
         });
     });
 }
@@ -233,19 +241,14 @@ function setNotice() {
                 const canvas = document.createElement('canvas');
                 let width = img.width; let height = img.height;
                 const MAX_WIDTH = 600;
-                if (width > MAX_WIDTH) {
-                    height = Math.round((height * MAX_WIDTH) / width);
-                    width = MAX_WIDTH;
-                }
+                if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
                 canvas.width = width; canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
+                const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
                 const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
                 db.ref('settings/notice').set(noticeText).then(() => {
                     db.ref('settings/noticeImage').set(compressedBase64).then(() => {
-                        fileInput.value = ''; 
-                        alert('公告及附加图片更新成功！');
+                        fileInput.value = ''; alert('公告及附加图片更新成功！');
                     });
                 });
             };
@@ -253,17 +256,13 @@ function setNotice() {
         };
         reader.readAsDataURL(file);
     } else {
-        db.ref('settings/notice').set(noticeText).then(() => {
-            alert('公告文本更新成功！');
-        });
+        db.ref('settings/notice').set(noticeText).then(() => alert('公告文本更新成功！'));
     }
 }
 
 function removeCurrentNoticeImage() {
     if (confirm('确定要清除当前的公告图片吗？（只保留文字）')) {
-        db.ref('settings/noticeImage').remove().then(() => {
-            alert('当前公告图片已成功移除！');
-        });
+        db.ref('settings/noticeImage').remove().then(() => alert('当前公告图片已成功移除！'));
     }
 }
 
@@ -271,17 +270,11 @@ function addSlot() {
     const timeInput = document.getElementById('new-slot-time');
     const time = timeInput.value.trim();
     const dateMatch = time.match(/^(\d{1,2})\/(\d{1,2})/);
-    if (!dateMatch) {
-        return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 0800-1015"');
-    }
+    if (!dateMatch) return alert('❌ 格式不正确！必须以“月/日”格式开头，例如: "6/19 0800-1015"');
+    const month = parseInt(dateMatch[1], 10); const day = parseInt(dateMatch[2], 10);
+    if (!isValidCalendarDate(month, day)) return alert(`❌ 添加失败：公历中不存在 ${month}月${day}日！`);
 
-    const month = parseInt(dateMatch[1], 10);
-    const day = parseInt(dateMatch[2], 10);
-    if (!isValidCalendarDate(month, day)) {
-        return alert(`❌ 添加失败：公历中不存在 ${month}月${day}日！`);
-    }
-
-    db.ref('slots').push({ time: time, reserved: false }).then(() => { timeInput.value = ''; });
+    db.ref('slots').push({ time: time, reserved: false, status: "active" }).then(() => { timeInput.value = ''; });
 }
 
 function generateDayTemplate() {
@@ -297,25 +290,66 @@ function generateDayTemplate() {
         const updates = {};
         templates.forEach(t => {
             const newKey = db.ref().child('slots').push().key;
-            updates[`slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false };
+            updates[`slots/${newKey}`] = { time: `${prefix} ${t}`, reserved: false, status: "active" };
         });
         db.ref().update(updates).then(() => {
-            document.getElementById('template-date').value = "";
-            alert('⚡ 排班模板已成功部署！');
+            document.getElementById('template-date').value = ""; alert('⚡ 排班模板已成功部署！');
         });
     }
 }
 
-// 🌟 核心更新：移除联动删除 reservations 的逻辑，只独立切除 slots 节点
+// 🌟 物理删除改逻辑隐藏，完美护航既有历史数据
 function deleteSlot(slotId) {
-    if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约记录不会被删除）')) {
-        db.ref('slots/' + slotId).remove().then(() => {
-            alert('该时段排班已成功从列表移除！');
+    if (confirm('确定要移除这个时间段吗？（有学生预约的单据会完好留存在下方列表中以供对账）')) {
+        db.ref('slots/' + slotId).once('value').then(snapshot => {
+            const slot = snapshot.val();
+            if (slot && slot.reserved) {
+                db.ref('slots/' + slotId).update({ status: "hidden" }).then(() => {
+                    alert('该时段已从学生页面安全隐藏，其历史预约单据已为您稳固保存！');
+                });
+            } else {
+                db.ref('slots/' + slotId).remove().then(() => {
+                    alert('该空闲时段已彻底安全移除！');
+                });
+            }
         });
     }
 }
 
-function setDeadline() { const dl = document.getElementById('deadline-input').value; if (!dl) return alert('请选择时间！'); db.ref('settings/deadline').set(dl).then(() => alert('截止时间已保存！')); }
-function setCode() { const code = document.getElementById('code-input').value.trim(); if (!code) return alert('口令不能为空！'); db.ref('settings/accessCode').set(code).then(() => alert('预约口令已更新！')); }
-function deleteSingleReservation(resKey, slotId, nickname) { if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) { const updates = {}; updates[`slots/${slotId}/reserved`] = false; updates[`reservations/${resKey}`] = null; db.ref().update(updates).then(() => alert(`已成功取消 [${nickname}] 的预约，名额已释放！`)); } }
-function clearData() { if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) { const updates = { slots: null, reservations: null }; db.ref().update(updates).then(() => alert('云端数据已彻底擦除！')); } }
+function deleteSingleReservation(resKey, slotId, nickname) {
+    if (confirm(`确定要取消学生 [${nickname}] 的这条预约吗？`)) {
+        db.ref('slots/' + slotId).once('value').then(slotSnap => {
+            const slot = slotSnap.val();
+            const updates = {};
+            updates[`reservations/${resKey}`] = null;
+            
+            if (!slot || slot.status === "hidden") {
+                updates[`slots/${slotId}`] = null;
+            } else {
+                updates[`slots/${slotId}/reserved`] = false;
+            }
+
+            db.ref().update(updates).then(() => {
+                alert(`已成功取消 [${nickname}] 的预约，节点数据净化完成！`);
+            });
+        });
+    }
+}
+
+function exportCSV() {
+    if (reservationsData.length === 0) return alert('当前无数据可导出');
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF预约时间,姓名,专属取消凭证码,提交时间\n";
+    reservationsData.forEach(r => {
+        csvContent += `${r.time},${r.nickname},${r.cancelCode || '无'},${new Date(r.timestamp).toLocaleString()}\n`;
+    });
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a"); link.setAttribute("href", encodedUri); link.setAttribute("download", "课程预约花名册.csv");
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+
+function clearData() {
+    if (confirm('⚠️ 警告：确定要清空所有排班和预约记录吗？')) {
+        const updates = { slots: null, reservations: null };
+        db.ref().update(updates).then(() => alert('云端数据已彻底擦除！'));
+    }
+}
