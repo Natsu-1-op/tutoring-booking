@@ -162,7 +162,6 @@ function initAdminSystem() {
     });
 }
 
-// 🌟 核心修正：修复函数声明格式，恢复行内排班“修改与取消”按钮的完整功能
 function cancelEditSlot(slotId) {
     db.ref('slots/' + slotId).once('value').then(snapshot => {
         const slot = snapshot.val();
@@ -307,18 +306,11 @@ function generateDayTemplate() {
     }
 }
 
+// 🌟 核心更新：移除联动删除 reservations 的逻辑，只独立切除 slots 节点
 function deleteSlot(slotId) {
-    if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约单也会一并删除）')) {
+    if (confirm('确定要彻底删除这个时间段排班吗？（对应的学生预约记录不会被删除）')) {
         db.ref('slots/' + slotId).remove().then(() => {
-            db.ref('reservations').once('value').then((snapshot) => {
-                const res = snapshot.val(); const updates = {};
-                if (res) {
-                    Object.keys(res).forEach(resKey => {
-                        if (res[resKey].slotId === slotId) updates[`reservations/${resKey}`] = null;
-                    });
-                }
-                db.ref().update(updates).then(() => alert('该时段排班与关联的学生单据已一并同步清除！'));
-            });
+            alert('该时段排班已成功从列表移除！');
         });
     }
 }
