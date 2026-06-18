@@ -3,48 +3,28 @@ let isDeadlined = false;
 let currentNoticeText = ""; 
 let currentNoticeImgHtml = ""; 
 
-// 💡 辅助函数：负责拼装和渲染最干净的公告栏内容
 function renderStudentNoticeBoard() {
     const board = document.getElementById('notice-board');
     const content = document.getElementById('notice-content');
-    
-    // 如果文字和图片都没内容，彻底隐藏公告栏
-    if (!currentNoticeText && !currentNoticeImgHtml) {
-        board.style.display = 'none';
-        return;
-    }
-    
-    // 缝合渲染文字和图片，确保排版优美、自适应
+    if (!currentNoticeText && !currentNoticeImgHtml) { board.style.display = 'none'; return; }
     let htmlBuilder = currentNoticeText ? currentNoticeText.replace(/\n/g, '<br>') : "";
-    if (currentNoticeImgHtml) {
-        htmlBuilder += currentNoticeImgHtml;
-    }
-    content.innerHTML = htmlBuilder;
-    board.style.display = 'block';
+    if (currentNoticeImgHtml) htmlBuilder += currentNoticeImgHtml;
+    content.innerHTML = htmlBuilder; board.style.display = 'block';
 }
 
-// 📢 1. 独立实时监听文字公告变化
 db.ref('settings/notice').on('value', (snapshot) => {
-    const notice = snapshot.val();
-    currentNoticeText = (notice && notice.trim() !== "") ? notice : "";
-    renderStudentNoticeBoard();
+    const notice = snapshot.val(); currentNoticeText = (notice && notice.trim() !== "") ? notice : ""; renderStudentNoticeBoard();
 });
 
-// 📢 2. 独立实时监听图片公告变化，并在下方渲染出限定最大宽度的自适应大底图
 db.ref('settings/noticeImage').on('value', (snapshot) => {
-    if (snapshot.val()) {
-        currentNoticeImgHtml = `<br><img src="${snapshot.val()}" style="max-width:100%; height:auto; border-radius:6px; margin-top:10px; display:block; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">`;
-    } else {
-        currentNoticeImgHtml = "";
-    }
+    currentNoticeImgHtml = snapshot.val() ? `<br><img src="${snapshot.val()}" style="max-width:100%; height:auto; border-radius:6px; margin-top:10px; display:block; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">` : "";
     renderStudentNoticeBoard();
 });
 
 db.ref('settings/deadline').on('value', (snapshot) => {
     const deadline = snapshot.val();
     if (deadline && new Date() > new Date(deadline)) {
-        isDeadlined = true;
-        document.getElementById('booking-form').innerHTML = '<h3 style="text-align:center; color:red;">本轮预约已截止，请等待下一次开放。</h3>';
+        isDeadlined = true; document.getElementById('booking-form').innerHTML = '<h3 style="text-align:center; color:red;">本轮预约已截止，请等待下一次开放。</h3>';
     }
 });
 
@@ -58,11 +38,21 @@ db.ref('slots').on('value', (snapshot) => {
     const availableSlots = []; const reservedSlots = [];
     Object.keys(slots).forEach(slotId => {
         const slot = slots[slotId];
+        
+        // 🌟 核心兼容：如果排班已经处于逻辑隐藏状态，学生端直接略过不显示
+        if (slot.status === "hidden") return;
+
+        // 🌟 容错保护：防止因为脏数据导致某些未知节点在页面卡出 undefined
+        if (!slot || !slot.time) return;
+
         if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
         else availableSlots.push({ id: slotId, data: slot });
     });
 
-    [...availableSlots, ...reservedSlots].forEach(item => {
+    const sortedSlots = [...availableSlots, ...reservedSlots];
+    if (sortedSlots.length === 0) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
+
+    sortedSlots.forEach(item => {
         const div = document.createElement('div');
         div.className = `slot-item ${item.data.reserved ? 'disabled' : ''}`;
         if (item.data.reserved) {
@@ -76,8 +66,7 @@ db.ref('slots').on('value', (snapshot) => {
 });
 
 function showMessage(msg, isSuccess) {
-    const msgEl = document.getElementById('message');
-    msgEl.textContent = msg; msgEl.className = isSuccess ? 'success' : 'error'; window.scrollTo(0, 0);
+    const msgEl = document.getElementById('message'); msgEl.textContent = msg; msgEl.className = isSuccess ? 'success' : 'error'; window.scrollTo(0, 0);
 }
 
 function submitBooking() {
@@ -89,12 +78,9 @@ function submitBooking() {
     if (!accessCode) return showMessage('请输入预约口令！', false);
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
 
-    const slotId = selectedSlot.value;
-    const slotTime = selectedSlot.getAttribute('data-time');
-    const match = slotTime.match(/^(\d{1,2}\/\d{1,2})/);
-    const targetDate = match ? match[1] : '';
-    const btn = document.getElementById('submit-btn');
-    btn.disabled = true; btn.textContent = '提交中...';
+    const slotId = selectedSlot.value; const slotTime = selectedSlot.getAttribute('data-time');
+    const match = slotTime.match(/^(\d{1,2}\/\d{1,2})/); const targetDate = match ? match[1] : '';
+    const btn = document.getElementById('submit-btn'); btn.disabled = true; btn.textContent = '提交中...';
 
     db.ref('settings/deadline').once('value').then((dlSnap) => {
         if (dlSnap.val() && new Date() > new Date(dlSnap.val())) { showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return; }
@@ -102,7 +88,7 @@ function submitBooking() {
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
             if (currentRes && targetDate) {
-                const hasBookedToday = Object.values(currentRes).some(r => r.nickname === nickname && r.time.startsWith(targetDate));
+                const hasBookedToday = Object.values(currentRes).some(r => r.nickname === nickname && r.time && r.time.startsWith(targetDate));
                 if (hasBookedToday) { showMessage(`❌ 拦截：您在 ${targetDate} 这天已有预约，同日限约一节！`, false); btn.disabled = false; btn.textContent = '提交预约'; return; }
             }
 
@@ -111,7 +97,7 @@ function submitBooking() {
 
                 db.ref('slots/' + slotId).transaction((currentData) => {
                     if (currentData === null) return currentData;
-                    if (!currentData.reserved) { currentData.reserved = true; return currentData; }
+                    if (!currentData.reserved && currentData.status !== "hidden") { currentData.reserved = true; return currentData; }
                     return; 
                 }, (error, committed) => {
                     if (error || !committed) { showMessage('手慢了，该时间已被预约！', false); btn.disabled = false; }
@@ -126,7 +112,7 @@ function submitBooking() {
                                 <p style="text-align:center;">预约时间: <b>${slotTime}</b></p>
                                 <div style="background:#fff7e6; border:1px solid #ffd591; padding:15px; border-radius:6px; margin-top:15px; text-align:center;">
                                     <span style="color:#d46b08; font-size:14px;">⚠️ <b>重要：5位专属取消凭证码</b></span><br>
-                                    <b style="font-size:24px; color:#ff4d4f; letter-spacing:2px;">${randomCancelCode}</b><br>
+                                    <b style="font-size:26px; color:#ff4d4f; letter-spacing:2px;">${randomCancelCode}</b><br>
                                     <small style="color:#666;">如果后面需要临时取消，必须输入此验证码。<br>请截图保存。</small>
                                 </div>`;
                         });
@@ -143,8 +129,7 @@ function cancelBooking() {
     const cancelCodeInput = document.getElementById('cancel-code').value.trim().toUpperCase();
 
     if (!cancelNickname || !cancelDateInput || !cancelCodeInput) return showMessage('请完整填写姓名、日期和凭证码！', false);
-    const dateParts = cancelDateInput.split('-');
-    const targetDatePrefix = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
+    const dateParts = cancelDateInput.split('-'); const targetDatePrefix = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
 
     if (!confirm(`确定要取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
     const cancelBtn = document.getElementById('cancel-btn'); cancelBtn.disabled = true;
@@ -156,18 +141,30 @@ function cancelBooking() {
         let targetResKey = null; let targetSlotId = null;
         Object.keys(reservations).forEach(key => {
             const r = reservations[key];
-            if (r.nickname === cancelNickname && r.time.startsWith(targetDatePrefix) && r.cancelCode === cancelCodeInput) {
+            if (r.nickname === cancelNickname && r.time && r.time.startsWith(targetDatePrefix) && r.cancelCode === cancelCodeInput) {
                 targetResKey = key; targetSlotId = r.slotId;
             }
         });
 
         if (!targetResKey) { showMessage(`验证失败：姓名、日期或 5 位凭证码不匹配！`, false); cancelBtn.disabled = false; return; }
 
-        const updates = {}; updates[`slots/${targetSlotId}/reserved`] = false; updates[`reservations/${targetResKey}`] = null;
-        db.ref().update(updates).then(() => {
-            showMessage(`成功取消预约！该时间段已重新开放。`, true);
-            document.getElementById('cancel-nickname').value = ''; document.getElementById('cancel-date').value = ''; document.getElementById('cancel-code').value = '';
-            cancelBtn.disabled = false;
-        }).catch(() => { alert('系统异常！'); cancelBtn.disabled = false; });
+        db.ref('slots/' + targetSlotId).once('value').then((slotSnapshot) => {
+            const slot = slotSnapshot.val();
+            const updates = {};
+            updates[`reservations/${targetResKey}`] = null;
+
+            if (!slot || slot.status === "hidden") {
+                // 🌟 核心兼容：如果排班原本不存在或者已经被老师隐藏，直接物理粉碎，绝不留死角
+                updates[`slots/${targetSlotId}`] = null;
+            } else {
+                updates[`slots/${targetSlotId}/reserved`] = false;
+            }
+
+            db.ref().update(updates).then(() => {
+                showMessage(`成功取消预约！该时间段已重新开放。`, true);
+                document.getElementById('cancel-nickname').value = ''; document.getElementById('cancel-date').value = ''; document.getElementById('cancel-code').value = '';
+                cancelBtn.disabled = false;
+            }).catch(() => { alert('系统异常！'); cancelBtn.disabled = false; });
+        });
     });
 }
