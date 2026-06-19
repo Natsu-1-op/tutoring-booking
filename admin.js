@@ -126,7 +126,6 @@ function initAdminSystem() {
             if (!r) return;
             reservationsData.push(r); 
             
-            // 🌟 核心兼容：如果遇到不合规的历史时间戳数据，自动兜底，防止卡死
             let submitDateStr = "历史记录";
             if (r.timestamp) {
                 const parsedDate = new Date(r.timestamp);
@@ -164,7 +163,6 @@ function initAdminSystem() {
                 const r = item.data;
                 const tr = document.createElement('tr');
                 
-                // 🌟 核心兼容：提取显示保存的时间，即使 slot 被删也完美显示文本
                 let displayTimeText = r.time || "未知时间段";
                 let displayTimestamp = "未知时间";
                 if (r.timestamp) {
@@ -298,7 +296,6 @@ function generateDayTemplate() {
     }
 }
 
-// 🌟 物理删除改逻辑隐藏，完美护航既有历史数据
 function deleteSlot(slotId) {
     if (confirm('确定要移除这个时间段吗？（有学生预约的单据会完好留存在下方列表中以供对账）')) {
         db.ref('slots/' + slotId).once('value').then(snapshot => {
@@ -314,6 +311,24 @@ function deleteSlot(slotId) {
             }
         });
     }
+}
+
+// 🌟 核心修复：将 .set() 升级为直连格式的 .update() 原子打包提交
+function setDeadline() {
+    const deadline = document.getElementById('deadline-input').value;
+    if (!deadline) return alert('请选择时间！');
+    
+    db.ref('settings').update({ deadline: deadline }).then(() => {
+        alert('截止时间已成功保存！');
+    }).catch(() => {
+        alert('提交失败，请检查网络或配置权限！');
+    });
+}
+
+function setCode() {
+    const code = document.getElementById('code-input').value.trim();
+    if (!code) return alert('口令不能为空！');
+    db.ref('settings').update({ accessCode: code }).then(() => alert('预约口令已更新！'));
 }
 
 function deleteSingleReservation(resKey, slotId, nickname) {
