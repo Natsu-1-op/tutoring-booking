@@ -21,10 +21,15 @@ db.ref('settings/noticeImage').on('value', (snapshot) => {
     renderStudentNoticeBoard();
 });
 
+// 🌟 核心更新：实时监听并对直连格式截止日期进行精准毫秒对比拦截
 db.ref('settings/deadline').on('value', (snapshot) => {
     const deadline = snapshot.val();
-    if (deadline && new Date() > new Date(deadline)) {
-        isDeadlined = true; document.getElementById('booking-form').innerHTML = '<h3 style="text-align:center; color:red;">本轮预约已截止，请等待下一次开放。</h3>';
+    if (deadline) {
+        const deadlineDate = new Date(deadline);
+        if (!isNaN(deadlineDate.getTime()) && new Date() > deadlineDate) {
+            isDeadlined = true; 
+            document.getElementById('booking-form').innerHTML = '<h3 style="text-align:center; color:red;">本轮预约已截止，请等待下一次开放。</h3>';
+        }
     }
 });
 
@@ -38,11 +43,7 @@ db.ref('slots').on('value', (snapshot) => {
     const availableSlots = []; const reservedSlots = [];
     Object.keys(slots).forEach(slotId => {
         const slot = slots[slotId];
-        
-        // 🌟 核心兼容：如果排班已经处于逻辑隐藏状态，学生端直接略过不显示
         if (slot.status === "hidden") return;
-
-        // 🌟 容错保护：防止因为脏数据导致某些未知节点在页面卡出 undefined
         if (!slot || !slot.time) return;
 
         if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
@@ -83,7 +84,13 @@ function submitBooking() {
     const btn = document.getElementById('submit-btn'); btn.disabled = true; btn.textContent = '提交中...';
 
     db.ref('settings/deadline').once('value').then((dlSnap) => {
-        if (dlSnap.val() && new Date() > new Date(dlSnap.val())) { showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return; }
+        const dlVal = dlSnap.val();
+        if (dlVal) {
+            const dlDate = new Date(dlVal);
+            if (!isNaN(dlDate.getTime()) && new Date() > dlDate) {
+                showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return;
+            }
+        }
 
         db.ref('reservations').once('value').then((resSnap) => {
             const currentRes = resSnap.val();
@@ -128,7 +135,7 @@ function cancelBooking() {
     const cancelDateInput = document.getElementById('cancel-date').value;
     const cancelCodeInput = document.getElementById('cancel-code').value.trim().toUpperCase();
 
-    if (!cancelNickname || !cancelDateInput || !cancelCodeInput) return showMessage('请完整填写姓名、日期和凭证码！', false);
+    if (!cancelNickname || !cancelDateInput || !cancelCodeInput) return showMessage('请完整填写姓名、日期 and 凭证码！', false);
     const dateParts = cancelDateInput.split('-'); const targetDatePrefix = `${parseInt(dateParts[1], 10)}/${parseInt(dateParts[2], 10)}`;
 
     if (!confirm(`确定要取消 [${cancelNickname}] 在 ${targetDatePrefix} 的预约吗？`)) return;
@@ -154,7 +161,6 @@ function cancelBooking() {
             updates[`reservations/${targetResKey}`] = null;
 
             if (!slot || slot.status === "hidden") {
-                // 🌟 核心兼容：如果排班原本不存在或者已经被老师隐藏，直接物理粉碎，绝不留死角
                 updates[`slots/${targetSlotId}`] = null;
             } else {
                 updates[`slots/${targetSlotId}/reserved`] = false;
