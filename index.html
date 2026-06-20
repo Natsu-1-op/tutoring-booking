@@ -11,6 +11,22 @@
             border-radius: 8px; margin-bottom: 20px; color: #d46b08; font-size: 14px; line-height: 1.6;
         }
         .notice-board h4 { margin: 0 0 5px 0; font-size: 15px; display: flex; align-items: center; gap: 5px; }
+        
+        .nav-btn-container { display: flex; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
+        .nav-btn-container button { 
+            flex: 1; margin: 0; padding: 12px 0; height: 50px; font-size: 16px; font-weight: bold;
+            box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+        }
+        
+        .history-card { border: 1px solid #e4e7ed; border-radius: 8px; padding: 15px; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-left: 5px; }
+        .status-pending { background: #e6a23c; color: #fff; }
+        .status-confirmed { background: #409eff; color: #fff; }
+        .status-pendingcancel { background: #f56c6c; color: #fff; }
+        .status-canceled { background: #909399; color: #fff; }
+        .status-completed { background: #67c23a; color: #fff; }
+        .card-row { margin: 6px 0; font-size: 14px; text-align: left; }
+        button.action-btn { width: auto; padding: 6px 12px; font-size: 13px; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -18,45 +34,43 @@
         <h1>专业课辅导预约</h1>
         <div id="message"></div>
 
-        <div class="notice-board" id="notice-board" style="display: none;">
-            <h4>公告：</h4>
-            <div id="notice-content">加载中...</div>
+        <div class="nav-btn-container">
+            <button id="nav-booking-btn" onclick="switchView('booking')">我要约课</button>
+            <button id="nav-history-btn" style="background: #67c23a;" onclick="switchView('history')">我的历史约课</button>
         </div>
 
-        <div id="booking-form">
-            <div class="form-group">
-                <label for="nickname">请输入姓名：</label>
-                <input type="text" id="nickname" placeholder="例如：丁真" required>
+        <div id="booking-section">
+            <div class="notice-board" id="notice-board" style="display: none;">
+                <h4>公告：</h4>
+                <div id="notice-content">加载中...</div>
             </div>
-            
-            <div class="form-group">
-                <label for="access-code">请输入班级预约口令：</label>
-                <input type="text" id="access-code" placeholder="周中会发送口令" required>
+
+            <div id="booking-form">
+                <div class="form-group">
+                    <label for="nickname">请输入姓名：</label>
+                    <input type="text" id="nickname" placeholder="例如：丁真" required>
+                </div>
+                <div class="form-group">
+                    <label for="access-code">请输入班级预约口令：</label>
+                    <input type="text" id="access-code" placeholder="周中会发送口令" required>
+                </div>
+                <div class="form-group">
+                    <label>请选择时间：</label>
+                    <div id="slots-container">加载中...</div>
+                </div>
+                <button id="submit-btn" onclick="submitBooking()">提交预约申请</button>
             </div>
-            
-            <div class="form-group">
-                <label>请选择时间（单选）：</label>
-                <div id="slots-container">加载中...</div>
-            </div>
-            
-            <button id="submit-btn" onclick="submitBooking()">提交预约</button>
         </div>
 
-        <div class="cancel-section">
-            <h3>想取消预约？</h3>
-            <div class="form-group">
-                <label style="font-size: 14px; color: #666; font-weight: normal;">1. 输入你的姓名：</label>
-                <input type="text" id="cancel-nickname" placeholder="输入预约时的姓名">
+        <div id="history-section" style="display: none;">
+            <div class="form-group" style="background: #fdfdfe; padding: 15px; border: 1px dashed #ccc; border-radius: 8px; margin-bottom: 20px;">
+                <label style="font-size: 14px; color: #555;">输入您的姓名以查询：</label>
+                <div style="display: flex; gap: 8px; margin-top: 5px;">
+                    <input type="text" id="history-search-name" placeholder="请输入预约时填写的姓名" style="padding: 8px;">
+                    <button onclick="loadMyHistory()" style="width: auto; white-space: nowrap; padding: 0 15px; font-size: 14px; background: #409eff;">查询</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label style="font-size: 14px; color: #666; font-weight: normal;">2. 选择要取消哪天的课程：</label>
-                <input type="date" id="cancel-date" style="padding: 10px;">
-            </div>
-            <div class="form-group">
-                <label style="font-size: 14px; color: #666; font-weight: normal;">3. 输入你的 5 位专属取消凭证码：</label>
-                <input type="text" id="cancel-code" placeholder="请输入5位码(不区分大小写）">
-            </div>
-            <button id="cancel-btn" class="danger-outline" onclick="cancelBooking()">确认取消我的预约</button>
+            <div id="history-container"><p style="text-align: center; color: #999; padding: 20px;">请输入姓名点击查询。</p></div>
         </div>
     </div>
 
