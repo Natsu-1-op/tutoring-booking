@@ -413,3 +413,12 @@ function clearData() {
         db.ref().update(updates).then(() => alert('云端数据已彻底擦除！'));
     }
 }
+function removeCurrentNoticeImage() {
+    if (confirm('确定要清除当前的公告图片吗？（只保留文字）')) {
+        db.ref('settings/noticeImage').remove().then(() => {
+            // 清空文件选择器内可能残存的待上传文件
+            document.getElementById('notice-image-input').value = "";
+            alert('当前公告图片已成功移除！');
+        });
+    }
+}
