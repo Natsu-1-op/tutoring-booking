@@ -72,12 +72,18 @@
             <div id="cancel-approval-list"><p style="color: #999; font-size: 13px;">暂无学生发起的取消申请。</p></div>
         </div>
 
-        <h2>📢 约课端公告设置</h2>
+<h2>📢 约课端公告设置</h2>
         <div class="form-group">
             <textarea id="notice-input" rows="3" placeholder="在此输入公告内容。留空并保存可隐藏学生端的公告栏。"></textarea>
             <div style="margin-top: 10px; margin-bottom: 10px; background: #fafafa; padding: 10px; border-radius: 6px; border: 1px dashed #ccc;">
                 <label style="font-size: 14px; color: #666; font-weight: normal; margin-bottom: 5px;">🖼️ 附加公告图片（自动压缩画幅和质量）：</label>
                 <input type="file" id="notice-image-input" accept="image/*" style="font-size: 13px;">
+                
+                <div id="admin-img-preview-container" style="display: none; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #ddd;">
+                    <p style="font-size: 13px; color: #666; margin: 0 0 6px 0;">当前已发布图片：</p>
+                    <img id="admin-img-preview" src="" style="max-width: 180px; max-height: 120px; display: block; border-radius: 4px; margin-bottom: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
+                    <button type="button" onclick="removeCurrentNoticeImage()" class="danger" style="width: auto; padding: 5px 12px; font-size: 12px; background: #f56c6c;">🗑️ 仅删除当前图片</button>
+                </div>
             </div>
             <button onclick="setNotice()" style="background:#e6a23c; margin-top: 8px; width: auto;">发布/更新公告</button>
         </div>
