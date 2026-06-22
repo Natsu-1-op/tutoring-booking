@@ -1,74 +1,120 @@
 // app.js
 let isDeadlined = false;
-let currentNoticeText = ""; 
-let currentNoticeImgHtml = ""; 
+let isSubmitting = false; 
 
-function renderStudentNoticeBoard() {
-    const board = document.getElementById('notice-board');
-    const content = document.getElementById('notice-content');
-    if (!currentNoticeText && !currentNoticeImgHtml) { board.style.display = 'none'; return; }
-    let htmlBuilder = currentNoticeText ? currentNoticeText.replace(/\n/g, '<br>') : "";
-    if (currentNoticeImgHtml) htmlBuilder += currentNoticeImgHtml;
-    content.innerHTML = htmlBuilder; board.style.display = 'block';
-}
-
-db.ref('settings/notice').on('value', (snapshot) => {
-    const notice = snapshot.val(); currentNoticeText = (notice && notice.trim() !== "") ? notice : ""; renderStudentNoticeBoard();
-});
-
-db.ref('settings/noticeImage').on('value', (snapshot) => {
-    currentNoticeImgHtml = snapshot.val() ? `<br><img src="${snapshot.val()}" style="max-width:100%; height:auto; border-radius:6px; margin-top:10px; display:block; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">` : "";
-    renderStudentNoticeBoard();
-});
-
-db.ref('settings/deadline').on('value', (snapshot) => {
-    const deadline = snapshot.val();
-    if (deadline) {
-        const deadlineDate = new Date(deadline);
-        if (!isNaN(deadlineDate.getTime()) && new Date() > deadlineDate) {
-            isDeadlined = true; 
-            document.getElementById('booking-form').innerHTML = '<h3 style="text-align:center; color:red;">本轮预约已截止，请等待下一次开放。</h3>';
-        }
+SystemRouter.system().on('value', (snap) => {
+    const sys = snap.val();
+    if (sys && sys.activeYear) {
+        SystemRouter.activeYear = sys.activeYear;
+        
+        const titleEl = document.getElementById('main-title');
+        if (titleEl) titleEl.textContent = "专业课辅导";
+        
+        const overlay = document.getElementById('sync-overlay');
+        if (overlay) overlay.style.display = 'none';
+        
+        bindActiveYearListeners();
     }
 });
 
-db.ref('slots').on('value', (snapshot) => {
-    if (isDeadlined) return;
-    const slots = snapshot.val();
-    const container = document.getElementById('slots-container');
-    container.innerHTML = '';
-    if (!slots) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
+function bindActiveYearListeners() {
+    const year = SystemRouter.activeYear;
+    
+    let currentNoticeText = "";
+    let currentNoticeImgHtml = "";
 
-    const availableSlots = []; const reservedSlots = [];
-    Object.keys(slots).forEach(slotId => {
-        const slot = slots[slotId];
-        if (slot.status === "hidden" || !slot || !slot.time) return;
-
-        if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
-        else availableSlots.push({ id: slotId, data: slot });
-    });
-
-    const sortedSlots = [...availableSlots, ...reservedSlots];
-    if (sortedSlots.length === 0) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
-
-    sortedSlots.forEach(item => {
-        const div = document.createElement('div');
-        div.className = `slot-item ${item.data.reserved ? 'disabled' : ''}`;
-        if (item.data.reserved) {
-            div.innerHTML = `<span>${item.data.time}</span> <span style="color:#ff4d4f;">(已满/审批中)</span>`;
-        } else {
-            div.innerHTML = `<label style="display:flex; align-items:center; width:100%; cursor:pointer; font-weight:normal; margin:0;">
-                <input type="radio" name="slot" value="${item.id}" data-time="${item.data.time}" style="margin-right:10px;">${item.data.time}</label>`;
+    function renderFullNoticeBoard() {
+        const board = document.getElementById('notice-board');
+        const content = document.getElementById('notice-content');
+        if (!currentNoticeText && !currentNoticeImgHtml) {
+            board.style.display = 'none';
+            return;
         }
-        container.appendChild(div);
+        let htmlBuilder = currentNoticeText ? escapeHtml(currentNoticeText).replace(/\n/g, '<br>') : "";
+        if (currentNoticeImgHtml) {
+            htmlBuilder += currentNoticeImgHtml;
+        }
+        content.innerHTML = htmlBuilder;
+        board.style.display = 'block';
+    }
+
+    SystemRouter.getSettingsRef(year).child('notice').on('value', (snapshot) => {
+        const notice = snapshot.val();
+        currentNoticeText = (notice && notice.trim() !== "") ? notice : "";
+        renderFullNoticeBoard();
     });
-});
+
+    SystemRouter.getSettingsRef(year).child('noticeImage').on('value', (snapshot) => {
+        const imgBase64 = snapshot.val();
+        currentNoticeImgHtml = imgBase64 ? `<br><img src="${imgBase64}" style="max-width:100%; height:auto; border-radius:6px; margin-top:10px; display:block; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">` : "";
+        renderFullNoticeBoard();
+    });
+
+    SystemRouter.getSettingsRef(year).child('deadline').on('value', (snapshot) => {
+        const deadline = snapshot.val();
+        let deadlineHint = document.getElementById('deadline-hint');
+        if (!deadlineHint) {
+            deadlineHint = document.createElement('h3'); deadlineHint.id = 'deadline-hint';
+            deadlineHint.style.textAlign = 'center'; deadlineHint.style.color = 'red';
+            deadlineHint.textContent = '本轮预约已截止，请等待下一次开放。';
+            const formEl = document.getElementById('booking-form');
+            if (formEl) formEl.parentNode.insertBefore(deadlineHint, formEl);
+        }
+        
+        if (deadline && !isNaN(new Date(deadline).getTime()) && new Date() > new Date(deadline)) {
+            isDeadlined = true;
+            document.getElementById('booking-form').style.display = 'none';
+            deadlineHint.style.display = 'block';
+        } else {
+            isDeadlined = false;
+            document.getElementById('booking-form').style.display = 'block';
+            deadlineHint.style.display = 'none';
+        }
+    });
+
+    SystemRouter.getSlotsRef(year).on('value', (snapshot) => {
+        if (isDeadlined) return;
+        const slots = snapshot.val();
+        const container = document.getElementById('slots-container');
+        container.innerHTML = '';
+        if (!slots) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
+
+        const availableSlots = []; const reservedSlots = [];
+        Object.keys(slots).forEach(slotId => {
+            const slot = slots[slotId];
+            if (slot.status === "hidden" || !slot || !slot.time) return;
+            if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
+            else availableSlots.push({ id: slotId, data: slot });
+        });
+
+        const sortedSlots = [...availableSlots, ...reservedSlots];
+        if (sortedSlots.length === 0) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
+
+        sortedSlots.forEach(item => {
+            const div = document.createElement('div');
+            div.className = `slot-item ${item.data.reserved ? 'disabled' : ''}`;
+            
+            const parsed = TimeParser.parseRawText(item.data.time, SystemRouter.activeYear);
+            const displayTime = parsed ? parsed.formattedSlotText : item.data.time;
+
+            if (item.data.reserved) {
+                div.innerHTML = `<span>${escapeHtml(displayTime)}</span> <span style="color:#ff4d4f;">(已满)</span>`;
+            } else {
+                div.innerHTML = `<label style="display:flex; align-items:center; width:100%; cursor:pointer; font-weight:normal; margin:0;">
+                    <input type="radio" name="slot" value="${item.id}" data-time="${escapeHtml(item.data.time)}" style="margin-right:10px;">${escapeHtml(displayTime)}</label>`;
+            }
+            container.appendChild(div);
+        });
+    });
+}
 
 function showMessage(msg, isSuccess) {
     const msgEl = document.getElementById('message'); msgEl.textContent = msg; msgEl.className = isSuccess ? 'success' : 'error'; window.scrollTo(0, 0);
 }
 
 function submitBooking() {
+    if (isSubmitting) return; 
+
     const nickname = document.getElementById('nickname').value.trim();
     const accessCode = document.getElementById('access-code').value.trim();
     const selectedSlot = document.querySelector('input[name="slot"]:checked');
@@ -76,51 +122,86 @@ function submitBooking() {
     if (!nickname) return showMessage('请输入姓名！', false);
     if (!accessCode) return showMessage('请输入预约口令！', false);
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
+    if (nickname.includes(',')) return showMessage('姓名中不能包含逗号！', false);
 
+    const safePathName = nickname.replace(/[.#$\[\]\/]/g, '_');
     const slotId = selectedSlot.value; const slotTime = selectedSlot.getAttribute('data-time');
-    const match = slotTime.match(/^(\d{1,2}\/\d{1,2})/); const targetDate = match ? match[1] : '';
-    const btn = document.getElementById('submit-btn'); btn.disabled = true; btn.textContent = '提交中...';
+    const year = SystemRouter.activeYear;
 
-    db.ref('settings/deadline').once('value').then((dlSnap) => {
+    const parsedTimeObj = TimeParser.parseRawText(slotTime, year);
+    if (!parsedTimeObj) return showMessage('排班格式错误，请联系老师处理！', false);
+
+    const normalizedDateKey = parsedTimeObj.date.replace(/-/g, '_'); 
+    const btn = document.getElementById('submit-btn'); 
+    isSubmitting = true; btn.disabled = true; btn.textContent = '提交中...';
+
+    function resetBtn() { isSubmitting = false; btn.disabled = false; btn.textContent = '提交预约申请'; }
+
+    SystemRouter.getSettingsRef(year).child('deadline').once('value').then((dlSnap) => {
         const dlVal = dlSnap.val();
         if (dlVal && !isNaN(new Date(dlVal).getTime()) && new Date() > new Date(dlVal)) {
-            showMessage('抱歉，本轮预约已截止！', false); btn.disabled = false; return;
+            showMessage('抱歉，本轮预约已截止！', false); resetBtn(); return;
         }
 
-        db.ref('reservations').once('value').then((resSnap) => {
-            const currentRes = resSnap.val();
-            if (currentRes && targetDate) {
-                const hasBookedToday = Object.values(currentRes).some(r => 
-                    r.nickname === nickname && r.time && r.time.startsWith(targetDate) && r.status !== "Canceled"
-                );
-                if (hasBookedToday) { showMessage(`拦截：您在 ${targetDate} 这天已有申请，同日限约一节！`, false); btn.disabled = false; btn.textContent = '提交预约'; return; }
+        // 🌟 🌟 🌟 核心新增：白名单前置过滤鉴权大闸
+        db.ref(`years/${year}/studentWhitelist`).once('value').then((whitelistSnap) => {
+            const whitelist = whitelistSnap.val();
+            if (!whitelist) {
+                showMessage('抱歉，本学年暂未录入任何准入学生名单，请联系老师添加！', false);
+                resetBtn(); return;
+            }
+            
+            // 严格的全等匹配，大小名对账
+            const isNameAuthorized = Object.values(whitelist).some(approvedName => approvedName === nickname);
+            if (!isNameAuthorized) {
+                showMessage('❌ 预约拦截：您不在本期专业课辅导学生名单中，请联系老师添加标准大名！', false);
+                resetBtn(); return;
             }
 
-            db.ref('settings/accessCode').once('value').then((snapshot) => {
-                if (accessCode !== (snapshot.val() || "123456")) { showMessage('口令错误，无法提交！', false); btn.disabled = false; return; }
+            // 名单校验通过，继续后面的抢日历锁与霸占坑位资源
+            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).transaction((currentLock) => {
+                if (currentLock) return; 
+                return firebase.database.ServerValue.TIMESTAMP; 
+            }, (err, committed) => {
+                if (err || !committed) {
+                    showMessage(`您在 ${parsedTimeObj.formattedSlotText.split(' ')[0]} 当天已经预约过了，一天只能约一次！`, false);
+                    resetBtn(); return;
+                }
 
-                db.ref('slots/' + slotId).transaction((currentData) => {
-                    if (currentData === null) return currentData;
-                    if (!currentData.reserved && currentData.status !== "hidden") { currentData.reserved = true; return currentData; }
-                    return; 
-                }, (error, committed) => {
-                    if (error || !committed) { showMessage('手慢了，该时间已被抢占申请！', false); btn.disabled = false; }
-                    else {
-                        const randomCancelCode = (Math.random().toString(36).substring(2, 4) + Math.random().toString(36).substring(2, 5)).toUpperCase().slice(0, 5);
-                        db.ref('reservations').push({
-                            nickname: nickname,
-                            slotId: slotId,
-                            time: slotTime,
-                            cancelCode: randomCancelCode,
-                            status: "Pending", 
-                            timestamp: new Date().toISOString()
-                        }).then(() => {
-                            document.getElementById('nickname').value = '';
-                            document.getElementById('access-code').value = '';
-                            showMessage('约课申请已提交！请前往“我的历史约课”页面查看审批状态。', true);
-                            btn.disabled = false; btn.textContent = '提交预约申请';
-                        });
+                SystemRouter.getSettingsRef(year).child('accessCode').once('value').then((snapshot) => {
+                    if (accessCode !== (snapshot.val() || "123456")) {
+                        SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
+                        showMessage('预约口令错误！', false); resetBtn(); return;
                     }
+
+                    SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
+                        if (slot && !slot.reserved && slot.status !== "hidden") {
+                            slot.reserved = true; return slot;
+                        }
+                        return;
+                    }, (err, committed) => {
+                        if (!committed) {
+                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
+                            showMessage('手慢了，该时间段已被约满！', false); resetBtn(); return;
+                        }
+
+                        const resKey = SystemRouter.getReservationsRef(year).push().key; 
+                        const cancelSecureCode = Math.random().toString(36).substring(2, 7).toUpperCase(); 
+
+                        SystemRouter.getReservationsRef(year).child(resKey).set({
+                            nickname: nickname, slotId: slotId, time: parsedTimeObj.formattedSlotText, status: "Pending", cancelCode: cancelSecureCode,
+                            slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
+                        }).then(() => {
+                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
+                            SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                            document.getElementById('nickname').value = ''; resetBtn();
+                            showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
+                        }).catch(() => {
+                            SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
+                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
+                            showMessage('网络异常，请重试！', false); resetBtn();
+                        });
+                    });
                 });
             });
         });
@@ -139,77 +220,63 @@ function switchView(view) {
 
 function loadMyHistory() {
     const searchName = document.getElementById('history-search-name').value.trim();
+    const searchCode = document.getElementById('history-search-code').value.trim().toUpperCase();
     const container = document.getElementById('history-container');
-    if (!searchName) return alert('请输入姓名以查询！');
+    
+    if (!searchName) return alert('请输入真实姓名！');
+    if (!searchCode) return alert('请输入5位取消凭证码！');
 
-    container.innerHTML = '<p style="text-align:center; color:#999;">正在调取您的辅导记录单...</p>';
+    container.innerHTML = '<p style="text-align:center; color:#999;">正在查询...</p>';
 
-    db.ref('reservations').once('value').then((snapshot) => {
-        const reservations = snapshot.val();
-        if (!reservations) { container.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">暂无任何历史单据记录。</p>'; return; }
+    SystemRouter.getReservationsRef(SystemRouter.activeYear)
+        .orderByChild('nickname')
+        .equalTo(searchName)
+        .once('value').then((snapshot) => {
+            const reservations = snapshot.val();
+            if (!reservations) { container.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">未找到该姓名对应的记录。</p>'; return; }
 
-        let listHtml = "";
-        let count = 0;
-
-        Object.keys(reservations).sort((a,b) => new Date(reservations[b].timestamp) - new Date(reservations[a].timestamp)).forEach(key => {
-            const r = reservations[key];
-            if (r.nickname !== searchName) return;
-            count++;
-
-            let currentStatus = r.status || "Confirmed"; 
-            let statusText = "";
-            let badgeClass = "";
-            let actionButtonHtml = "";
-
-            switch(currentStatus) {
-                case "Pending":
-                    statusText = "待确认"; badgeClass = "status-pending";
-                    actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">申请取消</button>`;
-                    break;
-                case "Confirmed":
-                    statusText = "已确认"; badgeClass = "status-confirmed";
-                    actionButtonHtml = `<button class="action-btn" style="background:#909399; cursor:not-allowed;" disabled title="已确认的课程不支持取消预约，请联系处理。">已确认（不支持取消）</button>`;
-                    break;
-                case "PendingCancel":
-                    statusText = "待同意取消"; badgeClass = "status-pendingcancel";
-                    actionButtonHtml = `<span style="font-size:13px; color:#f56c6c; font-weight:bold;"> 等待处理取消申请</span>`;
-                    break;
-                case "Canceled":
-                    statusText = "已取消"; badgeClass = "status-canceled";
-                    actionButtonHtml = `<span style="font-size:13px; color:#909399;">无操作</span>`;
-                    break;
-                case "Completed":
-                    statusText = "已完成"; badgeClass = "status-completed";
-                    actionButtonHtml = `<span style="font-size:13px; color:#67c23a;">无操作</span>`;
-                    break;
+            const isAuthPassed = Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode);
+            if (!isAuthPassed) {
+                container.innerHTML = `<p style="text-align:center; color:#f56c6c; font-weight:bold; padding:20px;">姓名或凭证码错误！</p>`;
+                return;
             }
 
-            listHtml += `
-                <div class="history-card">
-                    <div class="card-row"><b>辅导时段：</b><span style="color:#409eff; font-weight:bold;">${r.time}</span></div>
-                    <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${statusText}</span></div>
-                    <div class="card-row" style="color:#999; font-size:12px;"><b>专属取消凭证：</b>${r.cancelCode || '无'}</div>
-                    <div class="card-row" style="color:#999; font-size:12px;"><b>提交时间：</b>${new Date(r.timestamp).toLocaleString()}</div>
-                    <div style="margin-top:10px; border-top:1px dashed #eee; padding-top:8px; text-align:right;">
-                        ${actionButtonHtml}
-                    </div>
-                </div>
-            `;
-        });
+            let listHtml = ""; let count = 0;
+            Object.keys(reservations).sort((a,b) => new Date(reservations[b].timestamp || 0) - new Date(reservations[a].timestamp || 0)).forEach(key => {
+                const r = reservations[key]; if (r.nickname !== searchName) return; count++;
+                let currentStatus = r.status || "Confirmed"; let statusText = ""; let badgeClass = ""; let actionButtonHtml = "";
 
-        if (count === 0) {
-            container.innerHTML = `<p style="text-align:center; color:#999; padding:20px;">未找到姓名为 [${searchName}] 的约课历史单据。</p>`;
-        } else {
-            container.innerHTML = listHtml;
-        }
-    });
+                switch(currentStatus) {
+                    case "Pending":
+                        statusText = "待确认"; badgeClass = "status-pending";
+                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">申请取消预约</button>`;
+                        break;
+                    case "Confirmed": statusText = "已确认"; badgeClass = "status-confirmed"; break;
+                    case "PendingCancel": statusText = "待同意取消"; badgeClass = "status-pendingcancel"; break;
+                    case "Canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
+                    case "Completed": statusText = "已完成"; badgeClass = "status-completed"; break;
+                }
+
+                listHtml += `
+                    <div class="history-card">
+                        <div class="card-row"><b>辅导时段：</b><span style="color:#409eff; font-weight:bold;">${escapeHtml(r.time)}</span></div>
+                        <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></div>
+                        <div class="card-row" style="color:#999; font-size:12px;"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
+                        <div class="card-row" style="color:#999; font-size:12px;"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
+                        <div style="margin-top:10px; border-top:1px dashed #eee; padding-top:8px; text-align:right;">
+                            ${actionButtonHtml}
+                        </div>
+                    </div>`;
+            });
+
+            if (count === 0) container.innerHTML = `<p style="text-align:center; color:#999; padding:20px;">未找到对应的记录。</p>`;
+            else container.innerHTML = listHtml;
+        });
 }
 
 function requestCancelBooking(resKey) {
     if (!confirm('确定要为这条待确认的课程发起取消申请吗？')) return;
-    
-    db.ref(`reservations/${resKey}`).update({ status: "PendingCancel" }).then(() => {
-        alert('取消申请提交成功！请提醒他同意。');
-        loadMyHistory(); 
+    SystemRouter.getReservationsRef(SystemRouter.activeYear).child(resKey).update({ status: "PendingCancel" }).then(() => {
+        alert('取消申请已提交，请等待老师同意。'); document.getElementById('history-container').innerHTML = ''; 
     });
 }
