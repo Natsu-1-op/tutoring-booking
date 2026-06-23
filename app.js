@@ -129,7 +129,7 @@ function submitBooking() {
     const year = SystemRouter.activeYear;
 
     const parsedTimeObj = TimeParser.parseRawText(slotTime, year);
-    if (!parsedTimeObj) return showMessage('排班格式错误，请联系老师处理！', false);
+    if (!parsedTimeObj) return showMessage('排班格式错误！', false);
 
     const normalizedDateKey = parsedTimeObj.date.replace(/-/g, '_'); 
     const btn = document.getElementById('submit-btn'); 
@@ -147,14 +147,14 @@ function submitBooking() {
         db.ref(`years/${year}/studentWhitelist`).once('value').then((whitelistSnap) => {
             const whitelist = whitelistSnap.val();
             if (!whitelist) {
-                showMessage('抱歉，本学年暂未录入任何准入学生名单，请联系老师添加！', false);
+                showMessage('本学年暂未录入任何学生名单', false);
                 resetBtn(); return;
             }
             
             // 严格的全等匹配，大小名对账
             const isNameAuthorized = Object.values(whitelist).some(approvedName => approvedName === nickname);
             if (!isNameAuthorized) {
-                showMessage('❌ 预约拦截：您不在本期专业课辅导学生名单中，请联系老师添加标准大名！', false);
+                showMessage('预约拦截：您不在本期专业课辅导学生名单中，请使用真名！', false);
                 resetBtn(); return;
             }
 
@@ -277,6 +277,6 @@ function loadMyHistory() {
 function requestCancelBooking(resKey) {
     if (!confirm('确定要为这条待确认的课程发起取消申请吗？')) return;
     SystemRouter.getReservationsRef(SystemRouter.activeYear).child(resKey).update({ status: "PendingCancel" }).then(() => {
-        alert('取消申请已提交，请等待老师同意。'); document.getElementById('history-container').innerHTML = ''; 
+        alert('取消申请已提交，请提醒他处理。'); document.getElementById('history-container').innerHTML = ''; 
     });
 }
