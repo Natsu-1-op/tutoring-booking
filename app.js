@@ -129,7 +129,7 @@ function submitBooking() {
     const year = SystemRouter.activeYear;
 
     const parsedTimeObj = TimeParser.parseRawText(slotTime, year);
-    if (!parsedTimeObj) return showMessage('排班格式错误！', false);
+    if (!parsedTimeObj) return showMessage('排班格式错误，请联系老师处理！', false);
 
     const normalizedDateKey = parsedTimeObj.date.replace(/-/g, '_'); 
     const btn = document.getElementById('submit-btn'); 
@@ -143,22 +143,20 @@ function submitBooking() {
             showMessage('抱歉，本轮预约已截止！', false); resetBtn(); return;
         }
 
-        // 🌟 🌟 🌟 核心新增：白名单前置过滤鉴权大闸
         db.ref(`years/${year}/studentWhitelist`).once('value').then((whitelistSnap) => {
             const whitelist = whitelistSnap.val();
             if (!whitelist) {
-                showMessage('本学年暂未录入任何学生名单', false);
-                resetBtn(); return;
-            }
-            
-            // 严格的全等匹配，大小名对账
-            const isNameAuthorized = Object.values(whitelist).some(approvedName => approvedName === nickname);
-            if (!isNameAuthorized) {
-                showMessage('预约拦截：您不在本期专业课辅导学生名单中，请使用真名！', false);
+                showMessage('抱歉，本学年暂未录入任何准入学生名单！', false);
                 resetBtn(); return;
             }
 
-            // 名单校验通过，继续后面的抢日历锁与霸占坑位资源
+            const isNameAuthorized = Object.values(whitelist).some(approvedName => approvedName === nickname);
+            if (!isNameAuthorized) {
+                showMessage('预约拦截：您不在本期专业课辅导学生名单中，请输入标准姓名！', false);
+                resetBtn(); return;
+            }
+
+
             SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).transaction((currentLock) => {
                 if (currentLock) return; 
                 return firebase.database.ServerValue.TIMESTAMP; 
@@ -277,6 +275,6 @@ function loadMyHistory() {
 function requestCancelBooking(resKey) {
     if (!confirm('确定要为这条待确认的课程发起取消申请吗？')) return;
     SystemRouter.getReservationsRef(SystemRouter.activeYear).child(resKey).update({ status: "PendingCancel" }).then(() => {
-        alert('取消申请已提交，请提醒他处理。'); document.getElementById('history-container').innerHTML = ''; 
+        alert('取消申请已提交。'); document.getElementById('history-container').innerHTML = ''; 
     });
 }
