@@ -35,12 +35,6 @@
         if (!isAdminAuthenticated) return; 
         if (initialized) return; initialized = true;
 
-        db.ref('slots').once('value').then((s) => {
-            db.ref('reservations').once('value').then((r) => {
-                if (s.exists() || r.exists()) document.getElementById('migration-wizard-panel').style.display = 'block';
-            });
-        });
-
         SystemRouter.yearsRoot().on('value', (snapshot) => {
             if (!isAdminAuthenticated) return;
             const data = snapshot.val(); const selectEl = document.getElementById('admin-year-select');
@@ -609,7 +603,6 @@
         }
     }
 
-    // 🌟 🌟 🌟 解决问题一：移除所有删除成功后的二次 [记录已删除] alert() 告知弹窗
     function deleteSingleReservation(resKey, slotId, nickname) {
         if (confirm(`确定要删除 ${nickname} 的预约记录吗？`)) {
             SystemRouter.getSlotsRef(viewingYear).child(slotId).once('value').then(slotSnap => {
@@ -636,7 +629,6 @@
 
                     db.ref().update(finalAbsoluteUpdates).then(() => {
                         SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                        // 🌟 已抹除告知性弹窗，让流水直接静默重绘刷新
                     });
                 });
             });
@@ -746,70 +738,6 @@
         }
     }
 
-    function executeDataMigration() {
-        const logEl = document.getElementById('migration-log'); 
-        logEl.style.color = "#333";
-        logEl.textContent = "检查完成，准备迁移...";
-        
-        db.ref('slots').once('value').then(sSnap => {
-            db.ref('reservations').once('value').then(rSnap => {
-                db.ref('settings').once('value').then(setSnap => {
-                    const oldSlots = sSnap.val() || {}; const oldRes = rSnap.val() || {}; const oldSet = setSnap.val() || {};
-                    
-                    const oldSlotsStr = JSON.stringify(oldSlots);
-                    const oldResStr = JSON.stringify(oldRes);
-
-                    const migrationPacks = {};
-                    migrationPacks['years/2026/slots'] = oldSlots;
-                    migrationPacks['years/2026/reservations'] = oldRes;
-                    migrationPacks['years/2026/settings'] = oldSet;
-                    migrationPacks['years/2026/metadata'] = { name: "2026年历史数据", archived: true, schemaVersion: 1 };
-                    migrationPacks['system'] = { activeYear: "2026", activeName: "专业课辅导" };
-
-                    db.ref().update(migrationPacks).then(() => {
-                        SystemRouter.yearsRoot().child('2026').once('value').then(verifySnap => {
-                            const v = verifySnap.val();
-                            const newSlotsStr = JSON.stringify(v.slots || {});
-                            const newResStr = JSON.stringify(v.reservations || {});
-                            
-                            if (newSlotsStr === oldSlotsStr && newResStr === oldResStr) {
-                                logEl.style.color = "#67c23a";
-                                logEl.textContent = `迁移成功，对账一致。可以安全清空扁平老节点了。`;
-                                document.getElementById('purge-old-btn').removeAttribute('disabled');
-                                document.getElementById('purge-old-btn').style.background = "#f56c6c";
-                                document.getElementById('purge-old-btn').textContent = "清除旧版扁平根节点数据";
-                            } else {
-                                logEl.style.color = "red"; 
-                                logEl.textContent = "警告：数据对账不匹配，迁移取消！";
-                            }
-                        }).catch(err => {
-                            logEl.style.color = "red"; logEl.textContent = `读取失败: ${err.message}`;
-                        });
-                    }).catch(err => {
-                        logEl.style.color = "red"; logEl.textContent = `写入被拦截: ${err.message}`;
-                    });
-                }).catch(err => { logEl.style.color = "red"; logEl.textContent = `读取失败: ${err.message}`; });
-            }).catch(err => { logEl.style.color = "red"; logEl.textContent = `读取失败: ${err.message}`; });
-        }).catch(err => { logEl.style.color = "red"; logEl.textContent = `读取失败: ${err.message}`; });
-    }
-
-    // 🌟 🌟 🌟 解决问题二：在点击粉碎清除老节点成功后，直接让整个 migration-wizard-panel 块从页面彻底隐藏销毁
-    window.purgeOldRootNodes = function() {
-        if (confirm("高危清理核密防线触发：\n历史数据已被安全平移到 years/2026 树状独立数据库中并对账完毕。\n当前操作将彻底粉碎物理根目录残留的旧版 /slots, /reservations, /settings 节点。\n该操作不可逆，确认清盘？")) {
-            const purgePacks = {};
-            purgePacks['slots'] = null;
-            purgePacks['reservations'] = null;
-            purgePacks['settings'] = null;
-            
-            db.ref().update(purgePacks).then(() => {
-                // 🌟 直接彻底移出 DOM 视图隐藏
-                document.getElementById('migration-wizard-panel').style.display = 'none';
-            }).catch(err => {
-                alert("清理失败，阻断报错: " + err.message);
-            });
-        }
-    };
-
     window.toggleLogCollapse = function() {
         const wrapper = document.getElementById('admin-logs-wrapper');
         const indicator = document.getElementById('log-arrow-indicator');
@@ -874,8 +802,6 @@
     document.getElementById('btn-export-tutor-json').onclick = exportTutorFeeJSON; 
     document.getElementById('btn-clear-year').onclick = clearCurrentYearData;
     document.getElementById('btn-destroy-year').onclick = destroyCurrentYearData; 
-    document.getElementById('mgr-start-btn').onclick = executeDataMigration;
-    document.getElementById('purge-old-btn').onclick = function() { window.purgeOldRootNodes(); }; 
     document.getElementById('btn-toggle-logs').onclick = toggleLogCollapse;
     document.getElementById('btn-clear-logs').onclick = clearOperationLogs;
     document.getElementById('btn-add-student').onclick = addNewStudentToWhitelist;
