@@ -10,7 +10,8 @@
         .control-panel { display: flex; gap: 10px; margin-bottom: 15px; align-items: center;}
         #admin-login {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: #f5f7fa; display: flex; justify-content: center; align-items: center; z-index: 9999;\n        }
+            background: #f5f7fa; display: flex; justify-content: center; align-items: center; z-index: 9999;
+        }
         #admin-content { display: none; }
         .date-group { margin-bottom: 15px; border: 1px solid #dcdfe6; border-radius: 8px; overflow: hidden; background: #fff; }
         .date-header { 
@@ -38,8 +39,6 @@
         .approval-btns button { width: auto; padding: 4px 10px; font-size: 12px; }
         .year-panel-box { background: #f4f6fa; border: 1px solid #dcdfe6; padding: 15px; border-radius: 8px; margin-bottom: 25px; }
         .year-select-dropdown { padding: 8px 12px; font-size: 14px; font-weight: bold; border-radius: 4px; border: 1px solid #b3d8ff; background: #ecf5ff; color: #409eff; cursor: pointer; }
-        .wizard-box { background: #fef0f0; border: 1px dashed #f56c6c; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; }
-        
         .editable-name { cursor: pointer; border-bottom: 1px dashed #409eff; padding: 2px 4px; border-radius: 4px; transition: background 0.2s; }
         .editable-name:hover { background: #e6f7ff; color: #409eff; }
         
@@ -63,16 +62,6 @@
     <div id="admin-content" class="container" style="max-width: 800px;">
         <div class="admin-header">
             <h2>专业课辅导 - 管理后台</h2>
-        </div>
-
-        <div class="wizard-box" id="migration-wizard-panel">
-            <h3 style="color: #f56c6c; margin-top:0;">检测到旧版数据</h3>
-            <p style="font-size:13px; color:#666; line-height:1.5;">系统已升级，请启动数据迁移以归档历史数据。</p>
-            <div style="display:flex; gap:10px; margin-top:10px;">
-                <button id="mgr-start-btn" style="background:#e6a23c; width:auto; font-size:13px; padding:8px 15px;">开始数据迁移</button>
-                <button id="purge-old-btn" style="background:#909399; width:auto; font-size:13px; padding:8px 15px;" disabled>准备迁移中</button>
-            </div>
-            <p id="migration-log" style="font-size:12px; color:#f56c6c; margin-top:8px; font-weight:bold;"></p>
         </div>
 
         <div class="year-panel-box">
@@ -101,7 +90,13 @@
             <div id="cancel-approval-list"></div>
         </div>
 
-        <h2>公告与提示</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0;">
+            <h2 style="margin: 0;">公告与提示</h2>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="window.open('exam_teacher.html', '_blank')" style="background: #8e44ad; width: auto; font-size: 13px; padding: 6px 12px;">教师出卷与评卷中心</button>
+                <button onclick="window.open('exam_student.html', '_blank')" style="background: #2980b9; width: auto; font-size: 13px; padding: 6px 12px;">学生模拟考试端</button>
+            </div>
+        </div>
         <div class="form-group">
             <textarea id="notice-input" rows="3" placeholder="输入公告内容，留空则不显示。"></textarea>
             <div style="margin-top: 10px; margin-bottom: 10px; background: #fafafa; padding: 10px; border-radius: 6px; border: 1px dashed #ccc;">
@@ -118,7 +113,7 @@
         <h2>准入学生名单 (白名单)</h2>
         <div class="template-panel" style="background: #f4f6fa; border-color: #dcdfe6;">
             <div class="control-panel">
-                <input type="text" id="new-student-name" placeholder="请输入准入同学的真实姓名（如：张三）" style="flex: 1;">
+                <input type="text" id="new-student-name" placeholder="请输入准入同学的真实姓名（如：丁真）" style="flex: 1;">
                 <button id="btn-add-student" style="width: auto; white-space: nowrap; background: #409eff;">允许该生约课</button>
             </div>
             <div id="admin-student-whitelist-container" style="margin-top: 10px; background: #fff; padding: 12px; border-radius: 8px; min-h-[50px]; border: 1px solid #e4e7ed;">
