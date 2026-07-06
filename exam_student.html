@@ -341,11 +341,26 @@
                 dot.id = `r-dot-id-${idx}`; dot.textContent = idx + 1;
                 dot.onclick = () => {
                     document.getElementById(`q-card-${currentQuestionIndex}`).classList.remove('active');
-                    currentQuestionIndex = idx; document.getElementById(`q-card-${currentQuestionIndex}`).classList.add('active');
+                    
+                    // 🌟 局部清空老节点 MathJax 的上下文残留
+                    if (window.MathJax) {
+                        const oldCard = document.getElementById(`q-card-${currentQuestionIndex}`);
+                        MathJax.typesetClear([oldCard]);
+                    }
+
+                    currentQuestionIndex = idx; 
+                    const nextActiveCard = document.getElementById(`q-card-${currentQuestionIndex}`);
+                    nextActiveCard.classList.add('active');
+                    
                     document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
                     document.querySelectorAll('.r-dot').forEach(d => d.classList.remove('active')); dot.classList.add('active');
                     
                     document.querySelector('.main-content').scrollTop = 0;
+                    
+                    // 🌟 为展现出的新卡片域进行增量局部排版
+                    if (window.MathJax) {
+                        MathJax.typesetPromise([nextActiveCard]);
+                    }
                     
                     document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
                     document.getElementById('btn-next').style.display = currentQuestionIndex === totalQCount - 1 ? 'none' : 'block';
@@ -407,9 +422,11 @@
                 }
                 card.innerHTML = html; wrapper.appendChild(card);
             });
-            if (window.MathJax) MathJax.typesetPromise([wrapper]);
-            startCountUpTimer();
+            // 🌟 首次入场时仅编译首张处于 Active 形态的题卡
+            const firstCard = document.getElementById('q-card-0');
+            if (window.MathJax) MathJax.typesetPromise([firstCard]);
             
+            startCountUpTimer();
             document.getElementById('btn-prev').style.visibility = 'hidden';
             updateBtnState(); 
         }
@@ -429,16 +446,32 @@
                 let target = currentQuestionIndex + dir;
                 if(target >= 0 && target < totalLen) { document.getElementById(`r-dot-id-${target}`).click(); } return;
             }
-            document.getElementById(`q-card-${currentQuestionIndex}`).classList.remove('active'); currentQuestionIndex += dir;
-            document.getElementById(`q-card-${currentQuestionIndex}`).classList.add('active'); document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
             
+            // 🌟 切题时先抹掉老节点的排版上下文，彻底防止排版冲突堆叠
+            if (window.MathJax) {
+                const oldCard = document.getElementById(`q-card-${currentQuestionIndex}`);
+                MathJax.typesetClear([oldCard]);
+            }
+
+            document.getElementById(`q-card-${currentQuestionIndex}`).classList.remove('active'); 
+            currentQuestionIndex += dir;
+            
+            const nextActiveCard = document.getElementById(`q-card-${currentQuestionIndex}`);
+            nextActiveCard.classList.add('active'); 
+            
+            document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
             document.querySelector('.main-content').scrollTop = 0;
+            
+            // 🌟 针对当前切过来的卡片域执行单点增量动态渲染
+            if (window.MathJax) {
+                MathJax.typesetPromise([nextActiveCard]);
+            }
+
             updateBtnState();
         };
 
         function updateBtnState() {
             const totalLen = activeReviewPackageData ? activeReviewPackageData.masterPaperSnapshot.questions.length : examPaperData.questions.length;
-            
             document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
             
             if (activeReviewPackageData) {
@@ -531,6 +564,12 @@
             document.getElementById('questions-wrapper').innerHTML = ""; document.getElementById('input-paper-json').value = "";
             document.getElementById('student-name').value = ""; document.getElementById('student-name-zone').style.display = 'none';
             document.getElementById('exam-app').style.display = 'none'; document.getElementById('auth-overlay').style.display = 'flex';
+        }
+
+        // 实体转义兜底
+        function escapeHtml(string) {
+            const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;', '/': '&#x2F;' };
+            return String(string).replace(/[&<>"'\/]/g, s => entityMap[s]);
         }
     </script>
 </body>
