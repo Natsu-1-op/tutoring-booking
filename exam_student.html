@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>在线考试与复盘系统 - 同学端</title>
+    <title>考试与复盘</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     
@@ -109,7 +109,7 @@
                 </div>
             </div>
             <div id="view-box-review" style="display: none;">
-                <div style="margin-bottom: 8px; text-align: left;"><label>请导入评卷打分包 (JSON)：</label></div>
+                <div style="margin-bottom: 8px; text-align: left;"><label>请导入评卷打分包：</label></div>
                 <input type="file" id="input-review-package" accept=".json">
             </div>
             <p id="auth-error" style="color: var(--danger); font-weight: bold; margin-top: 15px; font-size:14px;"></p>
@@ -397,8 +397,8 @@
                         <div class="option-item ${isNo?'selected':''}" onclick="selectOpt('${q.id}', '×', this)">错误 (×)</div>
                      </div>`;
                 } else {
-                    html += `<textarea class="text-answer-box" placeholder="请输入文字答案，如遇复杂公式可留空直接拍照" oninput="updateTextAnswer('${q.id}', this.value)">${currentRestoredAnswer.text || ''}</textarea>
-                        <div class="upload-section"><div class="upload-placeholder" onclick="activateCamera('${q.id}')">点击上传演算草稿纸</div>
+                    html += `<textarea class="text-answer-box" placeholder="请输入文字答案，公式无法打字可上传图片" oninput="updateTextAnswer('${q.id}', this.value)">${currentRestoredAnswer.text || ''}</textarea>
+                        <div class="upload-section"><div class="upload-placeholder" onclick="activateCamera('${q.id}')">点击上传</div>
                             <div class="preview-wrapper" id="prev-box-${q.id}" style="${currentRestoredAnswer.image ? 'display:inline-block':'display:none'}">
                                 <button class="btn-remove-img" onclick="removeImg('${q.id}')">×</button>
                                 <img class="click-zoom-img" id="img-view-${q.id}" src="${currentRestoredAnswer.image || ''}" onclick="openGlobalLightbox(this.src)">
@@ -455,7 +455,7 @@
         document.getElementById('hidden-camera-input').onchange = function(e) {
             const file = e.target.files[0]; if (!file) return;
             if (file.size > 12 * 1024 * 1024) {
-                alert("照片体积过大（超过12MB）。请调低拍照分辨率后重新上传。");
+                alert("照片过大（超过12MB）。请调低拍照分辨率后重新上传。");
                 e.target.value = ""; return;
             }
             const reader = new FileReader(); reader.onload = function(evt) {
@@ -486,7 +486,7 @@
             const timerEl = document.getElementById('exam-timer'); const endTimestamp = new Date(examPaperData.endTime).getTime();
             timerInterval = setInterval(() => {
                 if (new Date().getTime() >= endTimestamp) {
-                    clearInterval(timerInterval); timerEl.textContent = "考试时间到！系统已锁定"; timerEl.style.color = "red"; alert("考试时间已到，系统已自动交卷并生成答案包。");
+                    clearInterval(timerInterval); timerEl.textContent = "考试时间到！"; timerEl.style.color = "red"; alert("考试时间已到，已自动交卷并生成答案包。");
                     triggerManualSubmit(true);
                     return;
                 }
@@ -507,7 +507,7 @@
         }
 
         function triggerManualSubmit(isForceSystemTimeout = false) {
-            if (!isForceSystemTimeout && !confirm("确定要交卷吗？交卷后将生成答案包并清除本地缓存。")) return;
+            if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
             clearInterval(timerInterval);
 
             const payload = { paperTitle: examPaperData.paperTitle, studentName: studentNameVerified, examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`, elapsedDuration: `${Math.floor(totalElapsedSeconds / 60)}分${totalElapsedSeconds % 60}秒`, submitTime: new Date().toLocaleString(), answers: studentAnswers };
@@ -521,7 +521,7 @@
             setTimeout(() => { URL.revokeObjectURL(downloadUrl); }, 1200);
             try { localStorage.removeItem("exam_answer_backup"); } catch(e){}
 
-            alert("交卷成功！答案包已导出，系统已安全退出。");
+            alert("交卷成功！答案包已导出。");
             
             Object.keys(studentAnswers).forEach(k => { studentAnswers[k].image = ""; });
             rawEncryptedPayload = null; examPaperData = null; studentNameVerified = "";
