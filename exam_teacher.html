@@ -37,7 +37,9 @@
         .student-profile-badge { background: #fff7e6; border: 2px solid #ffa940; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; }
         .student-profile-badge h3 { margin: 0 0 8px 0; color: #d46b08; font-size: 16px; }
         
-        .grade-item-card { border: 1px solid #cbd5e1; padding: 20px; margin-bottom: 25px; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.02); overflow: hidden; }
+        .grade-item-card { border: 1px solid #cbd5e1; padding: 20px; margin-bottom: 25px; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.02); overflow: hidden; display: block; }
+        /* 🌟 精准追加：利用高阶优先级子类名，切断单题轮切时的 DOM 挤压与踩踏现象 */
+        .grade-item-card.hidden-card { display: none !important; }
         .grade-item-card.visible { display: block; }
         .grade-item-stem { font-size: 16px; line-height: 1.8; margin-bottom: 15px; word-break: break-word; white-space: pre-wrap; }
         .grade-item-stem mjx-container { display: inline-block !important; margin: 0 3px !important; vertical-align: middle; }
@@ -65,7 +67,6 @@
         .rank-gold-lbl { background: #fff1f0; color: #cf1322; font-weight: bold; border-radius: 4px; padding: 2px 6px; text-align: center; }
         .paper-filter-wrapper { background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 8px; padding: 15px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
 
-        /* 🌟 直连手敲拦截安全大屏 */
         #teacher-gate-login-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f4f6f9; z-index: 100010; display: flex; justify-content: center; align-items: center; }
         .gate-card { background: white; padding: 35px 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); text-align: center; width: 100%; max-width: 380px; }
         .gate-card input[type="password"] { width: 100%; padding: 11px; border: 1px solid #ccc; border-radius: 6px; margin: 15px 0; text-align: center; font-size: 16px; }
@@ -244,6 +245,7 @@
         };
         window.closeGlobalLightbox = function() { document.getElementById('global-lightbox').style.display = 'none'; };
 
+        // 实体明文对称解密管道机制
         function encryptEngine(obj, salt) {
             const rawStr = encodeURIComponent(JSON.stringify(obj)); let result = '';
             for (let i = 0; i < rawStr.length; i++) { result += String.fromCharCode(rawStr.charCodeAt(i) ^ salt.charCodeAt(i % salt.length)); }
@@ -428,11 +430,15 @@
 
                 const dot = document.createElement('div'); dot.className = `q-nav-dot dot-id-${index}`; dot.textContent = index + 1;
                 if((mq.type==='choice' || mq.type==='judge' || mq.type==='blank-auto')) { dot.className = isCorrect ? "q-nav-dot correct" : "q-nav-dot wrong"; }
+                
+                // 🌟 核心修正一：精准切断快捷大盘单点切换时的多题重叠踩踏问题
                 dot.onclick = () => {
                     if(currentGradingViewMode === 'single') {
-                        document.querySelectorAll('.grade-item-card').forEach(c => c.classList.remove('visible'));
-                        document.querySelector(`.g-card-idx-${index}`).classList.add('visible');
+                        document.querySelectorAll('.grade-item-card').forEach(c => c.classList.add('hidden-card'));
+                        const targetCard = document.querySelector(`.g-card-idx-${index}`);
+                        if(targetCard) targetCard.classList.remove('hidden-card');
                         currentGradingSingleIndex = index; highlightActiveDot(index);
+                        if(window.MathJax) MathJax.typesetPromise([targetCard]); // 动态局部编译公式
                     } else { document.getElementById(`grade-card-id-${mq.id}`).scrollIntoView({ behavior: 'smooth', block: 'center' }); }
                 }; gridDots.appendChild(dot);
             });
@@ -475,20 +481,40 @@
             if(targetDot) { targetDot.className = (finalV >= maxScoreBoundary) ? "q-nav-dot correct active" : "q-nav-dot wrong active"; }
         };
 
+        // 🌟 核心修正二：打通整卷流与单题流切换时的彻底物理隔离隐藏大闸
         window.switchViewMode = function(mode) {
-            currentGradingViewMode = mode; document.getElementById('mode-btn-full').classList.toggle('active', mode === 'full'); document.getElementById('mode-btn-single').classList.toggle('active', mode === 'single');
+            currentGradingViewMode = mode; 
+            document.getElementById('mode-btn-full').classList.toggle('active', mode === 'full'); 
+            document.getElementById('mode-btn-single').classList.toggle('active', mode === 'single');
             document.getElementById('single-navigator-zone').style.display = (mode === 'single') ? 'block' : 'none';
-            if (mode === 'full') { document.querySelectorAll('.grade-item-card').forEach(c => c.classList.add('visible')); } 
-            else {
-                document.querySelectorAll('.grade-item-card').forEach(c => c.classList.remove('visible'));
-                const cur = document.querySelector(`.g-card-idx-${currentGradingSingleIndex}`); if(cur) cur.classList.add('visible');
+            
+            if (mode === 'full') { 
+                document.querySelectorAll('.grade-item-card').forEach(c => c.classList.remove('hidden-card')); 
+            } else {
+                document.querySelectorAll('.grade-item-card').forEach(c => c.classList.add('hidden-card'));
+                const cur = document.querySelector(`.g-card-idx-${currentGradingSingleIndex}`); 
+                if(cur) {
+                    cur.classList.remove('hidden-card');
+                    if(window.MathJax) MathJax.typesetPromise([cur]);
+                }
                 highlightActiveDot(currentGradingSingleIndex);
             }
         };
 
+        // 🌟 核心修正三：重编单题上下步进轮切管道与局部公式重绘
         window.navigateSingleQ = function(step) {
-            let target = currentGradingSingleIndex + step; if(target < 0 || target >= masterPaper.questions.length) return;
-            currentGradingSingleIndex = target; switchViewMode('single');
+            let target = currentGradingSingleIndex + step; 
+            if(target < 0 || target >= masterPaper.questions.length) return;
+            
+            document.querySelectorAll('.grade-item-card').forEach(c => c.classList.add('hidden-card'));
+            currentGradingSingleIndex = target;
+            
+            const curCard = document.querySelector(`.g-card-idx-${currentGradingSingleIndex}`);
+            if(curCard) {
+                curCard.classList.remove('hidden-card');
+                if(window.MathJax) MathJax.typesetPromise([curCard]); // 加速并重绘该局部节点的物理公式
+            }
+            highlightActiveDot(currentGradingSingleIndex);
         };
 
         function highlightActiveDot(index) {
