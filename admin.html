@@ -17,150 +17,105 @@
         .date-header { 
             background: #f5f7fa; padding: 12px 20px; font-weight: bold; color: #409eff; 
             cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-            border-bottom: 1px solid #e4e7ed; user-select: none;
+            border-bottom: 1px solid #eee;
         }
-        .date-header:hover { background: #edf5ff; }
-        .date-body { padding: 10px 15px; display: block; }
+        .date-header:hover { background: #ebf5ff; }
+        .date-body { padding: 15px 20px; }
         .date-body.collapsed { display: none; }
-        .res-group { border-color: #ffd591; }
-        .res-header { background: #fff7e6; color: #d46b08; border-bottom-color: #ffd591; }
-        .template-panel { background: #f0f9eb; border: 1px solid #c2e7b0; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .template-panel h4 { margin: 0 0 10px 0; color: #67c23a; }
-        .template-slots-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0 15px 0; }
-        .template-slots-grid input { padding: 6px 10px; border: 1px solid #c2e7b0; border-radius: 4px; text-align: center; font-size: 13px; }
-        textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: inherit;}
-        .edit-input { padding: 6px 10px; border: 1px solid #409eff; border-radius: 4px; font-size: 14px; width: 60%; box-sizing: border-box; }
-        .btn-group { display: flex; gap: 5px; }
-        table { width: 100%; border-collapse: collapse; }
-        .approval-box { background: #fffdf6; border: 1px dashed #e6a23c; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .approval-box h3 { margin: 0 0 12px 0; font-size: 16px; color: #e6a23c; }
-        .approval-item { display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border: 1px solid #efdfca; border-radius: 6px; margin-bottom: 8px; font-size: 14px;}
-        .approval-btns { display: flex; gap: 6px; }
-        .approval-btns button { width: auto; padding: 4px 10px; font-size: 12px; }
-        .year-panel-box { background: #f4f6fa; border: 1px solid #dcdfe6; padding: 15px; border-radius: 8px; margin-bottom: 25px; }
-        .year-select-dropdown { padding: 8px 12px; font-size: 14px; font-weight: bold; border-radius: 4px; border: 1px solid #b3d8ff; background: #ecf5ff; color: #409eff; cursor: pointer; }
-        .editable-name { cursor: pointer; border-bottom: 1px dashed #409eff; padding: 2px 4px; border-radius: 4px; transition: background 0.2s; }
-        .editable-name:hover { background: #e6f7ff; color: #409eff; }
-        
-        .student-tag { display: inline-flex; align-items: center; background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; padding: 4px 10px; border-radius: 4px; margin-right: 8px; margin-bottom: 8px; font-size: 13px; }
-        .student-tag-del { margin-left: 6px; color: #ff4d4f; cursor: pointer; font-weight: bold; }
-        .student-tag-del:hover { color: #f5222d; }
+        .arrow-indicator { font-size: 14px; color: #909399; }
+        .reservation-item { padding: 15px; border: 1px dashed #e0e0e0; border-radius: 6px; margin-bottom: 10px; background: #fafafa;}
+        .reservation-item:last-child { margin-bottom: 0; }
+        .reservation-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; font-size: 14px; margin-bottom: 10px;}
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #fff;}
+        .status-pending { background: #e6a23c; }
+        .status-confirmed { background: #67c23a; }
+        .status-cancelled { background: #909399; }
+        .status-completed { background: #409eff; }
+        .history-card { border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; margin-bottom: 8px; background: #fff; font-size: 13px;}
+        .history-card:last-child { margin-bottom: 0; }
+        .card-row { margin-bottom: 4px; }
+        .card-row:last-child { margin-bottom: 0; }
+        textarea { width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: inherit;}
+        select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; background: #fff;}
+        input[type="text"] { padding: 8px 12px; }
+        .whitelist-item { display: inline-flex; align-items: center; gap: 6px; background: #f4f4f5; color: #606266; padding: 4px 10px; border-radius: 4px; font-size: 13px; margin: 0 6px 6px 0; border: 1px solid #e4e7ed;}
+        .whitelist-item span.remove-btn { color: #f56c6c; cursor: pointer; font-weight: bold; font-size: 14px;}
+        .whitelist-item span.remove-btn:hover { color: #b71c1c; }
     </style>
 </head>
 <body>
+
     <div id="admin-login">
         <div class="container" style="max-width: 400px; text-align: center;">
-            <h1>系统后台认证</h1>
-            <div class="form-group" style="margin-top: 20px;">
-                <input type="password" id="admin-password" placeholder="请输入管理员密码" style="width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box;">
-            </div>
-            <button id="admin-login-submit">登录</button>
-            <p id="login-error" style="color: red; margin-top: 10px; font-weight: bold;"></p>
+            <h2>管理员身份验证</h2>
+            <input type="password" id="admin-password" placeholder="请输入管理员密码" style="text-align: center; margin: 15px 0;">
+            <button id="btn-login" onclick="verifyAdmin()">登录系统</button>
+            <p id="login-error" class="error" style="margin-top: 10px; font-weight: bold;"></p>
         </div>
     </div>
 
-    <div id="admin-content" class="container" style="max-width: 800px;">
+    <div class="container" id="admin-content">
         <div class="admin-header">
-            <h2>专业课辅导 - 管理后台</h2>
+            <h2>预约管理后台</h2>
+            <a href="exam_teacher.html" style="background: #409eff; color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: bold;">进入命题与阅卷系统 →</a>
         </div>
 
-        <div class="year-panel-box">
-            <h4 style="margin:0 0 10px 0; color:#333;">年份选择与管理</h4>
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <label style="font-weight:normal; font-size:14px;">当前查看：</label>
-                    <select id="admin-year-select" class="year-select-dropdown"></select>
-                </div>
-                <div style="display:flex; gap:8px;">
-                    <button id="btn-set-active" style="background:#409eff; width:auto; padding:6px 12px; font-size:13px;">设为当前开放学年</button>
-                    <button id="btn-create-year" style="background:#67c23a; width:auto; padding:6px 12px; font-size:13px;">新增学年</button>
-                    <button id="btn-destroy-year" style="background:#f56c6c; color:white; border:none; border-radius:4px; cursor:pointer; width:auto; font-size:13px; padding:6px 12px;">删除当前年度</button>
-                </div>
-            </div>
-            <p id="year-status-bar" style="margin:8px 0 0 0; font-size:13px; color:#666; background:#fff; padding:6px; border-radius:4px; border:1px solid #e4e7ed;"></p>
-        </div>
-
-        <div class="approval-box" id="pending-approval-panel" style="display: none;">
-            <h3>待确认的预约</h3>
-            <div id="pending-approval-list"></div>
-        </div>
-
-        <div class="approval-box" id="cancel-approval-panel" style="display: none; border-color: #f56c6c;">
-            <h3>待处理的取消申请</h3>
-            <div id="cancel-approval-list"></div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0;">
-            <h2 style="margin: 0;">公告与提示</h2>
-            <div style="display: flex; gap: 10px;">
-                <button onclick="window.open('exam_teacher.html', '_blank')" style="background: #8e44ad; width: auto; font-size: 13px; padding: 6px 12px;">教师出卷与评卷中心</button>
-                <button onclick="window.open('exam_student.html', '_blank')" style="background: #2980b9; width: auto; font-size: 13px; padding: 6px 12px;">学生模拟考试端</button>
+        <div class="form-group" style="background: #fdfdfe; padding: 15px; border: 1px dashed #cbd5e1; border-radius: 8px; margin-bottom: 20px;">
+            <label style="color:#334155;">学年维度分流切换：</label>
+            <div style="display:flex; gap:10px; margin-top:5px; align-items:center;">
+                <select id="admin-year-select" style="font-weight: bold; color: #1e293b;"></select>
+                <button id="btn-set-active" style="width:auto; padding:8px 15px; font-size:14px; background:#67c23a;">设为当前激活学年</button>
+                <button id="btn-create-year" style="width:auto; padding:8px 15px; font-size:14px; background:#409eff;">新建新学年数据节点</button>
             </div>
         </div>
+
         <div class="form-group">
-            <textarea id="notice-input" rows="3" placeholder="输入公告内容，留空则不显示。"></textarea>
-            <div style="margin-top: 10px; margin-bottom: 10px; background: #fafafa; padding: 10px; border-radius: 6px; border: 1px dashed #ccc;">
-                <label style="font-size: 14px; color: #666; font-weight: normal; margin-bottom: 5px;">附加图片：</label>
-                <div id="notice-img-preview-container" style="display: none; margin-bottom: 10px;">
-                     <img id="notice-img-preview" src="" style="max-width: 250px; display: block; margin-bottom: 10px; border-radius: 6px; border: 1px solid #eee;">
-                     <button id="btn-del-notice-img" class="danger" style="width: auto; font-size: 12px; padding: 4px 8px;">移除该图片</button>
-                </div>
-                <input type="file" id="notice-image-input" accept="image/*" style="font-size: 13px;">
+            <label>通知公告板：</label>
+            <textarea id="notice-input" placeholder="输入公告文字内容..."></textarea>
+            <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="notice-img-input" placeholder="可贴入合法海报图片 URL 地址 (留空则不展示)">
+                <button id="btn-set-notice" style="width:auto; padding:8px 15px; font-size:14px;">发布并同步公告</button>
             </div>
-            <button id="btn-set-notice" style="background:#e6a23c; margin-top: 8px; width: auto;">保存公告</button>
         </div>
 
-        <h2>准入学生名单 (白名单)</h2>
-        <div class="template-panel" style="background: #f4f6fa; border-color: #dcdfe6;">
+        <div class="form-group" style="background: #fafafa; padding:15px; border:1px solid #e2e8f0; border-radius:8px;">
+            <label>准入鉴权白名单：</label>
+            <div id="whitelist-display" style="margin-bottom:10px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; min-height:42px;">加载中...</div>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="new-student-name" placeholder="输入同学真实姓名 (如：丁真)" style="flex:1;">
+                <button id="btn-add-student" style="width:auto; padding:0 20px; font-size:14px; background:#67c23a;">添加至白名单</button>
+            </div>
+        </div>
+
+        <div class="form-group" style="border-top:1px solid #eee; padding-top:15px;">
+            <label>快捷排班工具：</label>
             <div class="control-panel">
-                <input type="text" id="new-student-name" placeholder="请输入准入同学的真实姓名（如：丁真）" style="flex: 1;">
-                <button id="btn-add-student" style="width: auto; white-space: nowrap; background: #409eff;">允许该生约课</button>
+                <input type="text" id="batch-date-text" placeholder="输入日期文本，例如: 7/7" style="width: 180px;">
+                <button id="btn-gen-tpl" style="background: #e6a23c;">一键生成该日标准班次</button>
             </div>
-            <div id="admin-student-whitelist-container" style="margin-top: 10px; background: #fff; padding: 12px; border-radius: 8px; min-h-[50px]; border: 1px solid #e4e7ed;">
-                正在调取名单...
+            <div class="control-panel" style="margin-bottom: 25px;">
+                <input type="text" id="slot-time-text" placeholder="手动添加特定时段，例如: 7/7 14:00-15:00">
+                <button id="btn-add-slot">+ 追加该排班</button>
             </div>
         </div>
 
-        <h2>排班管理</h2>
-        <div class="template-panel">
-            <h4>批量生成排班</h4>
-            <div class="control-panel" style="margin-bottom: 5px;">
-                <label style="font-size: 14px; color: #4f8234;">选择日期：</label>
-                <input type="date" id="template-date" style="width: auto; padding: 8px;">
+        <div class="form-group" style="display: flex; gap: 15px; align-items: center; border-top:1px solid #eee; padding-top:15px;">
+            <div>
+                <label>预约截止死线：</label>
+                <input type="datetime-local" id="deadline-input" style="width: 220px;">
+                <button id="btn-set-deadline" style="width:auto; padding:8px 15px; font-size:14px; margin-left:8px;">设定死线</button>
             </div>
-            <div class="template-slots-grid">
-                <input type="text" id="tpl-time-1" value="0800-1015">
-                <input type="text" id="tpl-time-2" value="1030-1245">
-                <input type="text" id="tpl-time-3" value="1330-1545">
-                <input type="text" id="tpl-time-4" value="1600-1815">
-                <input type="text" id="tpl-time-5" value="1900-2115">
+            <div style="border-left: 1px solid #ddd; padding-left:15px;">
+                <label>约课特征暗号：</label>
+                <input type="text" id="access-code-input" placeholder="留空则不设限制" style="width: 160px; text-transform: uppercase;">
+                <button id="btn-set-code" style="width:auto; padding:8px 15px; font-size:14px; margin-left:8px;">变更暗号</button>
             </div>
-            <button id="btn-gen-tpl" style="background:#67c23a; width: 100%;">确认生成</button>
         </div>
 
-        <div class="control-panel">
-            <input type="text" id="new-slot-time" placeholder="输入排班（例：6/19 1400-1500）">
-            <button id="btn-add-slot" style="width: auto; white-space: nowrap;">手动新增</button>
-        </div>
-        
-        <div id="admin-slots-container">读取中...</div>
-
-        <h2>全局设置</h2>
-        <div class="control-panel">
-            <input type="datetime-local" id="deadline-input">
-            <button id="btn-set-deadline" style="width: auto;">保存截止时间</button>
-        </div>
-
-        <div class="control-panel">
-            <input type="text" id="code-input" placeholder="输入新的预约口令">
-            <button id="btn-set-code" style="width: auto;">保存口令</button>
-        </div>
-
-        <h2>历史数据与记录</h2>
-        <div class="control-panel" style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button id="btn-export-csv" style="background:#52c41a; width:auto; font-size:14px; padding:10px 15px;">导出当年数据 (CSV)</button>
-            <button id="btn-export-tutor-json" style="background:#2563eb; color:white; width:auto; font-size:14px; padding:10px 15px; border:none; border-radius:6px; cursor:pointer;">导出课时费对账包 (JSON)</button>
-            <button id="btn-clear-year" class="danger" style="width:auto; font-size:14px; padding:10px 15px;">清空本年度数据</button>
+        <div class="control-panel" style="margin-top: 25px; margin-bottom: 20px; border-top: 1px solid #eee; padding-top: 15px;">
+            <button id="btn-export-csv" style="background: #67c23a; width:auto; padding:10px 15px;">导出预约名册 (CSV)</button>
+            <button id="btn-export-tutor-json" style="background: #409eff; width:auto; padding:10px 15px;">导出导师账单 (JSON)</button>
+            <button id="btn-clear-year" class="danger" style="width:auto; padding:10px 15px;">清空本年度数据</button>
         </div> 
         
         <div id="admin-reservations-container">读取中...</div>
@@ -168,7 +123,7 @@
         <div class="date-group" style="margin-top: 30px; border-color: #909399;">
             <div class="date-header" id="btn-toggle-logs" style="background: #f4f4f5; color: #606266; border-bottom-color: #dcdfe6; cursor: pointer;">
                 <span>系统操作日志 (Log)</span>
-                <span class="arrow-indicator" id="log-arrow-indicator">展开 +</span>
+                <span class=\"arrow-indicator\" id=\"log-arrow-indicator\">展开 +</span>
             </div>
             <div class="date-body collapsed" id="admin-logs-wrapper" style="background: #fff;">
                 <div style="text-align:right; margin-bottom:10px;">
@@ -182,9 +137,6 @@
         
     </div>
 
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-    
     <script src="config/firebase-env.js"></script>
     <script src="utils/time-parser.js"></script>
     <script src="admin.js"></script>
