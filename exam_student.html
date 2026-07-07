@@ -2,16 +2,24 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=no, shrink-to-fit=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>考试与复盘</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     
     <script>
         window.MathJax = {
-            tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$']] },
+            tex: { 
+                inlineMath: [['$', '$'], ['\\(', '\\)']], 
+                displayMath: [['$$', '$$']] 
+            },
             options: { renderActions: { addMenu: [] } },
-            startup: { ready: () => { MathJax.startup.defaultReady(); MathJax.startup.document.outputJax.options.displayAlign = 'left'; } }
+            startup: {
+                ready: () => {
+                    MathJax.startup.defaultReady();
+                    MathJax.startup.document.outputJax.options.displayAlign = 'left';
+                }
+            }
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
@@ -21,65 +29,62 @@
     
     <style>
         :root { --primary: #409eff; --success: #67c23a; --danger: #f56c6c; --bg: #f5f7fa; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); margin: 0; padding: 0; }
         
-        html, body { width: 100%; height: 100%; overflow: hidden; background-color: var(--bg); font-family: -apple-system, system-ui, sans-serif; }
-        
-        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f5f7fa; z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
         .auth-card { width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 30px; border-radius: 12px; background: #fff; }
-        .auth-card input { width: 100%; padding: 12px; margin: 12px 0; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; text-align: center; box-sizing: border-box; }
-        .auth-card button { background: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 16px; width: 100%; margin-top: 10px; font-weight: bold; }
+        .auth-card input { width: 100%; padding: 12px; margin: 12px 0; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; text-align: center; }
         
         .mode-switch-tabs { display: flex; background: #e4e7ed; padding: 4px; border-radius: 8px; margin-bottom: 20px; width: 100%; }
-        .m-btn { flex: 1; padding: 10px; border: none; background: transparent; font-weight: bold; font-size: 14px; cursor: pointer; border-radius: 6px; color: #4a5568; }
+        .m-btn { flex: 1; padding: 10px; border: none; background: transparent; font-weight: bold; font-size: 14px; cursor: pointer; border-radius: 6px; }
         .m-btn.active { background: #fff; color: var(--primary); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
 
-        .exam-app-wrapper { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
-        .exam-app-container { display: none; width: 100%; max-width: 600px; height: 100%; flex-direction: column; background: #fff; box-shadow: 0 0 20px rgba(0,0,0,0.1); position: relative; }
+        .app-container { display: none; max-width: 600px; margin: 0 auto; min-height: 100vh; flex-direction: column; background: #fff; position: relative; }
+        .header-bar { background: #fff; border-bottom: 1px solid #e0e0e0; padding: 15px; position: sticky; top: 0; z-index: 10; }
         
-        .exam-app-container .header-bar { background: #fff; border-bottom: 1px solid #e0e0e0; padding: 15px; flex-shrink: 0; }
-        .exam-app-container .paper-meta-info { background: #f0f7ff; border: 1px solid #b3d8ff; border-radius: 8px; padding: 12px; margin-bottom: 12px; font-size: 14px; color: #004085; position: relative; text-align: left; }
-        .exam-app-container .save-status-badge { position: absolute; top: 12px; right: 12px; background: #e6ffed; border: 1px solid #b7eb8f; color: #28a745; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; opacity: 0; transition: opacity 0.3s ease; }
-        .exam-app-container .save-status-badge.show { opacity: 1; }
-        .exam-app-container .timer-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-top: 5px; }
-        .exam-app-container .timer-box { font-size: 16px; color: #e6a23c; }
+        .paper-meta-info { background: #f0f7ff; border: 1px solid #b3d8ff; border-radius: 8px; padding: 12px; margin-bottom: 15px; font-size: 14px; color: #004085; position: relative; }
+        .paper-meta-info div { margin-bottom: 4px; }
         
-        .exam-app-container .main-content { flex: 1; padding: 20px 15px; overflow-y: auto; background: #fff; position: relative; -webkit-overflow-scrolling: touch; }
-        .exam-app-container .question-card { display: none; text-align: left; width: 100%; }
-        .exam-app-container .question-card.active { display: block !important; }
-        .exam-app-container .question-meta { font-size: 13px; color: var(--primary); font-weight: bold; margin-bottom: 8px; }
-        .exam-app-container .question-stem { font-size: 16px; line-height: 1.8; margin-bottom: 20px; word-break: break-word; white-space: pre-wrap; }
-        .exam-app-container .question-stem mjx-container { display: inline-block !important; margin: 0 3px !important; vertical-align: middle; }
+        .save-status-badge { position: absolute; top: 12px; right: 12px; background: #e6ffed; border: 1px solid #b7eb8f; color: #28a745; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; opacity: 0; transition: opacity 0.3s ease; }
+        .save-status-badge.show { opacity: 1; }
+
+        .timer-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-top: 5px; }
+        .timer-box { font-size: 16px; color: #e6a23c; }
+        
+        .main-content { flex: 1; padding: 20px 15px; overflow-y: auto; }
+        .question-card { display: none; }
+        .question-card.active { display: block; }
+        .question-meta { font-size: 13px; color: var(--primary); font-weight: bold; margin-bottom: 8px; }
+        .question-stem { font-size: 16px; line-height: 1.8; margin-bottom: 20px; word-break: break-word; white-space: pre-wrap; }
+        .question-stem mjx-container { display: inline-block !important; margin: 0 3px !important; vertical-align: middle; }
         
         .click-zoom-img { max-width: 100%; max-height: 160px; display: block; margin: 10px auto; border-radius: 6px; border: 1px solid #eaebec; cursor: zoom-in; }
-        .lightbox-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 100000; display: none; justify-content: center; align-items: center; cursor: zoom-out; }
+        .lightbox-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 10000; display: none; justify-content: center; align-items: center; cursor: zoom-out; }
         .lightbox-overlay img { max-width: 98%; max-height: 95%; object-fit: contain; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); }
 
-        .exam-app-container .options-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; }
-        .exam-app-container .option-item { border: 1px solid #dcdfe6; padding: 14px; border-radius: 8px; cursor: pointer; font-size: 15px; background: #fff; }
-        .exam-app-container .option-item.selected { background: #ecf5ff; border-color: var(--primary); color: var(--primary); font-weight: bold; }
-        .exam-app-container .text-answer-box { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; margin-bottom: 12px; resize: vertical; font-family: inherit; background: #fff; }
-        .exam-app-container .upload-section { margin-top: 10px; text-align: center; }
-        .exam-app-container .upload-placeholder { border: 2px dashed #c0c4cc; padding: 18px 15px; border-radius: 10px; cursor: pointer; color: #909399; font-size: 14px; background: #fafafa; }
-        .exam-app-container .preview-wrapper { position: relative; margin-top: 15px; display: inline-block; width: 100%; }
-        .exam-app-container .btn-remove-img { position: absolute; top: -10px; right: -10px; background: var(--danger); color: white; width: 24px; height: 24px; border-radius: 50%; border: none; font-weight: bold; cursor: pointer; z-index: 5; padding: 0; display: flex; align-items: center; justify-content: center; }
+        .options-list { display: flex; flex-direction: column; gap: 12px; }
+        .option-item { border: 1px solid #dcdfe6; padding: 14px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+        .option-item.selected { background: #ecf5ff; border-color: var(--primary); color: var(--primary); font-weight: bold; }
+        .text-answer-box { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; margin-bottom: 12px; resize: vertical; font-family: inherit; }
+        .upload-section { margin-top: 10px; text-align: center; }
+        .upload-placeholder { border: 2px dashed #c0c4cc; padding: 18px 15px; border-radius: 10px; cursor: pointer; color: #909399; font-size: 14px; background: #fafafa; }
+        .preview-wrapper { position: relative; margin-top: 15px; display: inline-block; width: 100%; }
+        .btn-remove-img { position: absolute; top: -10px; right: -10px; background: var(--danger); color: white; width: 24px; height: 24px; border-radius: 50%; border: none; font-weight: bold; cursor: pointer; z-index: 5; }
         
-        .exam-app-container .nav-footer { border-top: 1px solid #e0e0e0; padding: 15px; display: flex; gap: 10px; background: #fff; flex-shrink: 0; }
-        .exam-app-container .nav-footer button { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: bold; border: none; cursor: pointer; height: auto; margin: 0; }
-        .exam-app-container .nav-footer .btn-sub { background: #f4f4f5; color: #606266; border: 1px solid #dcdfe6 !important; }
-        .exam-app-container .nav-footer .btn-submit { background: var(--success); color: white; }
+        .nav-footer { border-top: 1px solid #e0e0e0; padding: 15px; display: flex; gap: 10px; background: #fff; position: sticky; bottom: 0; z-index: 10; }
+        .nav-footer button { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: bold; border: none; cursor: pointer; }
+        .btn-sub { background: #f4f4f5; color: #606266; border: 1px solid #dcdfe6 !important; }
+        .btn-submit { background: var(--success); color: white; }
         
-        #cropper-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100005; display: none; flex-direction: column; }
-        #cropper-modal .cropper-container-wrapper { flex: 1; position: relative; overflow: hidden; }
-        #cropper-modal .cropper-toolbar { background: rgba(0,0,0,0.85); padding: 15px; display: flex; justify-content: space-between; gap: 10px; }
-        #cropper-modal .cropper-toolbar button { flex: 1; padding: 12px; font-size: 14px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; width: auto; height: auto; color: #333; }
+        #cropper-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1000; display: none; flex-direction: column; }
+        .cropper-container-wrapper { flex: 1; position: relative; overflow: hidden; }
+        .cropper-toolbar { background: rgba(0,0,0,0.85); padding: 15px; display: flex; justify-content: space-between; gap: 10px; }
+        .cropper-toolbar button { flex: 1; padding: 12px; font-size: 14px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
         
-        .exam-app-container .review-score-banner { background: #f0f9eb; border: 1px dashed #67c23a; padding: 10px; border-radius: 6px; color: #2b6914; font-weight: bold; font-size: 14px; margin-top: 8px; display: flex; justify-content: space-between; }
-        
-        .review-float-panel-btn { position: fixed; bottom: 80px; left: calc(50% + 230px); transform: translateX(-100%); background: #333; color: white; width: 50px; height: 50px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10005; cursor: pointer; text-align: center; line-height: 1.2; }
-        @media screen and (max-width: 600px) { .review-float-panel-btn { left: auto; right: 20px; transform: none; } }
-        
-        #review-nav-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100010; display: none; justify-content: center; align-items: center; padding: 20px; }
+        .review-score-banner { background: #f0f9eb; border: 1px dashed #67c23a; padding: 10px; border-radius: 6px; color: #2b6914; font-weight: bold; font-size: 14px; margin-top: 8px; display: flex; justify-content: space-between; }
+        .review-float-panel-btn { position: fixed; bottom: 80px; right: 20px; background: #333; color: white; width: 50px; height: 50px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 99; cursor: pointer; text-align: center; line-height: 1.2; }
+        #review-nav-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: none; justify-content: center; align-items: center; padding: 20px; }
         .review-nav-card { background: white; width: 100%; max-width: 360px; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); text-align: center; }
         .review-grid-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 15px; }
         .review-grid-grid .r-dot { padding: 10px 0; text-align: center; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; border: 1px solid transparent; background: #e4e7ed; }
@@ -93,44 +98,42 @@
     <div id="auth-overlay">
         <div class="auth-card">
             <div class="mode-switch-tabs">
-                <button class="m-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">✍️ 在线考场模式</button>
-                <button class="m-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">🔍 批改复盘模式</button>
+                <button class="m-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">考试模式</button>
+                <button class="m-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">复查模式</button>
             </div>
             <div id="view-box-exam">
                 <input type="file" id="input-paper-json" accept=".json">
                 <div id="student-name-zone" style="display: none; margin-top: 10px;">
-                    <input type="text" id="student-name" placeholder="请输入您的真实姓名">
-                    <button onclick="verifyAndStartExam()">进入考试</button>
+                    <input type="text" id="student-name" placeholder="例如：丁真">
+                    <button style="width:100%; padding:12px; background:var(--primary); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;" onclick="verifyAndStartExam()">进入考试</button>
                 </div>
             </div>
             <div id="view-box-review" style="display: none;">
-                <div style="margin-bottom: 8px; text-align: left;"><label>导入老师发回的【评卷打分包 JSON】：</label></div>
+                <div style="margin-bottom: 8px; text-align: left;"><label>请导入评卷打分包：</label></div>
                 <input type="file" id="input-review-package" accept=".json">
             </div>
             <p id="auth-error" style="color: var(--danger); font-weight: bold; margin-top: 15px; font-size:14px;"></p>
         </div>
     </div>
 
-    <div class="exam-app-wrapper">
-        <div class="exam-app-container" id="exam-app">
-            <div class="header-bar">
-                <div class="paper-meta-info">
-                    <div class="save-status-badge" id="save-light">✓ 已自动保存</div>
-                    <div><b>考试科目：</b><span id="meta-paper-title">-</span></div>
-                    <div><b>答题学生：</b><span id="meta-student-name" style="font-weight: bold; color: var(--danger);">-</span></div>
-                    <div><b>有效时段：</b><br><span id="meta-time-window" style="font-size: 12px; color: #555;">-</span></div>
-                </div>
-                <div class="timer-row">
-                    <div style="font-size: 14px; color:#666;">当前进度: <span id="current-idx-text">1</span>/<span id="total-idx-text">1</span></div>
-                    <div class="timer-box" id="exam-timer">已答题 00:00</div>
-                </div>
+    <div class="app-container" id="exam-app">
+        <div class="header-bar">
+            <div class="paper-meta-info">
+                <div class="save-status-badge" id="save-light">已自动保存</div>
+                <div><b>考试科目：</b><span id="meta-paper-title">-</span></div>
+                <div><b>答题学生：</b><span id="meta-student-name" style="font-weight: bold; color: var(--danger);">-</span></div>
+                <div><b>有效时段：</b><br><span id="meta-time-window" style="font-size: 12px; color: #555;">-</span></div>
             </div>
-            <div class="main-content" id="questions-wrapper"></div>
-            <div class="nav-footer">
-                <button class="btn-sub" id="btn-prev" onclick="changeQuestion(-1)">上一题</button>
-                <button class="btn-sub" id="btn-next" onclick="changeQuestion(1)">下一题</button>
-                <button class="btn-submit" id="btn-finish" style="display: none;" onclick="triggerManualSubmit(false)">确认交卷</button>
+            <div class="timer-row">
+                <div style="font-size: 14px; color:#666;">当前进度: <span id="current-idx-text">1</span>/<span id="total-idx-text">1</span></div>
+                <div class="timer-box" id="exam-timer">已答题 00:00</div>
             </div>
+        </div>
+        <div class="main-content" id="questions-wrapper"></div>
+        <div class="nav-footer">
+            <button class="btn-sub" id="btn-prev" onclick="changeQuestion(-1)">上一题</button>
+            <button class="btn-sub" id="btn-next" onclick="changeQuestion(1)">下一题</button>
+            <button class="btn-submit" id="btn-finish" style="display: none;" onclick="triggerManualSubmit(false)">提交答卷</button>
         </div>
     </div>
 
@@ -138,7 +141,7 @@
         <img id="global-lightbox-img" src="" alt="全屏大图">
     </div>
 
-    <div class="review-float-panel-btn" id="review-panel-trigger" style="display: none;" onclick="openReviewNavModal()">对账<br>盘🔴</div>
+    <div class="review-float-panel-btn" id="review-panel-trigger" style="display: none;" onclick="openReviewNavModal()">答题<br>面板</div>
     <div id="review-nav-modal" onclick="closeReviewNavModal()">
         <div class="review-nav-card" onclick="event.stopPropagation()">
             <h3 style="margin-top:0;text-align:center;">答题面板</h3>
@@ -181,15 +184,18 @@
 
         function triggerSaveStatusLight() {
             const light = document.getElementById('save-light');
-            if(light) { light.classList.add('show'); setTimeout(() => { light.classList.remove('show'); }, 1200); }
+            light.classList.add('show');
+            setTimeout(() => { light.classList.remove('show'); }, 1200);
         }
 
         function triggerLiveAntiDisasterBackup() {
             if(!examPaperData || !studentNameVerified) return;
             const backupPayload = {
-                paperTitle: examPaperData.paperTitle, studentName: studentNameVerified,
+                paperTitle: examPaperData.paperTitle,
+                studentName: studentNameVerified,
                 examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`,
-                totalElapsedSeconds: totalElapsedSeconds, answers: studentAnswers
+                totalElapsedSeconds: totalElapsedSeconds,
+                answers: studentAnswers
             };
             try { localStorage.setItem("exam_answer_backup", JSON.stringify(backupPayload)); } catch(e){}
             triggerSaveStatusLight();
@@ -211,8 +217,12 @@
                     const json = JSON.parse(evt.target.result);
                     if (json.isEncrypted && json.cipher) {
                         const decryptedData = decryptStealthPayload(json.cipher, STEALTH_SECRET_SALT);
-                        if (!decryptedData) { document.getElementById('auth-error').textContent = "解密失败：试卷数据损坏或密钥不匹配。"; return; }
-                        examPaperData = decryptedData; rawEncryptedPayload = json.cipher; 
+                        if (!decryptedData) {
+                            document.getElementById('auth-error').textContent = "解密失败：试卷数据损坏或密钥不匹配。";
+                            return;
+                        }
+                        examPaperData = decryptedData;
+                        rawEncryptedPayload = json.cipher; 
                         document.getElementById('student-name-zone').style.display = 'block';
                         document.getElementById('auth-error').textContent = "";
                     } else { alert("试卷格式错误。"); }
@@ -248,11 +258,13 @@
                                 totalElapsedSeconds = parsedBackup.totalElapsedSeconds || 0;
                                 document.getElementById('auth-overlay').style.display = 'none'; 
                                 document.getElementById('exam-app').style.display = 'flex';
-                                initExamEngine(true); return;
+                                initExamEngine(true); 
+                                return;
                             }
                         }
                     } catch(err){}
                 }
+
                 document.getElementById('auth-overlay').style.display = 'none'; document.getElementById('exam-app').style.display = 'flex';
                 initExamEngine(false);
             });
@@ -266,7 +278,8 @@
                     const outerPayload = JSON.parse(evt.target.result);
                     const pack = decryptStealthPayload(outerPayload.cipher, STEALTH_SECRET_SALT);
                     if (!pack) return alert("解密失败。");
-                    activeReviewPackageData = pack; startReviewPackageWorkspace();
+                    activeReviewPackageData = pack;
+                    startReviewPackageWorkspace();
                 } catch(err) { alert("解析失败。"); }
             }; reader.readAsText(file);
         };
@@ -318,7 +331,7 @@
                     html += `<div class="option-item ${!isYes && sAns.text?'selected':''}" style="pointer-events:none;">错误 (×)</div>`;
                     html += `</div>`;
                 } else {
-                    html += `<div style="margin-top:12px;"><textarea class="text-answer-box" disabled style="background:#f4f4f5; border:1px solid #ccc; border-radius:6px; width:100%; padding:10px;">${escapeHtml(sAns.text) || '(无文字)'}</textarea></div>`;
+                    html += `<div style="margin-top:12px;"><textarea class="text-answer-box" disabled style="background:#f4f4f5;">${escapeHtml(sAns.text) || '(无文字)'}</textarea></div>`;
                     if (sAns.image) html += `<div><label style="font-size:12px;color:#999;display:block;">您的纸质草稿 (点图看大图)：</label><img src="${sAns.image}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)"></div>`;
                 }
                 if (mq.standardAnswer) html += `<div style="color:var(--primary);font-size:14px;margin-top:8px;"><b>标准参考标答：</b>${escapeHtml(mq.standardAnswer)}</div>`;
@@ -331,6 +344,7 @@
                         const oldCard = document.getElementById(`q-card-${currentQuestionIndex}`);
                         MathJax.typesetClear([oldCard]);
                     }
+
                     document.getElementById(`q-card-${currentQuestionIndex}`).classList.remove('active');
                     currentQuestionIndex = idx; 
                     const nextActiveCard = document.getElementById(`q-card-${currentQuestionIndex}`);
@@ -338,15 +352,22 @@
 
                     document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
                     document.querySelectorAll('.r-dot').forEach(d => d.classList.remove('active')); dot.classList.add('active');
+                    
                     document.querySelector('.main-content').scrollTop = 0;
                     
-                    if (window.MathJax) { MathJax.typesetPromise([nextActiveCard]); }
+                    if (window.MathJax) {
+                        MathJax.typesetPromise([nextActiveCard]);
+                    }
+                    
                     document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
                     document.getElementById('btn-next').style.display = currentQuestionIndex === totalQCount - 1 ? 'none' : 'block';
                     closeReviewNavModal();
                 }; gridContainer.appendChild(dot);
             });
-            if (window.MathJax) { MathJax.typesetClear([wrapper]); MathJax.typesetPromise([wrapper]); }
+            if (window.MathJax) {
+                MathJax.typesetClear([wrapper]);
+                MathJax.typesetPromise([wrapper]);
+            }
             document.getElementById('btn-prev').style.visibility = 'hidden';
             updateBtnState(); 
         }
@@ -361,12 +382,16 @@
 
             examPaperData.questions.forEach((q, idx) => {
                 const card = document.createElement('div'); card.className = `question-card ${idx === 0 ? 'active' : ''}`; card.id = `q-card-${idx}`;
-                if (!isRestoreFromBackup) { studentAnswers[q.id] = { text: "", image: "" }; }
+                
+                if (!isRestoreFromBackup) {
+                    studentAnswers[q.id] = { text: "", image: "" };
+                }
                 const currentRestoredAnswer = studentAnswers[q.id] || { text: "", image: "" };
 
                 let typeName = q.type === 'choice' ? '选择题' : (q.type === 'judge' ? '判断题' : '填空主观题');
                 let html = `<div class="question-meta">题型：【${typeName}】 | 分值：${q.score}分</div>`;
                 html += `<div class="question-stem">${q.stem.replace(/\\n/g, "\n")}</div>`;
+                
                 if (q.stemImage) html += `<img src="${q.stemImage}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)">`;
 
                 if (q.type === 'choice' && q.options) {
@@ -377,7 +402,8 @@
                     });
                     html += `</div>`;
                 } else if (q.type === 'judge') {
-                    const isYes = currentRestoredAnswer.text === '√'; const isNo = currentRestoredAnswer.text === '×';
+                    const isYes = currentRestoredAnswer.text === '√';
+                    const isNo = currentRestoredAnswer.text === '×';
                     html += `<div class="options-list">
                         <div class="option-item ${isYes?'selected':''}" onclick="selectOpt('${q.id}', '√', this)">正确 (√)</div>
                         <div class="option-item ${isNo?'selected':''}" onclick="selectOpt('${q.id}', '×', this)">错误 (×)</div>
@@ -395,14 +421,20 @@
             });
             const firstActiveCard = document.getElementById('q-card-0');
             if (window.MathJax) MathJax.typesetPromise([firstActiveCard]);
-            startCountUpTimer(); document.getElementById('btn-prev').style.visibility = 'hidden'; updateBtnState(); 
+            
+            startCountUpTimer();
+            document.getElementById('btn-prev').style.visibility = 'hidden';
+            updateBtnState(); 
         }
 
         window.selectOpt = function(qId, val, el) {
             studentAnswers[qId].text = val; el.parentElement.querySelectorAll('.option-item').forEach(i => i.classList.remove('selected')); el.classList.add('selected');
             triggerLiveAntiDisasterBackup(); 
         };
-        window.updateTextAnswer = function(qId, val) { studentAnswers[qId].text = val.trim(); triggerLiveAntiDisasterBackup(); };
+        window.updateTextAnswer = function(qId, val) { 
+            studentAnswers[qId].text = val.trim(); 
+            triggerLiveAntiDisasterBackup(); 
+        };
         
         window.changeQuestion = function(dir) {
             const totalLen = activeReviewPackageData ? activeReviewPackageData.masterPaperSnapshot.questions.length : examPaperData.questions.length;
@@ -425,13 +457,17 @@
             document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
             document.querySelector('.main-content').scrollTop = 0;
             
-            if (window.MathJax) { MathJax.typesetPromise([nextActiveCard]); }
+            if (window.MathJax) {
+                MathJax.typesetPromise([nextActiveCard]);
+            }
+
             updateBtnState();
         };
 
         function updateBtnState() {
             const totalLen = activeReviewPackageData ? activeReviewPackageData.masterPaperSnapshot.questions.length : examPaperData.questions.length;
             document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
+            
             if (activeReviewPackageData) {
                 document.getElementById('btn-next').style.display = currentQuestionIndex === totalLen - 1 ? 'none' : 'block';
                 document.getElementById('btn-finish').style.display = 'none';
@@ -442,6 +478,7 @@
         }
 
         window.activateCamera = function(qId) { currentTargetQuestionId = qId; document.getElementById('hidden-camera-input').click(); };
+        
         document.getElementById('hidden-camera-input').onchange = function(e) {
             const file = e.target.files[0]; if (!file) return;
             if (file.size > 12 * 1024 * 1024) {
@@ -467,64 +504,76 @@
             document.getElementById(`prev-box-${currentTargetQuestionId}`).style.display = 'inline-block'; closeCropperModal();
             triggerLiveAntiDisasterBackup(); 
         };
-        window.removeImg = function(qId) { studentAnswers[qId].image = ""; document.getElementById(`prev-box-${qId}`).style.display = 'none'; triggerLiveAntiDisasterBackup(); };
+        window.removeImg = function(qId) { 
+            studentAnswers[qId].image = ""; document.getElementById(`prev-box-${qId}`).style.display = 'none';
+            triggerLiveAntiDisasterBackup();
+        };
         
         function startCountUpTimer() {
             const timerEl = document.getElementById('exam-timer'); const endTimestamp = new Date(examPaperData.endTime).getTime();
             timerInterval = setInterval(() => {
                 if (new Date().getTime() >= endTimestamp) {
                     clearInterval(timerInterval); timerEl.textContent = "考试时间到！"; timerEl.style.color = "red"; alert("考试时间已到，已自动交卷并生成答案包。");
-                    triggerManualSubmit(true); return;
+                    triggerManualSubmit(true);
+                    return;
                 }
                 totalElapsedSeconds++; const mins = Math.floor(totalElapsedSeconds / 60); const secs = totalElapsedSeconds % 60;
                 timerEl.textContent = `已答题 ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                
                 if(totalElapsedSeconds % 60 === 0) {
                     try {
                         const localB = localStorage.getItem("exam_answer_backup");
-                        if(localB) { let parsed = JSON.parse(localB); parsed.totalElapsedSeconds = totalElapsedSeconds; localStorage.setItem("exam_answer_backup", JSON.stringify(parsed)); }
+                        if(localB) {
+                            let parsed = JSON.parse(localB);
+                            parsed.totalElapsedSeconds = totalElapsedSeconds;
+                            localStorage.setItem("exam_answer_backup", JSON.stringify(parsed));
+                        }
                     } catch(e){}
                 }
             }, 1000);
         }
 
-        // ================= 🌟 核心改造流：交卷原子级死锁判定大闸 =================
-        window.triggerManualSubmit = function(isForceSystemTimeout = false) {
+        // ================= 🌟 核心控制大闸：交卷云端原子锁 =================
+        function triggerManualSubmit(isForceSystemTimeout = false) {
             if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
             
-            // 将科目路径与学生姓名转义成 Firebase 合法的 Key 指针
+            // 安全清洗对账编码路径的合法字符
             const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
             const safeStudentPath = encodeURIComponent(studentNameVerified).replace(/\./g, '%2E');
 
-            // 🌟 核心：利用 Firebase 事务（Transaction）在云端强占排他性交卷锁
+            // 利用 Transaction 在云端实现强占排他性交卷锁
             db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).transaction((currentValue) => {
                 if (currentValue !== null) {
-                    return; // 锁已被占领，强行弹回，中断事务
+                    return; // 锁已被占领，强行回弹阻断事务
                 }
-                return firebase.database.ServerValue.TIMESTAMP; // 没被占领，则刻入当前的交卷时刻
+                return firebase.database.ServerValue.TIMESTAMP; // 未被占领，写入时间戳卡死
             }, (error, committed) => {
                 if (error || !committed) {
-                    // 彻底阻断二次交卷与多端交卷
-                    alert("⚠️ 提交拦截错误：\n系统检测到云端已存在您的交卷流水标记。\n您先前已成功交卷，不可重复提交答案包！");
+                    // 全局拦截：二次交卷或双设备抢答当场枪决
+                    alert("提交拦截错误：\n系统检测到云端已存在您的交卷流水。您先前已成功交卷，不可重复提交答卷！");
                     return;
                 }
 
-                // 首次提交成功，放行单据下载及缓存清理
+                // 首次交卷放行结算
                 clearInterval(timerInterval);
                 const payload = { paperTitle: examPaperData.paperTitle, studentName: studentNameVerified, examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`, elapsedDuration: `${Math.floor(totalElapsedSeconds / 60)}分${totalElapsedSeconds % 60}秒`, submitTime: new Date().toLocaleString(), answers: studentAnswers };
-                
                 try { localStorage.setItem("exam_answer_backup", JSON.stringify(payload)); } catch(e){}
 
-                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); 
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
                 const downloadUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = downloadUrl; a.download = `答案_${studentNameVerified}.json`; document.body.appendChild(a); a.click(); a.remove();
+                const a = document.createElement('a'); a.href = downloadUrl; a.download = `答案_${studentNameVerified}.json`;
+                document.body.appendChild(a); a.click(); a.remove();
                 
                 setTimeout(() => { URL.revokeObjectURL(downloadUrl); }, 1200);
                 try { localStorage.removeItem("exam_answer_backup"); } catch(e){}
-                
+
                 alert("交卷成功！答案包已导出。");
                 
                 Object.keys(studentAnswers).forEach(k => { studentAnswers[k].image = ""; });
-                rawEncryptedPayload = null; examPaperData = null; studentNameVerified = ""; currentQuestionIndex = 0; studentAnswers = {}; totalElapsedSeconds = 0; currentTargetQuestionId = null;
+                rawEncryptedPayload = null; examPaperData = null; studentNameVerified = "";
+                currentQuestionIndex = 0; studentAnswers = {}; totalElapsedSeconds = 0;
+                currentTargetQuestionId = null;
+                
                 document.getElementById('questions-wrapper').innerHTML = ""; document.getElementById('input-paper-json').value = "";
                 document.getElementById('student-name').value = ""; document.getElementById('student-name-zone').style.display = 'none';
                 document.getElementById('exam-app').style.display = 'none'; document.getElementById('auth-overlay').style.display = 'flex';
