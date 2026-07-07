@@ -243,7 +243,7 @@
             // 1. 优先核验云端是否已有交卷封锁打标
             db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
                 if (lockSnapshot.exists()) {
-                    document.getElementById('auth-error').textContent = `❌ 进入拦截：您(${nameInput})先前已成功交卷，不可重复进入系统答题！`;
+                    document.getElementById('auth-error').textContent = `进入拦截：您(${nameInput})先前已成功交卷，不可重复进入系统答题！`;
                     return;
                 }
 
