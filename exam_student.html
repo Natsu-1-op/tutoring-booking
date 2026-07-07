@@ -184,8 +184,8 @@
 
         function triggerSaveStatusLight() {
             const light = document.getElementById('save-light');
-            light.classList.add('show');
-            setTimeout(() => { light.classList.remove('show'); }, 1200);
+            if(light) light.classList.add('show');
+            setTimeout(() => { if(light) light.classList.remove('show'); }, 1200);
         }
 
         function triggerLiveAntiDisasterBackup() {
@@ -230,43 +230,57 @@
             }; reader.readAsText(file);
         };
 
+        // 🌟 核心看闸组件：进入考试前先检查云端是否已被锁死
         function verifyAndStartExam() {
             const nameInput = document.getElementById('student-name').value.trim();
             if (!nameInput) return alert("请输入姓名！");
             const targetYear = SystemRouter.activeYear || "2026";
             
-            db.ref(`years/${targetYear}/studentWhitelist`).once('value').then((snapshot) => {
-                let isAllowed = snapshot.exists() ? Object.values(snapshot.val()).includes(nameInput) : true;
-                if (!isAllowed) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
+            // 实体转义编码过滤合规
+            const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
+            const safeStudentPath = encodeURIComponent(nameInput).replace(/\./g, '%2E');
 
-                studentNameVerified = nameInput;
-                document.getElementById('meta-paper-title').textContent = examPaperData.paperTitle;
-                document.getElementById('meta-student-name').textContent = studentNameVerified;
-                document.getElementById('meta-time-window').innerHTML = `开始: ${examPaperData.startTime.replace('T', ' ')}<br>截止: ${examPaperData.endTime.replace('T', ' ')}`;
-                
-                const now = new Date().getTime();
-                if (now < new Date(examPaperData.startTime).getTime()) return alert("考试尚未开始！");
-                if (now > new Date(examPaperData.endTime).getTime()) return alert("考试已经截止！");
-                
-                const localSavedBackupStr = localStorage.getItem("exam_answer_backup");
-                if (localSavedBackupStr) {
-                    try {
-                        const parsedBackup = JSON.parse(localSavedBackupStr);
-                        if (parsedBackup.studentName === studentNameVerified && parsedBackup.paperTitle === examPaperData.paperTitle) {
-                            if (confirm("系统检测到未完成的考试记录，是否恢复已作答的内容？")) {
-                                studentAnswers = parsedBackup.answers || {};
-                                totalElapsedSeconds = parsedBackup.totalElapsedSeconds || 0;
-                                document.getElementById('auth-overlay').style.display = 'none'; 
-                                document.getElementById('exam-app').style.display = 'flex';
-                                initExamEngine(true); 
-                                return;
-                            }
-                        }
-                    } catch(err){}
+            // 1. 优先核验云端是否已有交卷封锁打标
+            db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
+                if (lockSnapshot.exists()) {
+                    document.getElementById('auth-error').textContent = `❌ 进入拦截：您(${nameInput})先前已成功交卷，不可重复进入系统答题！`;
+                    return;
                 }
 
-                document.getElementById('auth-overlay').style.display = 'none'; document.getElementById('exam-app').style.display = 'flex';
-                initExamEngine(false);
+                // 2. 如果云端没有被锁，则继续执行原本的白名单判定放行逻辑
+                db.ref(`years/${targetYear}/studentWhitelist`).once('value').then((snapshot) => {
+                    let isAllowed = snapshot.exists() ? Object.values(snapshot.val()).includes(nameInput) : true;
+                    if (!isAllowed) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
+
+                    studentNameVerified = nameInput;
+                    document.getElementById('meta-paper-title').textContent = examPaperData.paperTitle;
+                    document.getElementById('meta-student-name').textContent = studentNameVerified;
+                    document.getElementById('meta-time-window').innerHTML = `开始: ${examPaperData.startTime.replace('T', ' ')}<br>截止: ${examPaperData.endTime.replace('T', ' ')}`;
+                    
+                    const now = new Date().getTime();
+                    if (now < new Date(examPaperData.startTime).getTime()) return alert("考试尚未开始！");
+                    if (now > new Date(examPaperData.endTime).getTime()) return alert("考试已经截止！");
+                    
+                    const localSavedBackupStr = localStorage.getItem("exam_answer_backup");
+                    if (localSavedBackupStr) {
+                        try {
+                            const parsedBackup = JSON.parse(localSavedBackupStr);
+                            if (parsedBackup.studentName === studentNameVerified && parsedBackup.paperTitle === examPaperData.paperTitle) {
+                                if (confirm("系统检测到未完成的考试记录，是否恢复已作答的内容？")) {
+                                    studentAnswers = parsedBackup.answers || {};
+                                    totalElapsedSeconds = parsedBackup.totalElapsedSeconds || 0;
+                                    document.getElementById('auth-overlay').style.display = 'none'; 
+                                    document.getElementById('exam-app').style.display = 'flex';
+                                    initExamEngine(true); 
+                                    return;
+                                }
+                            }
+                        } catch(err){}
+                    }
+
+                    document.getElementById('auth-overlay').style.display = 'none'; document.getElementById('exam-app').style.display = 'flex';
+                    initExamEngine(false);
+                });
             });
         }
 
@@ -355,10 +369,7 @@
                     
                     document.querySelector('.main-content').scrollTop = 0;
                     
-                    if (window.MathJax) {
-                        MathJax.typesetPromise([nextActiveCard]);
-                    }
-                    
+                    if (window.MathJax) { MathJax.typesetPromise([nextActiveCard]); }
                     document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
                     document.getElementById('btn-next').style.display = currentQuestionIndex === totalQCount - 1 ? 'none' : 'block';
                     closeReviewNavModal();
@@ -533,28 +544,26 @@
             }, 1000);
         }
 
-        // ================= 🌟 核心控制大闸：交卷云端原子锁 =================
+        // ================= 🌟 核心交卷逻辑：抢占排他性交卷原子锁 =================
         function triggerManualSubmit(isForceSystemTimeout = false) {
             if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
             
-            // 安全清洗对账编码路径的合法字符
             const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
             const safeStudentPath = encodeURIComponent(studentNameVerified).replace(/\./g, '%2E');
 
-            // 利用 Transaction 在云端实现强占排他性交卷锁
+            // 抢占 Firebase 云端原子锁
             db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).transaction((currentValue) => {
                 if (currentValue !== null) {
-                    return; // 锁已被占领，强行回弹阻断事务
+                    return; // 已被抢占，回弹中止事务
                 }
-                return firebase.database.ServerValue.TIMESTAMP; // 未被占领，写入时间戳卡死
+                return firebase.database.ServerValue.TIMESTAMP; // 首次提交，打上时间戳
             }, (error, committed) => {
                 if (error || !committed) {
-                    // 全局拦截：二次交卷或双设备抢答当场枪决
-                    alert("提交拦截错误：\n系统检测到云端已存在您的交卷流水。您先前已成功交卷，不可重复提交答卷！");
+                    alert("提交拦截错误：\n系统检测到云端已存在您的交卷。您先前已成功交卷，不可重复提交答卷！");
                     return;
                 }
 
-                // 首次交卷放行结算
+                // 通过核验，执行交卷
                 clearInterval(timerInterval);
                 const payload = { paperTitle: examPaperData.paperTitle, studentName: studentNameVerified, examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`, elapsedDuration: `${Math.floor(totalElapsedSeconds / 60)}分${totalElapsedSeconds % 60}秒`, submitTime: new Date().toLocaleString(), answers: studentAnswers };
                 try { localStorage.setItem("exam_answer_backup", JSON.stringify(payload)); } catch(e){}
