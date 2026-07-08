@@ -85,12 +85,12 @@
         .review-score-banner { background: #f0f9eb; border: 1px dashed #67c23a; padding: 10px; border-radius: 6px; color: #2b6914; font-weight: bold; font-size: 14px; margin-top: 8px; display: flex; justify-content: space-between; }
         .review-float-panel-btn { position: fixed; bottom: 80px; right: 20px; background: #333; color: white; width: 50px; height: 50px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 99; cursor: pointer; text-align: center; line-height: 1.2; }
         #review-nav-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: none; justify-content: center; align-items: center; padding: 20px; }
-        .review-nav-card { background: white; width: 100%; max-width: 360px; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); text-align: center; }
+        .review-nav-card { background: white; width: 100%; max-width: 360px; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
         .review-grid-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 15px; }
-        .review-grid-grid .r-dot { padding: 10px 0; text-align: center; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; border: 1px solid transparent; background: #e4e7ed; }
-        .review-grid-grid .r-dot.correct { background: #f0f9eb; color: #67c23a; }
-        .review-grid-grid .r-dot.wrong { background: #fef0f0; color: var(--danger); border-color: #fde2e2; }
-        .review-grid-grid .r-dot.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(64,159,255,0.2); }
+        .r-dot { padding: 10px 0; text-align: center; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+        .r-dot.correct { background: #f0f9eb; color: #67c23a; }
+        .r-dot.wrong { background: #fef0f0; color: #f56c6c; border-color: #fde2e2; }
+        .r-dot.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(64,159,255,0.2); }
     </style>
 </head>
 <body>
@@ -184,8 +184,8 @@
 
         function triggerSaveStatusLight() {
             const light = document.getElementById('save-light');
-            if(light) light.classList.add('show');
-            setTimeout(() => { if(light) light.classList.remove('show'); }, 1200);
+            light.classList.add('show');
+            setTimeout(() => { light.classList.remove('show'); }, 1200);
         }
 
         function triggerLiveAntiDisasterBackup() {
@@ -230,24 +230,21 @@
             }; reader.readAsText(file);
         };
 
-        // 🌟 核心看闸组件：进入考试前先检查云端是否已被锁死
         function verifyAndStartExam() {
             const nameInput = document.getElementById('student-name').value.trim();
             if (!nameInput) return alert("请输入姓名！");
             const targetYear = SystemRouter.activeYear || "2026";
             
-            // 实体转义编码过滤合规
             const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
             const safeStudentPath = encodeURIComponent(nameInput).replace(/\./g, '%2E');
 
-            // 1. 优先核验云端是否已有交卷封锁打标
+            // 门禁前哨拦截线：入场时先从云端锁确认该考生是否交过卷
             db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
                 if (lockSnapshot.exists()) {
-                    document.getElementById('auth-error').textContent = `进入拦截：您(${nameInput})先前已成功交卷，不可重复进入系统答题！`;
+                    document.getElementById('auth-error').textContent = `❌ 进入拦截：您(${nameInput})先前已成功提交答卷，不可重复进行考试。`;
                     return;
                 }
 
-                // 2. 如果云端没有被锁，则继续执行原本的白名单判定放行逻辑
                 db.ref(`years/${targetYear}/studentWhitelist`).once('value').then((snapshot) => {
                     let isAllowed = snapshot.exists() ? Object.values(snapshot.val()).includes(nameInput) : true;
                     if (!isAllowed) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
@@ -388,6 +385,10 @@
 
         function initExamEngine(isRestoreFromBackup = false) {
             const wrapper = document.getElementById('questions-wrapper');
+            
+            // 🌟 核心增设点：在填装题目结构前，无条件强制物理清洗大容器，斩断“多重追加”的排版黑洞
+            wrapper.innerHTML = "";
+
             const totalQuestionsLength = examPaperData.questions.length;
             document.getElementById('total-idx-text').textContent = totalQuestionsLength;
 
@@ -544,26 +545,23 @@
             }, 1000);
         }
 
-        // ================= 🌟 核心交卷逻辑：抢占排他性交卷原子锁 =================
         function triggerManualSubmit(isForceSystemTimeout = false) {
             if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
             
             const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
             const safeStudentPath = encodeURIComponent(studentNameVerified).replace(/\./g, '%2E');
 
-            // 抢占 Firebase 云端原子锁
             db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).transaction((currentValue) => {
                 if (currentValue !== null) {
-                    return; // 已被抢占，回弹中止事务
+                    return; 
                 }
-                return firebase.database.ServerValue.TIMESTAMP; // 首次提交，打上时间戳
+                return firebase.database.ServerValue.TIMESTAMP; 
             }, (error, committed) => {
                 if (error || !committed) {
-                    alert("提交拦截错误：\n系统检测到云端已存在您的交卷。您先前已成功交卷，不可重复提交答卷！");
+                    alert("提交拦截错误：\n系统检测到云端已存在您的交卷流水。您先前已成功交卷，不可重复提交答卷！");
                     return;
                 }
 
-                // 通过核验，执行交卷
                 clearInterval(timerInterval);
                 const payload = { paperTitle: examPaperData.paperTitle, studentName: studentNameVerified, examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`, elapsedDuration: `${Math.floor(totalElapsedSeconds / 60)}分${totalElapsedSeconds % 60}秒`, submitTime: new Date().toLocaleString(), answers: studentAnswers };
                 try { localStorage.setItem("exam_answer_backup", JSON.stringify(payload)); } catch(e){}
