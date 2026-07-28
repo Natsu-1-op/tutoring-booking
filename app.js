@@ -124,7 +124,8 @@ function submitBooking() {
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
     if (nickname.includes(',')) return showMessage('姓名中不能包含逗号！', false);
 
-    const safePathName = nickname.replace(/[.#$\[\]\/]/g, '_');
+    // 将 Firebase 不允许的字符替换为 _XX 编码以保证不同名字产生不同 key
+    const safePathName = nickname.replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
     const slotId = selectedSlot.value; const slotTime = selectedSlot.getAttribute('data-time');
     const year = SystemRouter.activeYear;
 
@@ -202,6 +203,10 @@ function submitBooking() {
                     });
                 });
             });
+        }).catch((err) => {
+            console.error('提交预约失败:', err);
+            showMessage('操作失败，请检查网络后重试！', false);
+            resetBtn();
         });
     });
 }
@@ -231,10 +236,9 @@ function loadMyHistory() {
         .equalTo(searchName)
         .once('value').then((snapshot) => {
             const reservations = snapshot.val();
-            if (!reservations) { container.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">未找到该姓名对应的记录。</p>'; return; }
-
-            const isAuthPassed = Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode);
+            const isAuthPassed = reservations ? Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode) : false;
             if (!isAuthPassed) {
+                // 统一提示信息，不区分「姓名不存在」和「凭证码错误」，防止信息泄露
                 container.innerHTML = `<p style="text-align:center; color:#f56c6c; font-weight:bold; padding:20px;">姓名或凭证码错误！</p>`;
                 return;
             }
@@ -269,12 +273,17 @@ function loadMyHistory() {
 
             if (count === 0) container.innerHTML = `<p style="text-align:center; color:#999; padding:20px;">未找到对应的记录。</p>`;
             else container.innerHTML = listHtml;
+        }).catch((err) => {
+            console.error('查询历史记录失败:', err);
+            container.innerHTML = '<p style="text-align:center; color:#f56c6c; padding:20px;">查询失败，请检查网络后重试。</p>';
         });
 }
 
 function requestCancelBooking(resKey) {
     if (!confirm('确定要为这条待确认的课程发起取消申请吗？')) return;
     SystemRouter.getReservationsRef(SystemRouter.activeYear).child(resKey).update({ status: "PendingCancel" }).then(() => {
-        alert('取消申请已提交。'); document.getElementById('history-container').innerHTML = ''; 
+        alert('取消申请已提交。'); document.getElementById('history-container').innerHTML = '';
+    }).catch(() => {
+        alert('操作失败，请检查网络后重试。');
     });
 }

@@ -433,7 +433,7 @@
                         const parsed = TimeParser.parseRawText(r.time, viewingYear);
                         if (parsed) {
                             const dateKey = parsed.date.replace(/-/g, '_');
-                            const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, '_');
+                            const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
                             SystemRouter.getLocksRef(viewingYear).child(`${safePathName}_${dateKey}`).remove();
                         }
                     }
@@ -460,13 +460,16 @@
                     const parsed = TimeParser.parseRawText(r.time, viewingYear);
                     if (parsed) {
                         const dateKey = parsed.date.replace(/-/g, '_');
-                        const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, '_');
+                        const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
                         finalAbsoluteUpdates[`years/${viewingYear}/dailyLocks/${safePathName}_${dateKey}`] = null;
                     }
                 }
 
                 db.ref().update(finalAbsoluteUpdates).then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({ action: `同意了 [${r.nickname}] 的取消申请`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                }).catch((err) => {
+                    console.error('取消审批操作失败:', err);
+                    alert('操作失败，请重试。');
                 });
             });
         });
@@ -542,11 +545,11 @@
                     canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
                     const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
                     targetRef.child('notice').set(noticeText).then(() => {
-                        targetRef.child('noticeImage').set(compressedBase64).then(() => { fileInput.value = ''; alert('公告发布成功。'); });
-                    });
+                        targetRef.child('noticeImage').set(compressedBase64).then(() => { fileInput.value = ''; alert('公告发布成功。'); }).catch(() => { alert('图片上传失败，请重试。'); });
+                    }).catch(() => { alert('公告保存失败，请重试。'); });
                 }; img.src = e.target.result;
             }; reader.readAsDataURL(file);
-        } else { targetRef.child('notice').set(noticeText).then(() => alert('公告保存成功。')); }
+        } else { targetRef.child('notice').set(noticeText).then(() => alert('公告保存成功。')).catch(() => { alert('公告保存失败，请重试。'); }); }
     }
 
     function addSlot() {
@@ -561,14 +564,16 @@
             
             SystemRouter.getSlotsRef(viewingYear).push({ time: validationParser.formattedSlotText, reserved: false, status: "active" }).then(() => {
                 SystemRouter.getLogsRef(viewingYear).push({ action: `新增排班：[${validationParser.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                timeInput.value = ''; 
-            });
+                timeInput.value = '';
+            }).catch(() => { alert('新增排班失败，请重试。'); });
         });
     }
 
     function generateDayTemplate() {
         const dateInput = document.getElementById('template-date').value; if (!dateInput) return alert('请选择日期。');
-        const dateObj = new Date(dateInput); const prefix = `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
+        const dateObj = new Date(dateInput);
+        if (isNaN(dateObj.getTime())) return alert('日期格式无效！');
+        const prefix = `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
         const templates = []; for (let i = 1; i <= 5; i++) { const val = document.getElementById(`tpl-time-${i}`).value.trim(); if (val) templates.push(val); }
 
         SystemRouter.getSlotsRef(viewingYear).once('value').then(snap => {
@@ -592,6 +597,8 @@
                 db.ref().update(atomicUpdates).then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({ action: `批量新增了 ${okCount} 个排班`, timestamp: firebase.database.ServerValue.TIMESTAMP });
                     document.getElementById('template-date').value = ""; alert('批量排班成功。');
+                }).catch(() => {
+                    alert('批量排班失败，请重试。');
                 });
             }
         });
@@ -605,11 +612,11 @@
                     SystemRouter.getSlotsRef(viewingYear).child(slotId).update({ status: "hidden" }).then(() => {
                         SystemRouter.getLogsRef(viewingYear).push({ action: `隐藏已预约的排班: [${slot.time}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
                         alert('由于已有学生预约，该时段已在学生端隐藏。');
-                    });
+                    }).catch(() => { alert('操作失败，请重试。'); });
                 } else {
-                    SystemRouter.getSlotsRef(viewingYear).child(slotId).remove().then(() => alert('删除成功。'));
+                    SystemRouter.getSlotsRef(viewingYear).child(slotId).remove().then(() => alert('删除成功。')).catch(() => { alert('删除失败，请重试。'); });
                 }
-            });
+            }).catch(() => { alert('读取排班信息失败，请重试。'); });
         }
     }
 
@@ -632,13 +639,16 @@
                         const parsed = TimeParser.parseRawText(rData.time, viewingYear);
                         if (parsed) {
                             const dateKey = parsed.date.replace(/-/g, '_');
-                            const safePathName = (nickname || '').replace(/[.#$\[\]\/]/g, '_');
+                            const safePathName = (nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
                             finalAbsoluteUpdates[`years/${viewingYear}/dailyLocks/${safePathName}_${dateKey}`] = null;
                         }
                     }
 
                     db.ref().update(finalAbsoluteUpdates).then(() => {
                         SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                    }).catch((err) => {
+                        console.error('删除预约记录失败:', err);
+                        alert('删除失败，请重试。');
                     });
                 });
             });
@@ -861,10 +871,7 @@
         }).catch(err => { logEl.style.color = "red"; logEl.textContent = `读取失败: ${err.message}`; });
     }
 
-    function escapeHtml(string) {
-        const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;', '/': '&#x2F;' };
-        return String(string).replace(/[&<>"'\/]/g, s => entityMap[s]);
-    }
+    // 注意：escapeHtml 由 config/firebase-env.js 全局提供，此处不再重复定义
 
     document.getElementById('admin-login-submit').onclick = verifyAdmin;
     document.getElementById('admin-password').onkeypress = (e) => { if (e.key === 'Enter') verifyAdmin(); };
