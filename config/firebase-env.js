@@ -23,7 +23,6 @@ const SystemRouter = {
     getSlotsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/slots`),
     getReservationsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/reservations`),
     getSettingsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/settings`),
-    getLocksRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/dailyLocks`),
     getLogsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/operationLog`)
 };
 

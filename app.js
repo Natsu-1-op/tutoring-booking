@@ -82,7 +82,7 @@ function bindActiveYearListeners() {
         const availableSlots = []; const reservedSlots = [];
         Object.keys(slots).forEach(slotId => {
             const slot = slots[slotId];
-            if (slot.status === "hidden" || !slot || !slot.time) return;
+            if (!slot || slot.status === "hidden" || !slot.time) return;
             if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
             else availableSlots.push({ id: slotId, data: slot });
         });

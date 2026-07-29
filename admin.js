@@ -678,7 +678,6 @@
             const clearPacks = {};
             clearPacks[`years/${viewingYear}/slots`] = null;
             clearPacks[`years/${viewingYear}/reservations`] = null;
-            clearPacks[`years/${viewingYear}/dailyLocks`] = null;
             clearPacks[`years/${viewingYear}/operationLog`] = null;
             clearPacks[`years/${viewingYear}/settings/deadline`] = null;
             clearPacks[`years/${viewingYear}/settings/notice`] = null;
