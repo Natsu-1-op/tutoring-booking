@@ -2,10 +2,11 @@
 (function() {
     let isAdminAuthenticated = false;
     let initialized = false; 
-    let dateCollapseState = {}; 
-    let resCollapseState = {}; 
-    let reservationsData = []; 
-    let viewingYear = "2026"; 
+    let dateCollapseState = {};
+    let resCollapseState = {};
+    let reservationsData = [];
+    let viewingYear = "2026";
+    const GROUP_CUTOFF = new Date('2026-07-26T00:00:00+08:00').getTime(); 
 
     let currentActiveSlotsRefMemory = null;
     let currentActiveReservationsRefMemory = null;
@@ -238,7 +239,6 @@
             const cancelPanel = document.getElementById('cancel-approval-panel');
 
             container.innerHTML = '';
-            // 不再需要审批面板，始终隐藏
             if (pendingPanel) pendingPanel.style.display = 'none';
             if (cancelPanel) cancelPanel.style.display = 'none';
             reservationsData = [];
@@ -246,68 +246,69 @@
 
             const resGroups = {};
 
-            const SLOT_CUTOFF = new Date('2026-07-26T00:00:00+08:00').getTime();
-
             Object.keys(res).forEach(resKey => {
                 const r = res[resKey]; if (!r) return;
                 r.id = resKey; reservationsData.push(r);
 
-                // 分组策略：
-                // 1. 2026/7/26 之后创建的 slot → 按 slot 创建时间分组
-                // 2. 2026/7/26 之前 → 按实际上课时间（r.time）分组
-                // 3. 都解析失败 → 回退到同学提交时间
-                let groupDateStr = null;
-
-                // 先尝试 slot 创建时间（仅对新数据生效）
-                if (r.slotId) {
-                    const slotTs = decodePushIdTimestamp(r.slotId);
-                    if (slotTs && slotTs >= SLOT_CUTOFF) {
-                        const d = new Date(slotTs);
-                        groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+                // 已手动归档的强制进历史归档，否则按上课时间判断
+                let groupKey;
+                if (r.archived) {
+                    groupKey = '历史归档';
+                } else {
+                    let lessonTs = null;
+                    if (r.time) {
+                        const parsed = TimeParser.parseRawText(r.time, viewingYear);
+                        if (parsed && parsed.date) lessonTs = new Date(parsed.date + 'T00:00:00+08:00').getTime();
                     }
-                }
-
-                // 旧数据：按实际上课时间分类
-                if (!groupDateStr && r.time) {
-                    const parsed = TimeParser.parseRawText(r.time, viewingYear);
-                    if (parsed && parsed.date) {
-                        // date 已是 YYYY-MM-DD 格式，转为 YYYY/MM/DD 保证与 slot 分组格式一致
-                        groupDateStr = parsed.date.replace(/-/g, '/');
+                    if (lessonTs === null && r.slotId) {
+                        lessonTs = decodePushIdTimestamp(r.slotId);
                     }
+                    if (lessonTs === null && r.timestamp) {
+                        lessonTs = new Date(r.timestamp).getTime();
+                    }
+                    groupKey = (lessonTs !== null && lessonTs >= GROUP_CUTOFF) ? '当前排课' : '历史归档';
                 }
 
-                // 最终回退：同学提交时间
-                if (!groupDateStr && r.timestamp) {
-                    const d = new Date(r.timestamp);
-                    if (!isNaN(d.getTime())) groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-                }
-                if (!groupDateStr) groupDateStr = "历史记录";
-
-                if (!resGroups[groupDateStr]) resGroups[groupDateStr] = [];
-                resGroups[groupDateStr].push({ key: resKey, data: r });
+                if (!resGroups[groupKey]) resGroups[groupKey] = [];
+                resGroups[groupKey].push({ key: resKey, data: r });
             });
 
-            Object.keys(resGroups).sort().reverse().forEach(submitDate => {
-                const resGroupDiv = document.createElement('div'); resGroupDiv.className = 'date-group res-group';
-                if (resCollapseState[submitDate] === undefined) resCollapseState[submitDate] = true;
+            // 组内按上课时间倒序（最近的在最上面）
+            const sortByLessonTime = (a, b) => {
+                const getTs = (r) => {
+                    if (r.time) { const p = TimeParser.parseRawText(r.time, viewingYear); if (p && p.date) return new Date(p.date + 'T00:00:00+08:00').getTime(); }
+                    if (r.slotId) return decodePushIdTimestamp(r.slotId) || 0;
+                    return r.timestamp || 0;
+                };
+                return getTs(b.data) - getTs(a.data);
+            };
 
-                const header = document.createElement('div'); header.className = 'date-header res-header';
-                header.innerHTML = `<span>${escapeHtml(submitDate)} 预约记录 (${resGroups[submitDate].length} 条)</span> <span class="arrow-indicator">${resCollapseState[submitDate] ? '展开 +' : '收起 -'}</span>`;
-                const body = document.createElement('div'); body.className = `date-body ${resCollapseState[submitDate] ? 'collapsed' : ''}`;
+            ['当前排课', '历史归档'].forEach(groupKey => {
+                if (!resGroups[groupKey]) return;
+                const groupRecords = resGroups[groupKey].sort(sortByLessonTime);
+                const resGroupDiv = document.createElement('div'); resGroupDiv.className = 'date-group res-group';
+                if (resCollapseState[groupKey] === undefined) resCollapseState[groupKey] = false;
+
+                const isCurrent = groupKey === '当前排课';
+                const header = document.createElement('div'); header.className = 'date-header';
+                header.style.background = isCurrent ? '#ecf5ff' : '#f4f4f5';
+                header.style.color = isCurrent ? '#409eff' : '#909399';
+                header.innerHTML = `<span>${escapeHtml(groupKey)} (${groupRecords.length} 条)</span> <span class="arrow-indicator">${resCollapseState[groupKey] ? '展开 +' : '收起 -'}</span>`;
+                const body = document.createElement('div'); body.className = `date-body ${resCollapseState[groupKey] ? 'collapsed' : ''}`;
                 body.style.overflowX = 'auto';
 
                 header.onclick = () => {
-                    resCollapseState[submitDate] = !resCollapseState[submitDate]; body.classList.toggle('collapsed');
-                    header.querySelector('.arrow-indicator').textContent = resCollapseState[submitDate] ? '展开 +' : '收起 -';
+                    resCollapseState[groupKey] = !resCollapseState[groupKey]; body.classList.toggle('collapsed');
+                    header.querySelector('.arrow-indicator').textContent = resCollapseState[groupKey] ? '展开 +' : '收起 -';
                 };
 
                 const table = document.createElement('table');
-                table.innerHTML = `<thead><tr><th>时间</th><th>姓名 (双击可修改)</th><th>状态</th><th>取消码</th><th>操作</th></tr></thead><tbody></tbody>`;
+                table.innerHTML = `<thead><tr><th>时间</th><th>姓名</th><th>状态</th><th>取消码</th><th>操作</th></tr></thead><tbody></tbody>`;
                 const tbody = table.querySelector('tbody');
 
-                resGroups[submitDate].forEach(item => {
+                groupRecords.forEach(item => {
                     const r = item.data;
-                    const currentStatus = r.status || "booked";
+                    const currentStatus = r.status || 'booked';
                     const statusOptions = [
                         { val: 'booked', label: '已预约', color: '#e6a23c' },
                         { val: 'confirmed', label: '已确认', color: '#409eff' },
@@ -323,17 +324,26 @@
                     });
                     selectHtml += '</select>';
 
+                    // 归档 / 取消归档按钮
+                    let archiveBtnHtml = '';
+                    if (isCurrent) {
+                        archiveBtnHtml = `<button class="btn-archive-res" data-key="${item.key}" style="background:#e6a23c; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; margin-right:4px;">归档</button>`;
+                    } else if (r.archived) {
+                        archiveBtnHtml = `<button class="btn-unarchive-res" data-key="${item.key}" style="background:#67c23a; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; margin-right:4px;">移回当前</button>`;
+                    }
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `<td>${escapeHtml(r.time)}</td>
-                        <td><span class="editable-name" data-key="${item.key}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || "不详")}</b></span></td>
+                        <td><span class="editable-name" data-key="${item.key}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
                         <td>${selectHtml}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
-                        <td><button class="danger btn-force-del" data-key="${item.key}" data-slotid="${r.slotId}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
+                        <td>${archiveBtnHtml}<button class="danger btn-force-del" data-key="${item.key}" data-slotid="${r.slotId}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
                     tbody.appendChild(tr);
                 });
                 body.appendChild(table); resGroupDiv.appendChild(header); resGroupDiv.appendChild(body); container.appendChild(resGroupDiv);
             });
             bindStatusDropdownEvents();
             bindDeleteReservationButtons();
+            bindArchiveButtons();
             bindNameEditEvents();
         });
 
@@ -743,6 +753,26 @@
             timestamp = timestamp * 64 + idx;
         }
         return timestamp;
+    }
+
+    // 手动归档 / 取消归档
+    function toggleArchiveReservation(resKey, setArchived) {
+        const ref = SystemRouter.getReservationsRef(viewingYear).child(resKey);
+        ref.update({ archived: setArchived || null }).then(() => {
+            SystemRouter.getLogsRef(viewingYear).push({
+                action: setArchived ? '将预约归档到历史' : '将预约移回当前排课',
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        }).catch(() => { alert('操作失败，请重试。'); });
+    }
+
+    function bindArchiveButtons() {
+        document.querySelectorAll('.btn-archive-res').forEach(b => {
+            b.onclick = function() { toggleArchiveReservation(this.dataset.key, true); };
+        });
+        document.querySelectorAll('.btn-unarchive-res').forEach(b => {
+            b.onclick = function() { toggleArchiveReservation(this.dataset.key, false); };
+        });
     }
 
     function bindStatusDropdownEvents() {
