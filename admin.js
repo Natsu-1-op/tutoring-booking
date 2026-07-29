@@ -26,7 +26,7 @@
         db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
             if (snapshot.exists() && snapshot.val() === true) {
                 // 🌟 向当前浏览器会话（Tab）中埋下通过鉴权的绿色通行证
-                sessionStorage.setItem('admin_session_auth', 'true');
+                localStorage.setItem('admin_session_auth', 'true');
 
                 isAdminAuthenticated = true; 
                 document.getElementById('admin-login').style.display = 'none';

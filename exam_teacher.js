@@ -12,7 +12,7 @@ const STEALTH_SECRET_SALT = "ClassOpticSecurePaperKey2026";
 
 // ================= 准入守卫：Session 劫持校验 =================
 document.addEventListener("DOMContentLoaded", () => {
-    const hasAdminPassToken = sessionStorage.getItem('admin_session_auth');
+    const hasAdminPassToken = localStorage.getItem('admin_session_auth');
     if (hasAdminPassToken === 'true') {
         const mask = document.getElementById('teacher-gate-login-mask');
         if (mask) mask.style.display = 'none';
@@ -26,7 +26,7 @@ function executeManualGateAuth() {
 
     db.ref(`admin_auth/${tokenInput}`).once('value').then((snapshot) => {
         if (snapshot.exists() && snapshot.val() === true) {
-            sessionStorage.setItem('admin_session_auth', 'true');
+            localStorage.setItem('admin_session_auth', 'true');
             document.getElementById('teacher-gate-login-mask').style.display = 'none';
         } else { errLbl.textContent = '❌ 口令错误，直连请求已被系统拦截。'; }
     });

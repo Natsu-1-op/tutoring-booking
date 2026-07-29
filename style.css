@@ -295,6 +295,8 @@ th { background: #f9f9f9; }
 .teacher-btn-cyan:hover { background:#10aeae; }
 .teacher-btn-full { width:100%; }
 .teacher-btn-sm { padding:6px 14px; font-size:12px; }
+.teacher-btn-outline { background:#fff; color:#409eff; border:2px solid #409eff; }
+.teacher-btn-outline:hover { background:#ecf5ff; }
 
 /* 试题编辑器 */
 .question-builder-item { border:2px solid #e4e7ed; padding:20px; border-radius:10px; margin-bottom:14px; background:#fafbfc; position:relative; }
