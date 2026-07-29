@@ -262,7 +262,7 @@ th { background: #f9f9f9; }
 .teacher-gate-error { color:#f56c6c; font-size:13px; font-weight:bold; margin-top:12px; min-height:20px; }
 
 /* 容器与Tab */
-.teacher-container { max-width:1200px; margin:0 auto; background:#fff; padding:30px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
+.teacher-container { max-width:100%; margin:0 auto; background:#fff; padding:30px 40px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
 .teacher-tabs { display:flex; gap:8px; margin-bottom:28px; border-bottom:2px solid #ebeef5; padding-bottom:12px; }
 .teacher-tab { flex:1; padding:12px 8px; background:#f0f2f5; border:none; font-size:14px; font-weight:bold; cursor:pointer; border-radius:8px; color:#666; transition:all 0.15s; }
 .teacher-tab.active { background:#409eff; color:#fff; }
@@ -384,7 +384,7 @@ th { background: #f9f9f9; }
     .question-stem { font-size: 19px; }
     .options-list { gap: 14px; }
     .option-item { padding: 18px 22px; font-size: 17px; }
-    .teacher-container { max-width: 1400px; padding: 36px 40px; }
+    .teacher-container { padding: 36px 60px; }
     .grading-right-panel { width: 380px; }
     .grading-split { gap: 20px; }
 }
