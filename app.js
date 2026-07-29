@@ -113,7 +113,7 @@ function showMessage(msg, isSuccess) {
 }
 
 function submitBooking() {
-    if (isSubmitting) return; 
+    if (isSubmitting) return;
 
     const nickname = document.getElementById('nickname').value.trim();
     const accessCode = document.getElementById('access-code').value.trim();
@@ -124,16 +124,13 @@ function submitBooking() {
     if (!selectedSlot) return showMessage('请选择一个时间！', false);
     if (nickname.includes(',')) return showMessage('姓名中不能包含逗号！', false);
 
-    // 将 Firebase 不允许的字符替换为 _XX 编码以保证不同名字产生不同 key
-    const safePathName = nickname.replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
     const slotId = selectedSlot.value; const slotTime = selectedSlot.getAttribute('data-time');
     const year = SystemRouter.activeYear;
 
     const parsedTimeObj = TimeParser.parseRawText(slotTime, year);
     if (!parsedTimeObj) return showMessage('排班格式错误，请联系老师处理！', false);
 
-    const normalizedDateKey = parsedTimeObj.date.replace(/-/g, '_'); 
-    const btn = document.getElementById('submit-btn'); 
+    const btn = document.getElementById('submit-btn');
     isSubmitting = true; btn.disabled = true; btn.textContent = '提交中...';
 
     function resetBtn() { isSubmitting = false; btn.disabled = false; btn.textContent = '提交预约申请'; }
@@ -157,52 +154,61 @@ function submitBooking() {
                 resetBtn(); return;
             }
 
-
-            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).transaction((currentLock) => {
-                if (currentLock) return; 
-                return firebase.database.ServerValue.TIMESTAMP; 
-            }, (err, committed) => {
-                if (err || !committed) {
-                    showMessage(`您在 ${parsedTimeObj.formattedSlotText.split(' ')[0]} 当天已经预约过了，一天只能约一次！`, false);
-                    resetBtn(); return;
-                }
-
-                SystemRouter.getSettingsRef(year).child('accessCode').once('value').then((snapshot) => {
-                    if (accessCode !== (snapshot.val() || "123456")) {
-                        SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
-                        showMessage('预约口令错误！', false); resetBtn(); return;
+            // 同天多节提醒：查询该学生当天是否已有预约
+            SystemRouter.getReservationsRef(year)
+                .orderByChild('nickname').equalTo(nickname)
+                .once('value').then((existingSnap) => {
+                    const existing = existingSnap.val();
+                    let hasSameDay = false;
+                    if (existing) {
+                        const targetDate = parsedTimeObj.date; // 格式 YYYY-MM-DD
+                        hasSameDay = Object.values(existing).some(r => {
+                            if (!r || r.status === 'canceled') return false;
+                            const p = TimeParser.parseRawText(r.time, year);
+                            return p && p.date === targetDate;
+                        });
                     }
 
-                    SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
-                        if (slot && !slot.reserved && slot.status !== "hidden") {
-                            slot.reserved = true; return slot;
+                    if (hasSameDay) {
+                        const sameDayDate = parsedTimeObj.formattedSlotText.split(' ')[0];
+                        if (!confirm(`提醒：您在 ${sameDayDate} 当天已有其他预约。\n确定还要再约这一节吗？\n\n（同天多节是允许的，请确认您没有不小心选错时间）`)) {
+                            resetBtn(); return;
                         }
-                        return;
-                    }, (err, committed) => {
-                        if (!committed) {
-                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
-                            showMessage('手慢了，该时间段已被约满！', false); resetBtn(); return;
+                    }
+
+                    // 通过所有校验，开始约课
+                    SystemRouter.getSettingsRef(year).child('accessCode').once('value').then((snapshot) => {
+                        if (accessCode !== (snapshot.val() || "123456")) {
+                            showMessage('预约口令错误！', false); resetBtn(); return;
                         }
 
-                        const resKey = SystemRouter.getReservationsRef(year).push().key; 
-                        const cancelSecureCode = Math.random().toString(36).substring(2, 7).toUpperCase(); 
+                        SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
+                            if (slot && !slot.reserved && slot.status !== "hidden") {
+                                slot.reserved = true; return slot;
+                            }
+                            return;
+                        }, (err, committed) => {
+                            if (!committed) {
+                                showMessage('手慢了，该时间段已被约满！', false); resetBtn(); return;
+                            }
 
-                        SystemRouter.getReservationsRef(year).child(resKey).set({
-                            nickname: nickname, slotId: slotId, time: parsedTimeObj.formattedSlotText, status: "Pending", cancelCode: cancelSecureCode,
-                            slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
-                        }).then(() => {
-                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
-                            SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                            document.getElementById('nickname').value = ''; resetBtn();
-                            showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
-                        }).catch(() => {
-                            SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
-                            SystemRouter.getLocksRef(year).child(`${safePathName}_${normalizedDateKey}`).remove();
-                            showMessage('网络异常，请重试！', false); resetBtn();
+                            const resKey = SystemRouter.getReservationsRef(year).push().key;
+                            const cancelSecureCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+
+                            SystemRouter.getReservationsRef(year).child(resKey).set({
+                                nickname: nickname, slotId: slotId, time: parsedTimeObj.formattedSlotText, status: "booked", cancelCode: cancelSecureCode,
+                                slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
+                            }).then(() => {
+                                SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                                document.getElementById('nickname').value = ''; resetBtn();
+                                showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
+                            }).catch(() => {
+                                SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
+                                showMessage('网络异常，请重试！', false); resetBtn();
+                            });
                         });
                     });
                 });
-            });
         }).catch((err) => {
             console.error('提交预约失败:', err);
             showMessage('操作失败，请检查网络后重试！', false);
@@ -246,17 +252,19 @@ function loadMyHistory() {
             let listHtml = ""; let count = 0;
             Object.keys(reservations).sort((a,b) => new Date(reservations[b].timestamp || 0) - new Date(reservations[a].timestamp || 0)).forEach(key => {
                 const r = reservations[key]; if (r.nickname !== searchName) return; count++;
-                let currentStatus = r.status || "Confirmed"; let statusText = ""; let badgeClass = ""; let actionButtonHtml = "";
+                let currentStatus = r.status || "booked"; let statusText = ""; let badgeClass = ""; let actionButtonHtml = "";
 
                 switch(currentStatus) {
-                    case "Pending":
-                        statusText = "待确认"; badgeClass = "status-pending";
-                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">申请取消预约</button>`;
+                    case "booked":
+                        statusText = "已预约"; badgeClass = "status-pending";
+                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">取消预约</button>`;
                         break;
-                    case "Confirmed": statusText = "已确认"; badgeClass = "status-confirmed"; break;
-                    case "PendingCancel": statusText = "待同意取消"; badgeClass = "status-pendingcancel"; break;
-                    case "Canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
-                    case "Completed": statusText = "已完成"; badgeClass = "status-completed"; break;
+                    case "confirmed":
+                        statusText = "已确认"; badgeClass = "status-confirmed";
+                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">取消预约</button>`;
+                        break;
+                    case "completed": statusText = "已完成"; badgeClass = "status-completed"; break;
+                    case "canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
                 }
 
                 listHtml += `
@@ -280,9 +288,29 @@ function loadMyHistory() {
 }
 
 function requestCancelBooking(resKey) {
-    if (!confirm('确定要为这条待确认的课程发起取消申请吗？')) return;
-    SystemRouter.getReservationsRef(SystemRouter.activeYear).child(resKey).update({ status: "PendingCancel" }).then(() => {
-        alert('取消申请已提交。'); document.getElementById('history-container').innerHTML = '';
+    if (!confirm('确定要取消这条预约吗？取消后该时段将重新开放给其他同学。')) return;
+    const year = SystemRouter.activeYear;
+
+    SystemRouter.getReservationsRef(year).child(resKey).once('value').then((snap) => {
+        const r = snap.val();
+        if (!r) { alert('记录不存在。'); return; }
+
+        const updates = {};
+        updates[`years/${year}/reservations/${resKey}/status`] = "canceled";
+        if (r.slotId) {
+            updates[`years/${year}/slots/${r.slotId}/reserved`] = false;
+        }
+
+        db.ref().update(updates).then(() => {
+            SystemRouter.getLogsRef(year).push({
+                action: `学生 [${r.nickname}] 自行取消了预约: [${r.time}]`,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            alert('预约已取消。');
+            document.getElementById('history-container').innerHTML = '';
+        }).catch(() => {
+            alert('操作失败，请检查网络后重试。');
+        });
     }).catch(() => {
         alert('操作失败，请检查网络后重试。');
     });

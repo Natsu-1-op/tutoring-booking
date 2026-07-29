@@ -234,39 +234,23 @@
 
         currentActiveReservationsRefMemory.on('value', (snapshot) => {
             const res = snapshot.val(); const container = document.getElementById('admin-reservations-container');
-            const pendingPanel = document.getElementById('pending-approval-panel'); const pendingList = document.getElementById('pending-approval-list');
-            const cancelPanel = document.getElementById('cancel-approval-panel'); const cancelList = document.getElementById('cancel-approval-list');
+            const pendingPanel = document.getElementById('pending-approval-panel');
+            const cancelPanel = document.getElementById('cancel-approval-panel');
 
-            container.innerHTML = ''; pendingList.innerHTML = ''; cancelList.innerHTML = ''; reservationsData = [];
-            if (!res) { container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">当前没有预约记录。</p>'; pendingPanel.style.display = 'none'; cancelPanel.style.display = 'none'; return; }
+            container.innerHTML = '';
+            // 不再需要审批面板，始终隐藏
+            if (pendingPanel) pendingPanel.style.display = 'none';
+            if (cancelPanel) cancelPanel.style.display = 'none';
+            reservationsData = [];
+            if (!res) { container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">当前没有预约记录。</p>'; return; }
 
-            let pendingHtml = ""; let cancelRequestHtml = ""; const resGroups = {};
+            const resGroups = {};
 
             Object.keys(res).forEach(resKey => {
                 const r = res[resKey]; if (!r) return;
-                r.id = resKey; reservationsData.push(r); 
-                let currentStatus = r.status || "Confirmed"; 
+                r.id = resKey; reservationsData.push(r);
+                let currentStatus = r.status || "booked";
 
-                if (currentStatus === "Pending") {
-                    pendingHtml += `
-                        <div class="approval-item">
-                            <span>姓名：<b>${escapeHtml(r.nickname)}</b> 时间：<b style="color:#409eff;">${escapeHtml(r.time)}</b></span>
-                            <div class="approval-btns">
-                                <button class="btn-approve-yes" data-key="${resKey}" style="background:#67c23a;">同意</button>
-                                <button class="btn-approve-no" data-key="${resKey}" style="background:#ff4d4f;">拒绝</button>
-                            </div>
-                        </div>`;
-                }
-                if (currentStatus === "PendingCancel") {
-                    cancelRequestHtml += `
-                        <div class="approval-item">
-                            <span>取消人：<b>${escapeHtml(r.nickname)}</b> 时间：<b style="color:#f56c6c;">${escapeHtml(r.time)}</b></span>
-                            <div class="approval-btns">
-                                <button class="btn-cancel-yes" data-key="${resKey}" style="background:#e6a23c;">同意取消</button>
-                            </div>
-                        </div>`;
-                }
-                
                 let submitDateStr = "历史记录";
                 if (r.timestamp) {
                     const d = new Date(r.timestamp);
@@ -275,10 +259,7 @@
                 if (!resGroups[submitDateStr]) resGroups[submitDateStr] = []; resGroups[submitDateStr].push({ key: resKey, data: r });
             });
 
-            pendingPanel.style.display = pendingHtml ? 'block' : 'none'; if (pendingHtml) pendingList.innerHTML = pendingHtml;
-            cancelPanel.style.display = cancelRequestHtml ? 'block' : 'none'; if (cancelRequestHtml) cancelList.innerHTML = cancelRequestHtml;
-
-            Object.keys(resGroups).sort().reverse().forEach(submitDate => { 
+            Object.keys(resGroups).sort().reverse().forEach(submitDate => {
                 const resGroupDiv = document.createElement('div'); resGroupDiv.className = 'date-group res-group';
                 if (resCollapseState[submitDate] === undefined) resCollapseState[submitDate] = true;
 
@@ -297,24 +278,35 @@
                 const tbody = table.querySelector('tbody');
 
                 resGroups[submitDate].forEach(item => {
-                    const r = item.data; const tr = document.createElement('tr'); let statusText = "";
-                    switch(r.status || "Confirmed") {
-                        case "Pending": statusText = "<span style='color:#e6a23c;'>待审批</span>"; break;
-                        case "Confirmed": statusText = "<span style='color:#409eff;'>已同意</span>"; break;
-                        case "PendingCancel": statusText = "<span style='color:#f56c6c;'>待取消</span>"; break;
-                        case "Canceled": statusText = "<span style='color:#909399;'>已取消</span>"; break;
-                        case "Completed": statusText = "<span style='color:#67c23a;'>已完成</span>"; break;
-                    }
+                    const r = item.data;
+                    const currentStatus = r.status || "booked";
+                    const statusOptions = [
+                        { val: 'booked', label: '已预约', color: '#e6a23c' },
+                        { val: 'confirmed', label: '已确认', color: '#409eff' },
+                        { val: 'completed', label: '已完成', color: '#67c23a' },
+                        { val: 'canceled', label: '已取消', color: '#909399' }
+                    ];
+                    const selectedOpt = statusOptions.find(o => o.val === currentStatus);
+                    const statusColor = selectedOpt ? selectedOpt.color : '#909399';
+
+                    let selectHtml = `<select class="status-select-admin" data-key="${item.key}" data-oldstatus="${currentStatus}" style="padding:4px 6px; border-radius:4px; font-weight:bold; font-size:13px; color:${statusColor}; border:1px solid #ccc;">`;
+                    statusOptions.forEach(opt => {
+                        selectHtml += `<option value="${opt.val}" ${opt.val === currentStatus ? 'selected' : ''} style="color:${opt.color};">${opt.label}</option>`;
+                    });
+                    selectHtml += '</select>';
+
+                    const tr = document.createElement('tr');
                     tr.innerHTML = `<td>${escapeHtml(r.time)}</td>
                         <td><span class="editable-name" data-key="${item.key}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || "不详")}</b></span></td>
-                        <td>${statusText}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
+                        <td>${selectHtml}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
                         <td><button class="danger btn-force-del" data-key="${item.key}" data-slotid="${r.slotId}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
                     tbody.appendChild(tr);
                 });
                 body.appendChild(table); resGroupDiv.appendChild(header); resGroupDiv.appendChild(body); container.appendChild(resGroupDiv);
             });
-            bindDynamicApprovalButtons();
-            bindNameEditEvents(); 
+            bindStatusDropdownEvents();
+            bindDeleteReservationButtons();
+            bindNameEditEvents();
         });
 
         currentActiveLogsRefMemory.on('value', (snapshot) => {
@@ -365,8 +357,9 @@
 
     function exportTutorFeeJSON() {
         if (reservationsData.length === 0) return alert('当前没有预约记录可以导出！');
-        const validReservations = reservationsData.filter(r => r.status === "Confirmed" || r.status === "Completed" || !r.status);
-        if (validReservations.length === 0) return alert('当前没有有效课时用于记账。');
+        // 只有「已完成」才算有效课时
+        const validReservations = reservationsData.filter(r => r.status === "completed");
+        if (validReservations.length === 0) return alert('当前没有已完成的课时可用于记账。');
 
         const outputRecords = [];
         validReservations.forEach(r => {
@@ -412,68 +405,7 @@
         document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
     }
 
-    function approveBooking(resKey, isApprove) {
-        SystemRouter.getReservationsRef(viewingYear).child(resKey).transaction((currentRes) => {
-            if (currentRes === null) return currentRes;
-            if (currentRes.status === "Pending") {
-                currentRes.status = isApprove ? "Confirmed" : "Canceled"; return currentRes;
-            }
-            return; 
-        }, (error, committed, snapshot) => {
-            if (error || !committed) { alert('操作失败，状态可能已改变！'); }
-            else {
-                const r = snapshot.val();
-                if (!isApprove && r && r.slotId) {
-                    SystemRouter.getSlotsRef(viewingYear).child(r.slotId).once('value').then((s) => {
-                        if (s.exists() && s.val().status !== "hidden") {
-                            SystemRouter.getSlotsRef(viewingYear).child(r.slotId).update({ reserved: false });
-                        }
-                    });
-                    if (r.time) {
-                        const parsed = TimeParser.parseRawText(r.time, viewingYear);
-                        if (parsed) {
-                            const dateKey = parsed.date.replace(/-/g, '_');
-                            const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
-                            SystemRouter.getLocksRef(viewingYear).child(`${safePathName}_${dateKey}`).remove();
-                        }
-                    }
-                }
-                SystemRouter.getLogsRef(viewingYear).push({ action: `审批预约：${isApprove?'同意':'拒绝'} [${r.nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-            }
-        });
-    }
-
-    function approveCancelRequest(resKey) {
-        SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snapshot => {
-            const r = snapshot.val(); if (!r) return;
-            SystemRouter.getSlotsRef(viewingYear).child(r.slotId).once('value').then(slotSnapshot => {
-                const slot = slotSnapshot.val(); 
-                const finalAbsoluteUpdates = {};
-                finalAbsoluteUpdates[`years/${viewingYear}/reservations/${resKey}/status`] = "Canceled";
-                
-                if (slot) { 
-                    finalAbsoluteUpdates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = false; 
-                    finalAbsoluteUpdates[`years/${viewingYear}/slots/${r.slotId}/status`] = "hidden"; 
-                }
-                
-                if (r.time) {
-                    const parsed = TimeParser.parseRawText(r.time, viewingYear);
-                    if (parsed) {
-                        const dateKey = parsed.date.replace(/-/g, '_');
-                        const safePathName = (r.nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
-                        finalAbsoluteUpdates[`years/${viewingYear}/dailyLocks/${safePathName}_${dateKey}`] = null;
-                    }
-                }
-
-                db.ref().update(finalAbsoluteUpdates).then(() => {
-                    SystemRouter.getLogsRef(viewingYear).push({ action: `同意了 [${r.nickname}] 的取消申请`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                }).catch((err) => {
-                    console.error('取消审批操作失败:', err);
-                    alert('操作失败，请重试。');
-                });
-            });
-        });
-    }
+    // === 旧审批函数已废弃，状态通过状态下拉框自由切换 (changeReservationStatus) ===
 
     function cancelEditSlot(slotId) {
         SystemRouter.getSlotsRef(viewingYear).child(slotId).once('value').then(snapshot => {
@@ -623,33 +555,20 @@
     function deleteSingleReservation(resKey, slotId, nickname) {
         if (confirm(`确定要删除 ${nickname} 的预约记录吗？`)) {
             SystemRouter.getSlotsRef(viewingYear).child(slotId).once('value').then(slotSnap => {
-                const slot = slotSnap.val(); 
-                SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(resSnap => {
-                    const rData = resSnap.val() || {};
-                    
-                    const finalAbsoluteUpdates = {};
-                    finalAbsoluteUpdates[`years/${viewingYear}/reservations/${resKey}`] = null;
-                    
-                    if (slot) {
-                        if (slot.status === "hidden") finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}`] = null;
-                        else finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}/reserved`] = false;
-                    }
-                    
-                    if (rData.time) {
-                        const parsed = TimeParser.parseRawText(rData.time, viewingYear);
-                        if (parsed) {
-                            const dateKey = parsed.date.replace(/-/g, '_');
-                            const safePathName = (nickname || '').replace(/[.#$\[\]\/]/g, (ch) => '_' + ch.charCodeAt(0).toString(16));
-                            finalAbsoluteUpdates[`years/${viewingYear}/dailyLocks/${safePathName}_${dateKey}`] = null;
-                        }
-                    }
+                const slot = slotSnap.val();
+                const finalAbsoluteUpdates = {};
+                finalAbsoluteUpdates[`years/${viewingYear}/reservations/${resKey}`] = null;
 
-                    db.ref().update(finalAbsoluteUpdates).then(() => {
-                        SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                    }).catch((err) => {
-                        console.error('删除预约记录失败:', err);
-                        alert('删除失败，请重试。');
-                    });
+                if (slot) {
+                    if (slot.status === "hidden") finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}`] = null;
+                    else finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}/reserved`] = false;
+                }
+
+                db.ref().update(finalAbsoluteUpdates).then(() => {
+                    SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                }).catch((err) => {
+                    console.error('删除预约记录失败:', err);
+                    alert('删除失败，请重试。');
                 });
             });
         }
@@ -724,10 +643,10 @@
 
         let csvContent = "\"预约时段\",\"学生姓名\",\"状态\",\"取消凭证\",\"提交时间\"\n";
         sorted.forEach(r => {
-            let textS = r.status || "Confirmed";
+            let textS = r.status || "booked";
             switch(textS) {
-                case "Pending": textS = "待确认"; break; case "Confirmed": textS = "已确认"; break;
-                case "PendingCancel": textS = "申请取消"; break; case "Canceled": textS = "已取消"; break; case "Completed": textS = "已完成"; break;
+                case "booked": textS = "已预约"; break; case "confirmed": textS = "已确认"; break;
+                case "canceled": textS = "已取消"; break; case "completed": textS = "已完成"; break;
             }
             const readableSubmitTime = r.timestamp ? new Date(r.timestamp).toLocaleString() : "未知";
             csvContent += `"${(r.time || '').replace(/"/g, '""')}","${(r.nickname || '不详').replace(/"/g, '""')}","${textS}","${(r.cancelCode || '-').replace(/"/g, '""')}","${readableSubmitTime}"\n`;
@@ -785,19 +704,70 @@
         });
     }
 
-    function bindDynamicApprovalButtons() {
-        document.querySelectorAll('.btn-approve-yes').forEach(b => {
-            b.onclick = function() { approveBooking(this.dataset.key, true); }
+    // 状态下拉框自由切换
+    function bindStatusDropdownEvents() {
+        document.querySelectorAll('.status-select-admin').forEach(select => {
+            select.onchange = function() {
+                changeReservationStatus(this.dataset.key, this.value, this.dataset.oldstatus);
+            };
         });
-        document.querySelectorAll('.btn-approve-no').forEach(b => {
-            b.onclick = function() { approveBooking(this.dataset.key, false); }
-        });
-        document.querySelectorAll('.btn-cancel-yes').forEach(b => {
-            b.onclick = function() { approveCancelRequest(this.dataset.key); }
-        });
+    }
+
+    // 删除按钮绑定
+    function bindDeleteReservationButtons() {
         document.querySelectorAll('.btn-force-del').forEach(b => {
             b.onclick = function() { deleteSingleReservation(this.dataset.key, this.dataset.slotid, this.dataset.name); }
         });
+    }
+
+    // 管理端自由切换预约状态
+    function changeReservationStatus(resKey, newStatus, oldStatus) {
+        if (newStatus === oldStatus) return;
+        const statusLabels = { booked: '已预约', confirmed: '已确认', completed: '已完成', canceled: '已取消' };
+        const newLabel = statusLabels[newStatus] || newStatus;
+        const oldLabel = statusLabels[oldStatus] || oldStatus;
+
+        if (!confirm(`确定将状态从「${oldLabel}」改为「${newLabel}」吗？`)) {
+            // 还原下拉框
+            document.querySelector(`.status-select-admin[data-key="${resKey}"]`).value = oldStatus;
+            return;
+        }
+
+        const updates = {};
+        updates[`years/${viewingYear}/reservations/${resKey}/status`] = newStatus;
+
+        // 如果改为已取消，释放排班 slot
+        if (newStatus === 'canceled') {
+            SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snap => {
+                const r = snap.val();
+                if (r && r.slotId) {
+                    updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = false;
+                }
+                applyStatusUpdate();
+            }).catch(() => { alert('读取预约信息失败，请重试。'); });
+        } else {
+            applyStatusUpdate();
+        }
+
+        function applyStatusUpdate() {
+            db.ref().update(updates).then(() => {
+                SystemRouter.getLogsRef(viewingYear).push({
+                    action: `管理员将预约状态从 [${oldLabel}] 改为 [${newLabel}]`,
+                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                });
+                // 更新下拉框颜色
+                const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
+                if (selectEl) {
+                    selectEl.dataset.oldstatus = newStatus;
+                    const colors = { booked: '#e6a23c', confirmed: '#409eff', completed: '#67c23a', canceled: '#909399' };
+                    selectEl.style.color = colors[newStatus] || '#909399';
+                }
+            }).catch(() => {
+                alert('状态修改失败，请重试。');
+                const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
+                if (selectEl) selectEl.value = oldStatus;
+            });
+        }
     }
 
     document.getElementById('btn-del-notice-img').onclick = function() {
