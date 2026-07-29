@@ -251,12 +251,24 @@
                 r.id = resKey; reservationsData.push(r);
                 let currentStatus = r.status || "booked";
 
-                let submitDateStr = "历史记录";
-                if (r.timestamp) {
-                    const d = new Date(r.timestamp);
-                    if (!isNaN(d.getTime())) submitDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+                // 优先按排班 slot 的创建时间分组（解码 Firebase push ID 时间戳）
+                // 解析失败则回退到同学提交时间
+                let groupDateStr = null;
+                if (r.slotId) {
+                    const ts = decodePushIdTimestamp(r.slotId);
+                    if (ts) {
+                        const d = new Date(ts);
+                        groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+                    }
                 }
-                if (!resGroups[submitDateStr]) resGroups[submitDateStr] = []; resGroups[submitDateStr].push({ key: resKey, data: r });
+                if (!groupDateStr && r.timestamp) {
+                    const d = new Date(r.timestamp);
+                    if (!isNaN(d.getTime())) groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+                }
+                if (!groupDateStr) groupDateStr = "历史记录";
+
+                if (!resGroups[groupDateStr]) resGroups[groupDateStr] = [];
+                resGroups[groupDateStr].push({ key: resKey, data: r });
             });
 
             Object.keys(resGroups).sort().reverse().forEach(submitDate => {
@@ -705,6 +717,19 @@
     }
 
     // 状态下拉框自由切换
+    // 解码 Firebase push ID 中的创建时间戳（前8位为 base64 编码的毫秒时间）
+    function decodePushIdTimestamp(pushId) {
+        if (!pushId || pushId.length < 8) return null;
+        const PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+        let timestamp = 0;
+        for (let i = 0; i < 8; i++) {
+            const idx = PUSH_CHARS.indexOf(pushId.charAt(i));
+            if (idx === -1) return null;
+            timestamp = timestamp * 64 + idx;
+        }
+        return timestamp;
+    }
+
     function bindStatusDropdownEvents() {
         document.querySelectorAll('.status-select-admin').forEach(select => {
             select.onchange = function() {
@@ -726,12 +751,6 @@
         const statusLabels = { booked: '已预约', confirmed: '已确认', completed: '已完成', canceled: '已取消' };
         const newLabel = statusLabels[newStatus] || newStatus;
         const oldLabel = statusLabels[oldStatus] || oldStatus;
-
-        if (!confirm(`确定将状态从「${oldLabel}」改为「${newLabel}」吗？`)) {
-            // 还原下拉框
-            document.querySelector(`.status-select-admin[data-key="${resKey}"]`).value = oldStatus;
-            return;
-        }
 
         const updates = {};
         updates[`years/${viewingYear}/reservations/${resKey}/status`] = newStatus;
