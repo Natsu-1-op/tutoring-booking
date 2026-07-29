@@ -33,12 +33,9 @@ function executeManualGateAuth() {
 }
 
 function switchPane(el, id) {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
-
-    if (el && el.classList) { el.classList.add('active'); }
-    else { document.getElementById('tab-btn-rank').classList.add('active'); }
-
+    document.querySelectorAll('.teacher-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.teacher-pane').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
     document.getElementById(id).classList.add('active');
     if (id === 'pane-rank') { listenFirebasePaperTitles(); }
 }
@@ -69,7 +66,7 @@ function decryptEngine(cipherText, salt) {
     } catch (e) { return null; }
 }
 
-// ================= 阶段一：出题命卷 =================
+// ================= 出题命卷 =================
 function addQ(existingData) {
     if (existingData === undefined) existingData = null;
     qCount++;
@@ -77,28 +74,28 @@ function addQ(existingData) {
     const div = document.createElement('div');
     div.className = 'question-builder-item';
     div.id = `qb-${qCount}`;
-    const localCount = qCount;
+    const n = qCount;
 
     div.innerHTML = `
-        <div class="remove-btn" onclick="document.getElementById('${div.id}').remove()">移除本题</div>
-        <div style="display:flex; gap:10px; margin-bottom:8px;">
-            <select class="t-type" style="width:160px;" onchange="document.getElementById('opt-box-${localCount}').style.display = (this.value==='choice')?'block':'none'">
+        <button class="q-remove-btn" onclick="removeQuestion('${div.id}')" title="删除此题">✕</button>
+        <div class="q-meta-row">
+            <select class="t-type q-type-select" onchange="document.getElementById('opt-box-${n}').style.display = (this.value==='choice')?'block':'none'">
                 <option value="choice">选择题</option><option value="judge">判断题</option>
-                <option value="blank-auto">客观填空题 (自动阅卷)</option><option value="blank-hand">主观填空题 (人工阅卷)</option><option value="calculation">主观计算题 (人工阅卷)</option>
+                <option value="blank-auto">客观填空</option><option value="blank-hand">主观填空</option><option value="calculation">计算题</option>
             </select>
-            <input type="text" class="t-score" placeholder="分值" value="5" style="width:80px;">
-            <input type="text" class="t-ans" placeholder="自动阅卷试题标准答案" style="flex:1;">
+            <input type="text" class="t-score q-score-input" placeholder="分值" value="5">
+            <input type="text" class="t-ans q-ans-input" placeholder="标准答案（自动阅卷用）">
         </div>
-        <textarea class="t-stem" placeholder="输入题干，公式使用 $ 包裹..."></textarea>
-        <div class="form-group opt-config-div" id="opt-box-${localCount}">
-            <input type="text" class="t-opts" value="A. , B. , C. , D. ">
+        <textarea class="t-stem q-stem-input" placeholder="输入题干，数学公式用 $...$ 包裹"></textarea>
+        <div class="opt-config-div" id="opt-box-${n}" style="display:none;">
+            <input type="text" class="t-opts q-opts-input" value="A. , B. , C. , D. " placeholder="选项，逗号分隔">
         </div>
         <div class="img-upload-row">
-            <input type="file" accept="image/*" onchange="previewAndSaveStemImage(this, ${localCount})">
+            <input type="file" accept="image/*" onchange="previewAndSaveStemImage(this, ${n})">
             <input type="hidden" class="t-img-base64">
-            <img id="builder-img-view-${localCount}" class="builder-img-preview">
-            <button style="display:none; background:#ff4d4f; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;" id="builder-img-del-btn-${localCount}"
-                onclick="document.getElementById('qb-${localCount}').querySelector('.t-img-base64').value=''; document.getElementById('builder-img-view-${localCount}').style.display='none'; this.style.display='none'">删除附图</button>
+            <img id="builder-img-view-${n}" class="builder-img-preview">
+            <button class="q-img-del-btn" id="builder-img-del-btn-${n}" style="display:none;"
+                onclick="clearStemImage(${n})">删除附图</button>
         </div>`;
     c.appendChild(div);
 
@@ -112,14 +109,39 @@ function addQ(existingData) {
         }
         if (existingData.stemImage) {
             div.querySelector('.t-img-base64').value = existingData.stemImage;
-            const imgView = document.getElementById(`builder-img-view-${localCount}`);
+            const imgView = document.getElementById(`builder-img-view-${n}`);
             imgView.src = existingData.stemImage;
             imgView.style.display = 'block';
-            document.getElementById(`builder-img-del-btn-${localCount}`).style.display = 'inline-block';
+            document.getElementById(`builder-img-del-btn-${n}`).style.display = 'inline-block';
         }
     }
-    document.getElementById(`opt-box-${localCount}`).style.display =
+    document.getElementById(`opt-box-${n}`).style.display =
         (div.querySelector('.t-type').value === 'choice') ? 'block' : 'none';
+
+    // 滚动到新试题
+    div.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// 删除单题
+function removeQuestion(divId) {
+    const el = document.getElementById(divId);
+    if (el) el.remove();
+}
+
+// 清空全部试题
+function clearAllQuestions() {
+    const container = document.getElementById('builder-list-container');
+    if (container.children.length === 0) return;
+    if (!confirm('确定要清空全部试题吗？此操作不可恢复。')) return;
+    container.innerHTML = '';
+    qCount = 0;
+}
+
+// 清理试题附图
+function clearStemImage(n) {
+    document.getElementById(`qb-${n}`).querySelector('.t-img-base64').value = '';
+    document.getElementById(`builder-img-view-${n}`).style.display = 'none';
+    document.getElementById(`builder-img-del-btn-${n}`).style.display = 'none';
 }
 
 window.previewAndSaveStemImage = function(fileInput, id) {
@@ -695,4 +717,4 @@ function renderReviewWorkspace(pack) {
 }
 
 // ================= 初始化 =================
-addQ();
+// 不再自动创建空试题，教师点击「新增试题」手动添加

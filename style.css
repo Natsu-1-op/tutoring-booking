@@ -300,14 +300,18 @@ th { background: #f9f9f9; }
 
 /* 试题编辑器 */
 .question-builder-item { border:2px solid #e4e7ed; padding:20px; border-radius:10px; margin-bottom:14px; background:#fafbfc; position:relative; }
-.question-builder-item .remove-btn { position:absolute; top:14px; right:16px; color:#f56c6c; cursor:pointer; font-weight:bold; font-size:13px; }
-.question-builder-item select, .question-builder-item input[type="text"], .question-builder-item textarea {
-    padding:8px 12px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; box-sizing:border-box;
-}
-.question-builder-item textarea { width:100%; min-height:80px; resize:vertical; font-family:inherit; margin-top:8px; }
-.question-builder-item .t-type { width:160px; }
-.question-builder-item .t-score { width:80px; }
-.img-upload-row { margin-top:10px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.q-remove-btn { position:absolute; top:10px; right:12px; background:#fff; color:#f56c6c; border:1px solid #fde2e2; border-radius:50%; width:28px; height:28px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; line-height:1; }
+.q-remove-btn:hover { background:#fef0f0; border-color:#f56c6c; }
+.q-meta-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.q-type-select { width:130px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-score-input { width:70px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-ans-input { flex:1; min-width:150px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-stem-input { width:100%; min-height:80px; padding:10px 12px; border:2px solid #e4e7ed; border-radius:8px; font-size:14px; resize:vertical; font-family:inherit; margin-bottom:8px; box-sizing:border-box; }
+.q-stem-input:focus, .q-ans-input:focus, .q-type-select:focus, .q-score-input:focus { border-color:#409eff; outline:none; }
+.q-opts-input { width:100%; padding:8px 12px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; box-sizing:border-box; margin-bottom:8px; }
+.q-img-del-btn { background:#ff4d4f; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
+.q-img-del-btn:hover { background:#e60000; }
+.img-upload-row { margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .builder-img-preview { max-height:80px; border-radius:6px; display:none; }
 
 /* 评卷工作区 */
