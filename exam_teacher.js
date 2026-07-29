@@ -478,7 +478,7 @@ function renderGlobalScoreSummaryTable() {
     classResults.forEach((r, idx) => {
         h += `<tr><td><b>${escapeHtml(r.name)}</b></td><td>${escapeHtml(r.paperTitle)}</td><td>${r.time}</td>
                 <td><span class="score-editable" ondblclick="manuallyOverrideTotalScore(${idx})">${r.score}</span></td>
-                <td><button class="btn-action btn-danger-sm" onclick="removeRecordFromSummaryTable(${idx})">删除</button></td></tr>`;
+                <td><button class="teacher-btn teacher-btn-sm" style="background:#ff4d4f;color:#fff;" onclick="removeRecordFromSummaryTable(${idx})">删除</button></td></tr>`;
     });
     document.getElementById('table-render').innerHTML = h + "</table>";
     document.getElementById('summary-zone').style.display = classResults.length > 0 ? 'block' : 'none';
@@ -581,7 +581,7 @@ function calculateAndRenderRankDashboard() {
             tableHtml += `<tr><td style="text-align:center;">${rankLabelHtml}</td><td><b>${escapeHtml(row.name)}</b></td><td>${escapeHtml(row.paperTitle)}</td>
                 <td><span class="rank-score" ondblclick="manuallyOverrideCloudScore('${currentSelectedEncKey}', '${encodeURIComponent(row.name).replace(/\./g, '%2E')}', ${row.score})">${row.score} 分</span></td>
                 <td class="text-gray" style="font-size:12px;">${row.time}</td>
-                <td style="text-align:center;"><button class="btn-action btn-danger-sm" onclick="removeRecordFromCloud('${currentSelectedEncKey}', '${encodeURIComponent(row.name).replace(/\./g, '%2E')}')">删除</button></td></tr>`;
+                <td style="text-align:center;"><button class="teacher-btn teacher-btn-sm" style="background:#ff4d4f;color:#fff;" onclick="removeRecordFromCloud('${currentSelectedEncKey}', '${encodeURIComponent(row.name).replace(/\./g, '%2E')}')">删除</button></td></tr>`;
         });
         wrapper.innerHTML = tableHtml + `</table>`;
     }).catch(() => { wrapper.innerHTML = '<p class="msg-error">加载排名数据失败。</p>'; });

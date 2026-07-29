@@ -213,7 +213,7 @@ function startReviewPackageWorkspace() {
             document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
             document.querySelectorAll('.r-dot').forEach(d => d.classList.remove('active'));
             dot.classList.add('active');
-            document.querySelector('.main-content').scrollTop = 0;
+            document.querySelector('.exam-main-content').scrollTop = 0;
             if (window.MathJax) { MathJax.typesetPromise([nextActiveCard]).catch(() => {}); }
             document.getElementById('btn-prev').style.visibility = currentQuestionIndex === 0 ? 'hidden' : 'visible';
             document.getElementById('btn-next').style.display = currentQuestionIndex === totalQCount - 1 ? 'none' : 'block';
@@ -327,7 +327,7 @@ window.changeQuestion = function(dir) {
     const nextActiveCard = document.getElementById(`q-card-${currentQuestionIndex}`);
     nextActiveCard.classList.add('active');
     document.getElementById('current-idx-text').textContent = currentQuestionIndex + 1;
-    document.querySelector('.main-content').scrollTop = 0;
+    document.querySelector('.exam-main-content').scrollTop = 0;
     if (window.MathJax) { MathJax.typesetPromise([nextActiveCard]).catch(() => {}); }
     updateBtnState();
 };

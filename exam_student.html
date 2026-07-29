@@ -4,22 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>考试与复盘</title>
+
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
     <script>
         window.MathJax = {
-            tex: {
-                inlineMath: [['$', '$'], ['\\(', '\\)']],
-                displayMath: [['$$', '$$']]
-            },
+            tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$']] },
             options: { renderActions: { addMenu: [] } },
-            startup: {
-                ready: () => {
-                    MathJax.startup.defaultReady();
-                    MathJax.startup.document.outputJax.options.displayAlign = 'left';
-                }
-            }
+            startup: { ready: () => { MathJax.startup.defaultReady(); MathJax.startup.document.outputJax.options.displayAlign = 'left'; } }
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
@@ -28,102 +21,80 @@
     <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
 
     <link rel="stylesheet" href="style.css">
-    <style>
-        /* 仅保留本页独有布局样式 */
-        #auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
-        .auth-card { width: 100%; max-width: 400px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 30px; border-radius: 12px; background: #fff; }
-        .auth-card input { width: 100%; padding: 12px; margin: 12px 0; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; text-align: center; }
-        .mode-switch-tabs { display: flex; background: #e4e7ed; padding: 4px; border-radius: 8px; margin-bottom: 20px; width: 100%; }
-        .m-btn { flex: 1; padding: 10px; border: none; background: transparent; font-weight: bold; font-size: 14px; cursor: pointer; border-radius: 6px; }
-        .m-btn.active { background: #fff; color: var(--primary); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
-        .app-container { display: none; margin: 0 auto; min-height: 100vh; flex-direction: column; background: #fff; position: relative; }
-        .header-bar { background: #fff; border-bottom: 1px solid #e0e0e0; padding: 15px; position: sticky; top: 0; z-index: 10; }
-        .paper-meta-info { background: #f0f7ff; border: 1px solid #b3d8ff; border-radius: 8px; padding: 12px; margin-bottom: 15px; font-size: 14px; color: #004085; position: relative; }
-        .paper-meta-info div { margin-bottom: 4px; }
-        .save-status-badge { position: absolute; top: 12px; right: 12px; background: #e6ffed; border: 1px solid #b7eb8f; color: #28a745; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; opacity: 0; transition: opacity 0.3s ease; }
-        .save-status-badge.show { opacity: 1; }
-        .timer-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-top: 5px; }
-        .timer-box { font-size: 16px; color: #e6a23c; }
-        .main-content { flex: 1; padding: 20px 15px; overflow-y: auto; }
-        #cropper-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 1000; display: none; flex-direction: column; }
-        .cropper-container-wrapper { flex: 1; position: relative; overflow: hidden; }
-        .cropper-toolbar { background: rgba(0,0,0,0.85); padding: 15px; display: flex; justify-content: space-between; gap: 10px; }
-        .cropper-toolbar button { flex: 1; padding: 12px; font-size: 14px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
-        .review-float-panel-btn { position: fixed; bottom: 80px; right: 20px; background: #333; color: white; width: 50px; height: 50px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 99; cursor: pointer; text-align: center; line-height: 1.2; }
-        #review-nav-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: none; justify-content: center; align-items: center; padding: 20px; }
-        .review-nav-card { background: white; width: 100%; max-width: 360px; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
-        .nav-footer { border-top: 1px solid #e0e0e0; padding: 15px; display: flex; gap: 10px; background: #fff; position: sticky; bottom: 0; z-index: 10; }
-        .nav-footer button { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: bold; border: none; cursor: pointer; }
-        .btn-sub { background: #f4f4f5; color: #606266; border: 1px solid #dcdfe6 !important; }
-        .btn-submit { background: var(--success); color: white; }
-    </style>
 </head>
 <body>
 
-    <div id="auth-overlay">
-        <div class="auth-card">
-            <div class="mode-switch-tabs">
-                <button class="m-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">考试模式</button>
-                <button class="m-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">复查模式</button>
+    <!-- 认证遮罩 -->
+    <div id="auth-overlay" class="exam-auth-overlay">
+        <div class="exam-auth-card">
+            <div class="exam-mode-tabs">
+                <button class="exam-mode-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">考试模式</button>
+                <button class="exam-mode-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">复查模式</button>
             </div>
             <div id="view-box-exam">
                 <input type="file" id="input-paper-json" accept=".json">
-                <div id="student-name-zone" style="display: none; margin-top: 10px;">
-                    <input type="text" id="student-name" placeholder="例如：丁真">
-                    <button style="width:100%; padding:12px; background:var(--primary); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;" onclick="verifyAndStartExam()">进入考试</button>
+                <div id="student-name-zone" style="display:none;">
+                    <input type="text" id="student-name" placeholder="例如：丁真" class="exam-name-input">
+                    <button class="exam-start-btn" onclick="verifyAndStartExam()">进入考试</button>
                 </div>
             </div>
-            <div id="view-box-review" style="display: none;">
-                <div style="margin-bottom: 8px; text-align: left;"><label>请导入评卷打分包：</label></div>
+            <div id="view-box-review" style="display:none;">
+                <p class="exam-import-label">请导入评卷打分包：</p>
                 <input type="file" id="input-review-package" accept=".json">
             </div>
-            <p id="auth-error" style="color: var(--danger); font-weight: bold; margin-top: 15px; font-size:14px;"></p>
+            <p id="auth-error" class="exam-auth-error"></p>
         </div>
     </div>
 
-    <div class="app-container" id="exam-app">
-        <div class="header-bar">
-            <div class="paper-meta-info">
-                <div class="save-status-badge" id="save-light">已自动保存</div>
+    <!-- 考试主界面 -->
+    <div class="exam-app-container" id="exam-app">
+        <div class="exam-header-bar">
+            <div class="exam-paper-meta">
+                <div class="exam-save-badge" id="save-light">已自动保存</div>
                 <div><b>考试科目：</b><span id="meta-paper-title">-</span></div>
                 <div><b>答题学生：</b><span id="meta-student-name" class="text-red text-bold">-</span></div>
-                <div><b>有效时段：</b><br><span id="meta-time-window" class="text-gray" style="font-size:12px;">-</span></div>
+                <div><b>有效时段：</b><br><span id="meta-time-window" class="exam-meta-sub">-</span></div>
             </div>
-            <div class="timer-row">
-                <div class="text-gray" style="font-size:14px;">当前进度: <span id="current-idx-text">1</span>/<span id="total-idx-text">1</span></div>
-                <div class="timer-box" id="exam-timer">已答题 00:00</div>
+            <div class="exam-timer-row">
+                <span class="exam-progress-text">当前进度: <span id="current-idx-text">1</span>/<span id="total-idx-text">1</span></span>
+                <span class="exam-timer-box" id="exam-timer">已答题 00:00</span>
             </div>
         </div>
-        <div class="main-content" id="questions-wrapper"></div>
-        <div class="nav-footer">
-            <button class="btn-sub" id="btn-prev" onclick="changeQuestion(-1)">上一题</button>
-            <button class="btn-sub" id="btn-next" onclick="changeQuestion(1)">下一题</button>
-            <button class="btn-submit" id="btn-finish" style="display: none;" onclick="triggerManualSubmit(false)">提交答卷</button>
+
+        <div class="exam-main-content" id="questions-wrapper"></div>
+
+        <div class="exam-nav-footer">
+            <button class="exam-nav-btn" id="btn-prev" onclick="changeQuestion(-1)">上一题</button>
+            <button class="exam-nav-btn" id="btn-next" onclick="changeQuestion(1)">下一题</button>
+            <button class="exam-submit-btn" id="btn-finish" onclick="triggerManualSubmit(false)">提交答卷</button>
         </div>
     </div>
 
+    <!-- 全屏看图 -->
     <div id="global-lightbox" class="lightbox-overlay" onclick="closeGlobalLightbox()">
         <img id="global-lightbox-img" src="" alt="全屏大图">
     </div>
 
-    <div class="review-float-panel-btn" id="review-panel-trigger" style="display: none;" onclick="openReviewNavModal()">答题<br>面板</div>
-    <div id="review-nav-modal" onclick="closeReviewNavModal()">
-        <div class="review-nav-card" onclick="event.stopPropagation()">
-            <h3 style="margin-top:0;text-align:center;">答题面板</h3>
+    <!-- 复查答题面板 -->
+    <div class="review-float-btn" id="review-panel-trigger" onclick="openReviewNavModal()">答题<br>面板</div>
+    <div id="review-nav-modal" class="review-modal-overlay" onclick="closeReviewNavModal()">
+        <div class="review-modal-card" onclick="event.stopPropagation()">
+            <h3 class="review-modal-title">答题面板</h3>
             <div class="review-grid-grid" id="review-grid-dots-container"></div>
-            <button class="btn-sub" style="width:100%;margin-top:20px;padding:10px;border-radius:6px;font-weight:bold;" onclick="closeReviewNavModal()">关闭悬浮盘</button>
+            <button class="review-modal-close-btn" onclick="closeReviewNavModal()">关闭面板</button>
         </div>
     </div>
 
-    <div id="cropper-modal">
-        <div class="cropper-container-wrapper"><img id="cropper-image" src=""></div>
+    <!-- 图片裁剪 -->
+    <div id="cropper-modal" class="cropper-full-modal">
+        <div class="cropper-wrap"><img id="cropper-image" src=""></div>
         <div class="cropper-toolbar">
-            <button style="background: #555; color: white;" onclick="closeCropperModal()">取消</button>
-            <button style="background: #e6a23c; color: white;" onclick="rotateImage()">旋转90°</button>
-            <button style="background: var(--success); color: white;" onclick="saveCroppedResult()">保存裁剪</button>
+            <button class="cropper-btn-cancel" onclick="closeCropperModal()">取消</button>
+            <button class="cropper-btn-rotate" onclick="rotateImage()">旋转90°</button>
+            <button class="cropper-btn-save" onclick="saveCroppedResult()">保存裁剪</button>
         </div>
     </div>
-    <input type="file" id="hidden-camera-input" accept="image/*" style="display: none;">
+    <input type="file" id="hidden-camera-input" accept="image/*" class="hidden-file-input">
 
     <script src="config/firebase-env.js"></script>
     <script src="exam_student.js"></script>
