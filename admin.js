@@ -246,21 +246,37 @@
 
             const resGroups = {};
 
+            const SLOT_CUTOFF = new Date('2026-07-26T00:00:00+08:00').getTime();
+
             Object.keys(res).forEach(resKey => {
                 const r = res[resKey]; if (!r) return;
                 r.id = resKey; reservationsData.push(r);
-                let currentStatus = r.status || "booked";
 
-                // 优先按排班 slot 的创建时间分组（解码 Firebase push ID 时间戳）
-                // 解析失败则回退到同学提交时间
+                // 分组策略：
+                // 1. 2026/7/26 之后创建的 slot → 按 slot 创建时间分组
+                // 2. 2026/7/26 之前 → 按实际上课时间（r.time）分组
+                // 3. 都解析失败 → 回退到同学提交时间
                 let groupDateStr = null;
+
+                // 先尝试 slot 创建时间（仅对新数据生效）
                 if (r.slotId) {
-                    const ts = decodePushIdTimestamp(r.slotId);
-                    if (ts) {
-                        const d = new Date(ts);
+                    const slotTs = decodePushIdTimestamp(r.slotId);
+                    if (slotTs && slotTs >= SLOT_CUTOFF) {
+                        const d = new Date(slotTs);
                         groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
                     }
                 }
+
+                // 旧数据：按实际上课时间分类
+                if (!groupDateStr && r.time) {
+                    const parsed = TimeParser.parseRawText(r.time, viewingYear);
+                    if (parsed && parsed.date) {
+                        // date 已是 YYYY-MM-DD 格式，转为 YYYY/MM/DD 保证与 slot 分组格式一致
+                        groupDateStr = parsed.date.replace(/-/g, '/');
+                    }
+                }
+
+                // 最终回退：同学提交时间
                 if (!groupDateStr && r.timestamp) {
                     const d = new Date(r.timestamp);
                     if (!isNaN(d.getTime())) groupDateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
