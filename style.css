@@ -128,6 +128,8 @@ th { background: #f9f9f9; }
 }
 
 /* ========== 考试系统样式 ========== */
+.exam-student-body { max-width:none; margin:0; padding:0; background:#f5f7fa; }
+
 /* ---- 学生端认证页 ---- */
 .exam-auth-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:#fff; z-index:999; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:20px; }
 .exam-auth-card { width:100%; max-width:400px; text-align:center; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.08); }
@@ -248,7 +250,7 @@ th { background: #f9f9f9; }
 .exam-standard-answer { color:#409eff; font-size:14px; margin-top:10px; }
 
 /* ---- 教师端页面 ---- */
-.teacher-body { font-family:system-ui,sans-serif; background:#f4f6f9; padding:20px; color:#333; margin:0; }
+.teacher-body { font-family:system-ui,sans-serif; background:#f4f6f9; padding:20px; color:#333; margin:0; max-width:none; }
 
 /* 门禁 */
 .teacher-gate-mask { position:fixed; top:0; left:0; width:100%; height:100%; background:#f4f6f9; z-index:100010; display:flex; justify-content:center; align-items:center; }
@@ -284,7 +286,7 @@ th { background: #f9f9f9; }
 
 /* 按钮 */
 .teacher-btn-row { display:flex; gap:10px; margin-top:16px; }
-.teacher-btn { padding:10px 20px; border-radius:8px; font-weight:bold; font-size:14px; cursor:pointer; border:none; transition:all 0.15s; }
+.teacher-btn { padding:8px 16px; border-radius:8px; font-weight:bold; font-size:13px; cursor:pointer; border:none; transition:all 0.15s; }
 .teacher-btn-gray { background:#6c757d; color:#fff; }
 .teacher-btn-gray:hover { background:#5a6268; }
 .teacher-btn-green { background:#67c23a; color:#fff; }
