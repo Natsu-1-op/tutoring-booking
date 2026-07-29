@@ -205,3 +205,79 @@ th { background: #f9f9f9; }
 /* 考试图片标签 */
 .exam-img-label { font-size: 12px; color: #999; display: block; }
 .exam-standard-answer { color: var(--primary); font-size: 14px; margin-top: 8px; }
+
+/* 学生考试容器基值（小屏默认） */
+.app-container { max-width: 100%; }
+
+/* ========== 考试系统响应式 ========== */
+
+/* ——— 平板及以上 (>768px) ——— */
+@media screen and (min-width: 768px) {
+    /* 学生考试端放宽宽度 */
+    .app-container { max-width: 800px; }
+    .question-stem { font-size: 17px; }
+    .option-item { font-size: 16px; padding: 16px; }
+    .text-answer-box { font-size: 16px; }
+
+    /* 教师评卷：双栏更大 */
+    .grading-left-core { min-width: 0; }
+    .ans-panel { min-width: 320px; }
+}
+
+/* ——— 桌面 (>1024px) ——— */
+@media screen and (min-width: 1024px) {
+    /* 学生端进一步放宽 */
+    .app-container { max-width: 900px; }
+    .question-stem { font-size: 18px; line-height: 2; }
+    .options-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    .options-list .option-item { margin: 0; }
+    .nav-footer button { font-size: 16px; padding: 14px; }
+
+    /* 图片可更大 */
+    .click-zoom-img { max-height: 240px; }
+
+    /* 教师端 grading 面板更宽 */
+    .grading-right-panel { width: 360px; }
+}
+
+/* ——— 手机 (<640px) ——— */
+@media screen and (max-width: 640px) {
+    /* --- 考试学生端 --- */
+    .app-container { max-width: 100%; }
+    .header-bar { padding: 10px 12px; }
+    .main-content { padding: 15px 12px; }
+
+    /* 选项恢复单列 */
+    .options-list { grid-template-columns: 1fr; }
+
+    /* --- 考试教师端 --- */
+    body { padding: 8px; }
+    .container { padding: 15px 12px; }
+
+    /* Tab 按钮缩小 */
+    .tabs { flex-wrap: wrap; gap: 5px; }
+    .tab-btn { font-size: 12px; padding: 8px 6px; flex: 1 1 calc(50% - 5px); min-width: 0; }
+
+    /* 评卷布局从双栏变单栏 */
+    .grading-workspace { flex-direction: column; }
+    .grading-right-panel { width: 100%; position: static; }
+    .grading-split { flex-direction: column; }
+    .score-panel { width: 100%; }
+
+    /* 题库编辑 */
+    .question-builder-item { padding: 12px; }
+    .btn-action { font-size: 14px; padding: 8px 12px; }
+
+    /* 排名表横向滚动 */
+    .rank-table-wrapper { overflow-x: auto; }
+    .rank-table { font-size: 12px; }
+    .rank-table th, .rank-table td { padding: 6px 4px; }
+
+    /* 复查卡片 */
+    .review-card { padding: 12px; }
+    .analytics-dashboard-card { flex-direction: column; gap: 10px; font-size: 13px; }
+}

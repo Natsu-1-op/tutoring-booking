@@ -75,13 +75,13 @@
 
     <div class="container">
         <div class="tabs" id="main-system-tabs">
-            <button class="tab-btn active" onclick="switchPane(this, 'pane-make')">阶段一：出题命卷</button>
-            <button class="tab-btn" onclick="switchPane(this, 'pane-grade')">阶段二：评卷中心</button>
-            <button class="tab-btn" onclick="switchPane(this, 'pane-review')">阶段三：成绩复查</button>
-            <button class="tab-btn" id="tab-btn-rank" onclick="switchPane(this, 'pane-rank')">阶段四：成绩排名</button>
+            <button class="tab-btn active" onclick="switchPane(this, 'pane-make')">出题命卷</button>
+            <button class="tab-btn" onclick="switchPane(this, 'pane-grade')">评卷中心</button>
+            <button class="tab-btn" onclick="switchPane(this, 'pane-review')">成绩复查</button>
+            <button class="tab-btn" id="tab-btn-rank" onclick="switchPane(this, 'pane-rank')">成绩排名</button>
         </div>
 
-        <!-- 阶段一：出题命卷 -->
+        <!-- 出题命卷 -->
         <div class="pane active" id="pane-make">
             <div class="import-section">
                 <label class="text-gray text-bold">试卷二次编辑：</label>
@@ -100,7 +100,7 @@
             <button class="btn-action" style="background:#67c23a; width:100%; margin-top:20px; font-size:16px;" onclick="exportJsonPapers()">生成并导出试卷与母卷</button>
         </div>
 
-        <!-- 阶段二：评卷中心 -->
+        <!-- 评卷中心 -->
         <div class="pane" id="pane-grade">
             <div class="import-section import-section-blue">
                 <label>请先导入本地教师明文母卷 (Master)：</label>
@@ -139,7 +139,7 @@
             </div>
         </div>
 
-        <!-- 阶段三：成绩复查 -->
+        <!-- 成绩复查 -->
         <div class="pane" id="pane-review">
             <div class="import-section import-section-yellow">
                 <label>请导入评卷打分包 (JSON)：</label>
@@ -162,7 +162,7 @@
             </div>
         </div>
 
-        <!-- 阶段四：成绩排名 -->
+        <!-- 成绩排名 -->
         <div class="pane" id="pane-rank">
             <div class="paper-filter-wrapper">
                 <label class="text-blue text-bold" style="white-space:nowrap; margin:0;">请选择云端考卷：</label>
