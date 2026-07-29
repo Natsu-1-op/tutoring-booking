@@ -286,6 +286,7 @@ th { background: #f9f9f9; }
 
 /* 按钮 */
 .teacher-btn-row { display:flex; gap:10px; margin-top:16px; }
+.teacher-btn-row-equal .teacher-btn { flex:1; padding:10px 0; font-size:14px; }
 .teacher-btn { padding:8px 16px; border-radius:8px; font-weight:bold; font-size:13px; cursor:pointer; border:none; transition:all 0.15s; }
 .teacher-btn-gray { background:#6c757d; color:#fff; }
 .teacher-btn-gray:hover { background:#5a6268; }
