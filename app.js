@@ -98,10 +98,10 @@ function bindActiveYearListeners() {
             const displayTime = parsed ? parsed.formattedSlotText : item.data.time;
 
             if (item.data.reserved) {
-                div.innerHTML = `<span>${escapeHtml(displayTime)}</span> <span style="color:#ff4d4f;">(已满)</span>`;
+                div.innerHTML = `<span>${escapeHtml(displayTime)}</span> <span class="text-red">(已满)</span>`;
             } else {
-                div.innerHTML = `<label style="display:flex; align-items:center; width:100%; cursor:pointer; font-weight:normal; margin:0;">
-                    <input type="radio" name="slot" value="${item.id}" data-time="${escapeHtml(item.data.time)}" style="margin-right:10px;">${escapeHtml(displayTime)}</label>`;
+                div.innerHTML = `<label class="slot-radio-label">
+                    <input type="radio" name="slot" value="${item.id}" data-time="${escapeHtml(item.data.time)}">${escapeHtml(displayTime)}</label>`;
             }
             container.appendChild(div);
         });
@@ -235,7 +235,7 @@ function loadMyHistory() {
     if (!searchName) return alert('请输入真实姓名！');
     if (!searchCode) return alert('请输入5位取消凭证码！');
 
-    container.innerHTML = '<p style="text-align:center; color:#999;">正在查询...</p>';
+    container.innerHTML = '<p class="msg-hint">正在查询...</p>';
 
     SystemRouter.getReservationsRef(SystemRouter.activeYear)
         .orderByChild('nickname')
@@ -245,7 +245,7 @@ function loadMyHistory() {
             const isAuthPassed = reservations ? Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode) : false;
             if (!isAuthPassed) {
                 // 统一提示信息，不区分「姓名不存在」和「凭证码错误」，防止信息泄露
-                container.innerHTML = `<p style="text-align:center; color:#f56c6c; font-weight:bold; padding:20px;">姓名或凭证码错误！</p>`;
+                container.innerHTML = `<p class="msg-error">姓名或凭证码错误！</p>`;
                 return;
             }
 
@@ -257,11 +257,11 @@ function loadMyHistory() {
                 switch(currentStatus) {
                     case "booked":
                         statusText = "已预约"; badgeClass = "status-pending";
-                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">取消预约</button>`;
+                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking('${key}')">取消预约</button>`;
                         break;
                     case "confirmed":
                         statusText = "已确认"; badgeClass = "status-confirmed";
-                        actionButtonHtml = `<button class="action-btn" style="background:#f56c6c;" onclick="requestCancelBooking('${key}')">取消预约</button>`;
+                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking('${key}')">取消预约</button>`;
                         break;
                     case "completed": statusText = "已完成"; badgeClass = "status-completed"; break;
                     case "canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
@@ -269,21 +269,19 @@ function loadMyHistory() {
 
                 listHtml += `
                     <div class="history-card">
-                        <div class="card-row"><b>辅导时段：</b><span style="color:#409eff; font-weight:bold;">${escapeHtml(r.time)}</span></div>
+                        <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(r.time)}</span></div>
                         <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></div>
-                        <div class="card-row" style="color:#999; font-size:12px;"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
-                        <div class="card-row" style="color:#999; font-size:12px;"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
-                        <div style="margin-top:10px; border-top:1px dashed #eee; padding-top:8px; text-align:right;">
-                            ${actionButtonHtml}
-                        </div>
+                        <div class="card-row card-row-sub"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
+                        <div class="card-row card-row-sub"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
+                        <div class="card-footer">${actionButtonHtml}</div>
                     </div>`;
             });
 
-            if (count === 0) container.innerHTML = `<p style="text-align:center; color:#999; padding:20px;">未找到对应的记录。</p>`;
+            if (count === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
             else container.innerHTML = listHtml;
         }).catch((err) => {
             console.error('查询历史记录失败:', err);
-            container.innerHTML = '<p style="text-align:center; color:#f56c6c; padding:20px;">查询失败，请检查网络后重试。</p>';
+            container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
         });
 }
 

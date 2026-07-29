@@ -80,7 +80,7 @@
 
     function updateStatusTextInfo() {
         const bar = document.getElementById('year-status-bar');
-        if (bar) bar.innerHTML = `当前对学生开放的学年是：<span style="color:#0066ff;font-weight:bold;">${escapeHtml(SystemRouter.activeName)} (${SystemRouter.activeYear || '2026'}年)</span>`;
+        if (bar) bar.innerHTML = `当前对学生开放的学年是：<span class="text-blue text-bold">${escapeHtml(SystemRouter.activeName)} (${SystemRouter.activeYear || '2026'}年)</span>`;
     }
 
     function handleViewingYearChange() {
@@ -159,7 +159,7 @@
             container.innerHTML = '';
             const list = snapshot.val();
             if(!list) {
-                container.innerHTML = '<span style="color:#bbb; font-size:13px;">当前学年未录入准入学生，任何人都无法提交预约。</span>';
+                container.innerHTML = '<span class="text-gray" style="font-size:13px;">当前学年未录入准入学生，任何人都无法提交预约。</span>';
                 return;
             }
             Object.keys(list).forEach(sId => {
@@ -186,7 +186,7 @@
 
         currentActiveSlotsRefMemory.on('value', (snapshot) => {
             const slots = snapshot.val(); const container = document.getElementById('admin-slots-container');
-            container.innerHTML = ''; if (!slots) { container.innerHTML = '<p style="color:#999;padding:10px;">当前没有排班。</p>'; return; }
+            container.innerHTML = ''; if (!slots) { container.innerHTML = '<p class="empty-hint">当前没有排班。</p>'; return; }
 
             const groups = {};
             Object.keys(slots).forEach(slotId => {
@@ -221,9 +221,9 @@
                     const displayLabel = p ? p.formattedSlotText : item.data.time;
 
                     slotDiv.innerHTML = `
-                        <span class="slot-text-span">${escapeHtml(displayLabel)} ${item.data.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+                        <span class="slot-text-span">${escapeHtml(displayLabel)} ${item.data.reserved ? '<strong class="text-red">(已约)</strong>' : '<strong class="text-green">(空闲)</strong>'}</span>
                         <div class="btn-group">
-                            <button class="btn-edit" data-id="${item.id}" data-time="${escapeHtml(item.data.time)}" style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;">修改</button>
+                            <button class="btn-edit slot-edit-btn" data-id="${item.id}" data-time="${escapeHtml(item.data.time)}">修改</button>
                             <button class="btn-delete danger" data-id="${item.id}">删除</button>
                         </div>`;
                     body.appendChild(slotDiv);
@@ -242,7 +242,7 @@
             if (pendingPanel) pendingPanel.style.display = 'none';
             if (cancelPanel) cancelPanel.style.display = 'none';
             reservationsData = [];
-            if (!res) { container.innerHTML = '<p style="color:#999; text-align:center; padding:20px;">当前没有预约记录。</p>'; return; }
+            if (!res) { container.innerHTML = '<p class="empty-hint">当前没有预约记录。</p>'; return; }
 
             const resGroups = {};
 
@@ -287,7 +287,7 @@
                 if (!resGroups[groupKey]) return;
                 const groupRecords = resGroups[groupKey].sort(sortByLessonTime);
                 const resGroupDiv = document.createElement('div'); resGroupDiv.className = 'date-group res-group';
-                if (resCollapseState[groupKey] === undefined) resCollapseState[groupKey] = false;
+                if (resCollapseState[groupKey] === undefined) resCollapseState[groupKey] = true;
 
                 const isCurrent = groupKey === '当前排课';
                 const header = document.createElement('div'); header.className = 'date-header';
@@ -318,7 +318,7 @@
                     const selectedOpt = statusOptions.find(o => o.val === currentStatus);
                     const statusColor = selectedOpt ? selectedOpt.color : '#909399';
 
-                    let selectHtml = `<select class="status-select-admin" data-key="${item.key}" data-oldstatus="${currentStatus}" style="padding:4px 6px; border-radius:4px; font-weight:bold; font-size:13px; color:${statusColor}; border:1px solid #ccc;">`;
+                    let selectHtml = `<select class="status-select-admin" data-key="${item.key}" data-oldstatus="${currentStatus}" style="color:${statusColor};">`;
                     statusOptions.forEach(opt => {
                         selectHtml += `<option value="${opt.val}" ${opt.val === currentStatus ? 'selected' : ''} style="color:${opt.color};">${opt.label}</option>`;
                     });
@@ -327,9 +327,9 @@
                     // 归档 / 取消归档按钮
                     let archiveBtnHtml = '';
                     if (isCurrent) {
-                        archiveBtnHtml = `<button class="btn-archive-res" data-key="${item.key}" style="background:#e6a23c; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; margin-right:4px;">归档</button>`;
+                        archiveBtnHtml = `<button class="btn-archive btn-archive-res" data-key="${item.key}">归档</button>`;
                     } else if (r.archived) {
-                        archiveBtnHtml = `<button class="btn-unarchive-res" data-key="${item.key}" style="background:#67c23a; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer; margin-right:4px;">移回当前</button>`;
+                        archiveBtnHtml = `<button class="btn-unarchive btn-unarchive-res" data-key="${item.key}">移回当前</button>`;
                     }
 
                     const tr = document.createElement('tr');
@@ -452,9 +452,9 @@
             const p = TimeParser.parseRawText(slot.time, viewingYear);
             const displayLabel = p ? p.formattedSlotText : slot.time;
 
-            row.innerHTML = `<span class="slot-text-span">${escapeHtml(displayLabel)} ${slot.reserved ? '<strong style="color:red">(已约)</strong>' : '<strong style="color:green">(空闲)</strong>'}</span>
+            row.innerHTML = `<span class="slot-text-span">${escapeHtml(displayLabel)} ${slot.reserved ? '<strong class="text-red">(已约)</strong>' : '<strong class="text-green">(空闲)</strong>'}</span>
                 <div class="btn-group">
-                    <button class="btn-edit" data-id="${slotId}" data-time="${escapeHtml(slot.time)}" style="background:#67c23a; width:auto; padding:8px 12px; font-size:14px;">修改</button>
+                    <button class="btn-edit slot-edit-btn" data-id="${slotId}" data-time="${escapeHtml(slot.time)}">修改</button>
                     <button class="btn-delete danger" data-id="${slotId}">删除</button>
                 </div>`;
             bindDynamicGridButtons();
@@ -465,8 +465,8 @@
         const row = document.getElementById(`slot-row-${slotId}`);
         row.innerHTML = `<input type="text" class="edit-input" id="edit-input-${slotId}" value="${escapeHtml(currentTime)}">
             <div class="btn-group">
-                <button style="background:#409eff; width:auto; padding:8px 12px; font-size:14px;" onclick="saveEditedSlot('${slotId}')">保存</button>
-                <button style="background:#909399; width:auto; padding:8px 12px; font-size:14px;" onclick="cancelEditSlot('${slotId}')">取消</button>
+                <button class="slot-save-btn" onclick="saveEditedSlot('${slotId}')">保存</button>
+                <button class="slot-cancel-btn" onclick="cancelEditSlot('${slotId}')">取消</button>
             </div>`;
     }
 
