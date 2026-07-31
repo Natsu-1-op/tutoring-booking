@@ -275,7 +275,7 @@ function loadMyHistory() {
 
             let summaryHtml = '';
             if (completedHours > 0) {
-                summaryHtml = `<div class="history-summary">已完成辅导累计：<b class="text-green">${completedHours.toFixed(1)} 小时</b></div>`;
+                summaryHtml = `<div class="history-summary">已完成辅导累计：<b class="text-green">${completedHours.toFixed(2)} 小时</b></div>`;
             }
 
             let listHtml = "";
@@ -297,7 +297,7 @@ function loadMyHistory() {
                 }
 
                 const hours = calcHoursFromSlot(r.time);
-                const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(1)}h)</span>` : '';
+                const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(2)}h)</span>` : '';
 
                 listHtml += `
                     <div class="history-card">
