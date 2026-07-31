@@ -408,7 +408,8 @@
     function showStudentStats() {
         const panel = document.getElementById('stats-panel');
         // 已展开则收起
-        if (panel.style.display === 'block') {
+        if (panel.classList.contains('show')) {
+            panel.classList.remove('show');
             panel.style.display = 'none';
             return;
         }
@@ -439,6 +440,7 @@
         html += '</table>';
         panel.innerHTML = html;
         panel.style.display = 'block';
+        panel.classList.add('show');
         panel.scrollIntoView({ behavior: 'smooth' });
     }
 
