@@ -154,6 +154,8 @@
             }
         });
 
+        loadSlotTemplates();
+
         currentActiveStudentListRefMemory.on('value', (snapshot) => {
             const container = document.getElementById('admin-student-whitelist-container');
             container.innerHTML = '';
@@ -303,7 +305,7 @@
                 };
 
                 const table = document.createElement('table');
-                table.innerHTML = `<thead><tr><th>时间</th><th>姓名</th><th>状态</th><th>取消码</th><th>操作</th></tr></thead><tbody></tbody>`;
+                table.innerHTML = `<thead><tr><th style="width:30px;"><input type="checkbox" class="batch-check-all" title="全选/取消"></th><th>时间</th><th>姓名</th><th>状态</th><th>取消码</th><th>操作</th></tr></thead><tbody></tbody>`;
                 const tbody = table.querySelector('tbody');
 
                 groupRecords.forEach(item => {
@@ -324,7 +326,6 @@
                     });
                     selectHtml += '</select>';
 
-                    // 归档 / 取消归档按钮
                     let archiveBtnHtml = '';
                     if (isCurrent) {
                         archiveBtnHtml = `<button class="btn-archive btn-archive-res" data-key="${item.key}">归档</button>`;
@@ -333,17 +334,27 @@
                     }
 
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${escapeHtml(r.time)}</td>
+                    tr.innerHTML = `<td><input type="checkbox" class="batch-check-item" data-key="${item.key}"></td><td>${escapeHtml(r.time)}</td>
                         <td><span class="editable-name" data-key="${item.key}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
                         <td>${selectHtml}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
                         <td>${archiveBtnHtml}<button class="danger btn-force-del" data-key="${item.key}" data-slotid="${r.slotId}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
                     tbody.appendChild(tr);
                 });
+
+                // 绑定全选
+                const checkAll = table.querySelector('.batch-check-all');
+                if (checkAll) {
+                    checkAll.onclick = function() {
+                        table.querySelectorAll('.batch-check-item').forEach(cb => { cb.checked = this.checked; });
+                        updateBatchBar();
+                    };
+                }
                 body.appendChild(table); resGroupDiv.appendChild(header); resGroupDiv.appendChild(body); container.appendChild(resGroupDiv);
             });
             bindStatusDropdownEvents();
             bindDeleteReservationButtons();
             bindArchiveButtons();
+            bindBatchCheckEvents();
             bindNameEditEvents();
         });
 
@@ -391,6 +402,48 @@
                 input.value = '';
             });
         });
+    }
+
+    // 计算课时长
+    function calcHoursFromSlot(timeStr) {
+        if (!timeStr) return 0;
+        const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
+        if (!m) return 0;
+        const diff = (parseInt(m[3]) * 60 + parseInt(m[4])) - (parseInt(m[1]) * 60 + parseInt(m[2]));
+        return diff > 0 ? diff / 60 : 0;
+    }
+
+    // 显示每学生课时统计
+    function showStudentStats() {
+        if (reservationsData.length === 0) return alert('当前没有预约记录！');
+        const stats = {};
+        reservationsData.forEach(r => {
+            const name = r.nickname || '未知';
+            if (!stats[name]) stats[name] = { total: 0, completed: 0, booked: 0, confirmed: 0, canceled: 0 };
+            const hours = calcHoursFromSlot(r.time);
+            stats[name].total++;
+            switch (r.status || 'booked') {
+                case 'completed': stats[name].completed += hours; break;
+                case 'booked': stats[name].booked++; break;
+                case 'confirmed': stats[name].confirmed++; break;
+                case 'canceled': stats[name].canceled++; break;
+            }
+        });
+
+        const sorted = Object.entries(stats).sort((a, b) => b[1].completed - a[1].completed);
+        let html = `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <tr style="background:#f5f7fa;"><th>学生</th><th>已完成(h)</th><th>已确认</th><th>已预约</th><th>已取消</th><th>总次数</th></tr>`;
+        sorted.forEach(([name, s]) => {
+            html += `<tr><td><b>${escapeHtml(name)}</b></td>
+                <td><span class="text-green text-bold">${s.completed.toFixed(2)}</span></td>
+                <td>${s.confirmed}</td><td>${s.booked}</td>
+                <td class="text-gray">${s.canceled}</td><td>${s.total}</td></tr>`;
+        });
+        html += '</table>';
+        const panel = document.getElementById('stats-panel');
+        panel.innerHTML = html;
+        panel.style.display = 'block';
+        panel.scrollIntoView({ behavior: 'smooth' });
     }
 
     function exportTutorFeeJSON() {
@@ -520,6 +573,30 @@
                 }; img.src = e.target.result;
             }; reader.readAsDataURL(file);
         } else { targetRef.child('notice').set(noticeText).then(() => alert('公告保存成功。')).catch(() => { alert('公告保存失败，请重试。'); }); }
+    }
+
+    // 加载排班模板（从 Firebase 设置中读取）
+    function loadSlotTemplates() {
+        SystemRouter.getSettingsRef(viewingYear).child('slotTemplates').once('value').then(snap => {
+            const vals = snap.val();
+            if (vals && Array.isArray(vals)) {
+                vals.forEach((v, i) => {
+                    const el = document.getElementById(`tpl-time-${i + 1}`);
+                    if (el && v) el.value = v;
+                });
+            }
+        });
+    }
+
+    // 保存排班模板到 Firebase
+    function saveSlotTemplates() {
+        const templates = [];
+        for (let i = 1; i <= 5; i++) {
+            templates.push(document.getElementById(`tpl-time-${i}`).value.trim());
+        }
+        SystemRouter.getSettingsRef(viewingYear).child('slotTemplates').set(templates).then(() => {
+            alert('模板已保存。');
+        }).catch(() => { alert('保存失败。'); });
     }
 
     function addSlot() {
@@ -784,6 +861,46 @@
     }
 
     // 删除按钮绑定
+    // 批量操作
+    function updateBatchBar() {
+        const checked = document.querySelectorAll('.batch-check-item:checked');
+        const bar = document.getElementById('batch-action-bar');
+        const countEl = document.getElementById('batch-count');
+        if (bar) bar.style.display = checked.length > 0 ? 'flex' : 'none';
+        if (countEl) countEl.textContent = checked.length;
+    }
+
+    function applyBatchStatus() {
+        const checked = document.querySelectorAll('.batch-check-item:checked');
+        const newStatus = document.getElementById('batch-target-status').value;
+        if (!newStatus) return alert('请选择目标状态！');
+        if (checked.length === 0) return alert('请先勾选记录！');
+
+        const statusLabels = { booked: '已预约', confirmed: '已确认', completed: '已完成', canceled: '已取消' };
+        if (!confirm(`确定将 ${checked.length} 条记录改为「${statusLabels[newStatus]}」吗？`)) return;
+
+        const updates = {};
+        checked.forEach(cb => {
+            const key = cb.dataset.key;
+            updates[`years/${viewingYear}/reservations/${key}/status`] = newStatus;
+        });
+
+        db.ref().update(updates).then(() => {
+            SystemRouter.getLogsRef(viewingYear).push({
+                action: `批量修改 ${checked.length} 条记录状态为 [${statusLabels[newStatus]}]`,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            document.getElementById('batch-target-status').value = '';
+        }).catch(() => { alert('操作失败，请重试。'); });
+    }
+
+    // 绑定 checkbox 变化和批量按钮
+    function bindBatchCheckEvents() {
+        document.querySelectorAll('.batch-check-item').forEach(cb => {
+            cb.onchange = updateBatchBar;
+        });
+    }
+
     function bindDeleteReservationButtons() {
         document.querySelectorAll('.btn-force-del').forEach(b => {
             b.onclick = function() { deleteSingleReservation(this.dataset.key, this.dataset.slotid, this.dataset.name); }
@@ -914,6 +1031,9 @@
     document.getElementById('btn-create-year').onclick = createNewYearNode;
     document.getElementById('btn-set-notice').onclick = setNotice;
     document.getElementById('btn-gen-tpl').onclick = generateDayTemplate;
+    document.getElementById('btn-save-tpl').onclick = saveSlotTemplates;
+    document.getElementById('btn-batch-apply').onclick = applyBatchStatus;
+    document.getElementById('btn-show-stats').onclick = showStudentStats;
     document.getElementById('btn-add-slot').onclick = addSlot;
     document.getElementById('btn-set-deadline').onclick = setDeadline;
     document.getElementById('btn-set-code').onclick = setCode;

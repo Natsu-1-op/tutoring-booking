@@ -1,4 +1,18 @@
 // exam_student.js — 学生考试与复查端
+
+// 断网保护 banner
+(function setupOfflineGuard() {
+    const banner = document.createElement('div');
+    banner.id = 'offline-banner';
+    banner.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;background:#fff3cd;color:#856404;text-align:center;padding:8px;font-weight:bold;font-size:13px;z-index:99999;';
+    banner.textContent = '⚠️ 当前处于离线状态，答案已保存到本地，恢复网络后继续答题';
+    document.body.appendChild(banner);
+
+    window.addEventListener('offline', () => { banner.style.display = 'block'; });
+    window.addEventListener('online', () => { banner.style.display = 'none'; });
+    if (!navigator.onLine) banner.style.display = 'block';
+})();
+
 let rawEncryptedPayload = null;
 let examPaperData = null;
 let studentNameVerified = "";

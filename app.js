@@ -1,18 +1,31 @@
 // app.js
 let isDeadlined = false;
-let isSubmitting = false; 
+let isSubmitting = false;
+
+// 记住上次输入的姓名和口令
+(function restoreSavedInputs() {
+    const saved = localStorage.getItem('booking_last_inputs');
+    if (saved) {
+        try {
+            const { name, code } = JSON.parse(saved);
+            const nameEl = document.getElementById('nickname');
+            const codeEl = document.getElementById('access-code');
+            if (nameEl && name) nameEl.value = name;
+            if (codeEl && code) codeEl.value = code;
+        } catch(e) {}
+    }
+})();
 
 SystemRouter.system().on('value', (snap) => {
     const sys = snap.val();
     if (sys && sys.activeYear) {
         SystemRouter.activeYear = sys.activeYear;
-        
+
         const titleEl = document.getElementById('main-title');
         if (titleEl) titleEl.textContent = "专业课辅导";
-        
+
         const overlay = document.getElementById('sync-overlay');
         if (overlay) overlay.style.display = 'none';
-        
         bindActiveYearListeners();
     }
 });
@@ -200,6 +213,8 @@ function submitBooking() {
                                 slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
                             }).then(() => {
                                 SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                                // 记住姓名和口令
+                                try { localStorage.setItem('booking_last_inputs', JSON.stringify({ name: nickname, code: accessCode })); } catch(e) {}
                                 document.getElementById('nickname').value = ''; resetBtn();
                                 showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
                             }).catch(() => {
@@ -298,10 +313,14 @@ function loadMyHistory() {
 
                 const hours = calcHoursFromSlot(r.time);
                 const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(2)}h)</span>` : '';
+                // 统一日期格式：提取完整 YYYY-MM-DD
+                let fullTime = r.time || '';
+                const p = TimeParser.parseRawText(r.time, SystemRouter.activeYear);
+                if (p) fullTime = `${p.date} ${p.startTime}-${p.endTime}`;
 
                 listHtml += `
                     <div class="history-card">
-                        <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(r.time)}${hoursText}</span></div>
+                        <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(fullTime)}${hoursText}</span></div>
                         <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></div>
                         <div class="card-row card-row-sub"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
                         <div class="card-row card-row-sub"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
