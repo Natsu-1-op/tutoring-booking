@@ -26,6 +26,8 @@ button.danger:hover { background: #e60000; }
 button.action-btn { width: auto; padding: 6px 12px; font-size: 13px; margin-top: 5px; }
 .btn-cancel-booking { background: #f56c6c; }
 .btn-cancel-booking:hover { background: #e60000; }
+.btn-cal-add { background: #fff; border: 1px solid #ddd; font-size: 16px; padding: 8px 10px; }
+.btn-cal-add:hover { background: #e6f7ff; border-color: #409eff; }
 
 /* ========== 导航按钮 ========== */
 .nav-btn-container { display: flex; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }

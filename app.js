@@ -217,6 +217,8 @@ function submitBooking() {
                                 try { localStorage.setItem('booking_last_inputs', JSON.stringify({ name: nickname, code: accessCode })); } catch(e) {}
                                 document.getElementById('nickname').value = ''; resetBtn();
                                 showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
+                                // 自动下载日历文件（含提前15分钟提醒）
+                                downloadICS(parsedTimeObj, cancelSecureCode);
                             }).catch(() => {
                                 SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
                                 showMessage('网络异常，请重试！', false); resetBtn();
@@ -318,13 +320,16 @@ function loadMyHistory() {
                 const p = TimeParser.parseRawText(r.time, SystemRouter.activeYear);
                 if (p) fullTime = `${p.date} ${p.startTime}-${p.endTime}`;
 
+                // 日历下载按钮（传 time 字符串和 cancelCode，由 downloadICSFromTime 解析）
+                const calBtn = r.time ? `<button class="action-btn btn-cal-add" onclick="downloadICSFromTime('${escapeHtml(r.time.replace(/'/g, "\\'"))}', '${escapeHtml(r.cancelCode || '')}')" title="添加到手机日历">📅</button>` : '';
+
                 listHtml += `
                     <div class="history-card">
                         <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(fullTime)}${hoursText}</span></div>
                         <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></div>
                         <div class="card-row card-row-sub"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
                         <div class="card-row card-row-sub"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
-                        <div class="card-footer">${actionButtonHtml}</div>
+                        <div class="card-footer">${calBtn} ${actionButtonHtml}</div>
                     </div>`;
             });
 
@@ -334,6 +339,51 @@ function loadMyHistory() {
             console.error('查询历史记录失败:', err);
             container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
         });
+}
+
+// 从 time 字符串解析并下载日历
+function downloadICSFromTime(timeStr, cancelCode) {
+    const parsed = TimeParser.parseRawText(timeStr, SystemRouter.activeYear);
+    if (!parsed) return alert('无法解析时间，请联系老师。');
+    downloadICS(parsed, cancelCode || '');
+}
+
+// 生成并下载 .ics 日历文件，可导入手机/电脑日历实现上课提醒
+function downloadICS(parsedTimeObj, cancelCode) {
+    if (!parsedTimeObj || !parsedTimeObj.date) return;
+    const [y, m, d] = parsedTimeObj.date.split('-');
+    const [sh, sm] = parsedTimeObj.startTime.split(':');
+    const [eh, em] = parsedTimeObj.endTime.split(':');
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const dtStart = `${y}${pad(m)}${pad(d)}T${sh}${sm}00`;
+    const dtEnd   = `${y}${pad(m)}${pad(d)}T${eh}${em}00`;
+
+    const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//TutoringBooking//CN',
+        'BEGIN:VEVENT',
+        `DTSTART:${dtStart}`,
+        `DTEND:${dtEnd}`,
+        'SUMMARY:专业课辅导',
+        `DESCRIPTION:预约凭证码: ${cancelCode}\\n请提前5分钟到达教室`,
+        'BEGIN:VALARM',
+        'TRIGGER:-PT15M',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:15分钟后有专业课辅导，请做好准备',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `辅导课_${parsedTimeObj.date}.ics`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function requestCancelBooking(resKey) {
