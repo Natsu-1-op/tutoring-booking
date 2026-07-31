@@ -249,9 +249,38 @@ function loadMyHistory() {
                 return;
             }
 
-            let listHtml = ""; let count = 0;
-            Object.keys(reservations).sort((a,b) => new Date(reservations[b].timestamp || 0) - new Date(reservations[a].timestamp || 0)).forEach(key => {
-                const r = reservations[key]; if (r.nickname !== searchName) return; count++;
+            // 收集并排序：按上课时间倒序，最近的在最上面
+            const list = [];
+            Object.keys(reservations).forEach(key => {
+                const r = reservations[key];
+                if (r.nickname !== searchName) return;
+                // 解析上课时间用于排序
+                let lessonTs = 0;
+                if (r.time) {
+                    const p = TimeParser.parseRawText(r.time, SystemRouter.activeYear);
+                    if (p && p.date) lessonTs = new Date(p.date + 'T' + p.startTime).getTime();
+                }
+                if (!lessonTs) lessonTs = r.timestamp || 0;
+                list.push({ key, data: r, lessonTs });
+            });
+            list.sort((a, b) => b.lessonTs - a.lessonTs);
+
+            // 统计已完成课时
+            let completedHours = 0;
+            list.forEach(item => {
+                if (item.data.status === 'completed') {
+                    completedHours += calcHoursFromSlot(item.data.time);
+                }
+            });
+
+            let summaryHtml = '';
+            if (completedHours > 0) {
+                summaryHtml = `<div class="history-summary">已完成辅导累计：<b class="text-green">${completedHours.toFixed(1)} 小时</b></div>`;
+            }
+
+            let listHtml = "";
+            list.forEach(item => {
+                const r = item.data; const key = item.key;
                 let currentStatus = r.status || "booked"; let statusText = ""; let badgeClass = ""; let actionButtonHtml = "";
 
                 switch(currentStatus) {
@@ -267,9 +296,12 @@ function loadMyHistory() {
                     case "canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
                 }
 
+                const hours = calcHoursFromSlot(r.time);
+                const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(1)}h)</span>` : '';
+
                 listHtml += `
                     <div class="history-card">
-                        <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(r.time)}</span></div>
+                        <div class="card-row"><b>辅导时段：</b><span class="text-blue text-bold">${escapeHtml(r.time)}${hoursText}</span></div>
                         <div class="card-row"><b>当前状态：</b><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></div>
                         <div class="card-row card-row-sub"><b>专属取消凭证：</b>${escapeHtml(r.cancelCode || '无')}</div>
                         <div class="card-row card-row-sub"><b>提交时间：</b>${r.timestamp ? new Date(r.timestamp).toLocaleString() : '未知提交时间'}</div>
@@ -277,12 +309,23 @@ function loadMyHistory() {
                     </div>`;
             });
 
-            if (count === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
-            else container.innerHTML = listHtml;
+            if (list.length === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
+            else container.innerHTML = summaryHtml + listHtml;
         }).catch((err) => {
             console.error('查询历史记录失败:', err);
             container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
         });
+}
+
+// 从排班时间字符串计算课时长（小时）
+function calcHoursFromSlot(timeStr) {
+    if (!timeStr) return 0;
+    const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
+    if (!m) return 0;
+    const startMin = parseInt(m[1]) * 60 + parseInt(m[2]);
+    const endMin = parseInt(m[3]) * 60 + parseInt(m[4]);
+    const diff = endMin - startMin;
+    return diff > 0 ? diff / 60 : 0;
 }
 
 function requestCancelBooking(resKey) {
