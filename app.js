@@ -321,7 +321,7 @@ function loadMyHistory() {
                 if (p) fullTime = `${p.date} ${p.startTime}-${p.endTime}`;
 
                 // 日历下载按钮（传 time 字符串和 cancelCode，由 downloadICSFromTime 解析）
-                const calBtn = r.time ? `<button class="action-btn btn-cal-add" onclick="downloadICSFromTime('${escapeHtml(r.time.replace(/'/g, "\\'"))}', '${escapeHtml(r.cancelCode || '')}')" title="添加到手机日历">📅</button>` : '';
+                const calBtn = r.time ? `<button class="action-btn btn-cal-add" onclick="downloadICSFromTime('${escapeHtml(r.time.replace(/'/g, "\\'"))}', '${escapeHtml(r.cancelCode || '')}')" title="添加到手机日历">日历</button>` : '';
 
                 listHtml += `
                     <div class="history-card">

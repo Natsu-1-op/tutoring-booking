@@ -17,7 +17,7 @@
     let currentActiveDeadlineRefMemory = null;
     let currentActiveAccessCodeRefMemory = null;
 
-    // 🌟 在核验成功的分支链中，追加会话打标共享，打通无感通行管道
+    //在核验成功的分支链中，追加会话打标共享，打通无感通行管道
     function verifyAdmin() {
         const inputPass = document.getElementById('admin-password').value.trim();
         const errorEl = document.getElementById('login-error');
@@ -25,7 +25,7 @@
 
         db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
             if (snapshot.exists() && snapshot.val() === true) {
-                // 🌟 向当前浏览器会话（Tab）中埋下通过鉴权的绿色通行证
+                //向当前浏览器会话（Tab）中埋下通过鉴权的绿色通行证
                 localStorage.setItem('admin_session_auth', 'true');
 
                 isAdminAuthenticated = true; 
@@ -950,7 +950,7 @@
         }
     };
 
-    // 🌟 原版迁移对账业务逻辑完全予以保留
+    //原版迁移对账业务逻辑完全予以保留
     window.purgeOldRootNodes = function() {
         if (confirm("高危清理核密防线触发：\n历史数据已被安全平移到 years/2026 树状独立数据库中并对账完毕。\n当前操作将彻底粉碎物理根目录残留的旧版 /slots, /reservations, /settings 节点。\n该操作不可逆，确认清盘？")) {
             const purgePacks = {};

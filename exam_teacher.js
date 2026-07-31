@@ -28,7 +28,7 @@ function executeManualGateAuth() {
         if (snapshot.exists() && snapshot.val() === true) {
             localStorage.setItem('admin_session_auth', 'true');
             document.getElementById('teacher-gate-login-mask').style.display = 'none';
-        } else { errLbl.textContent = '❌ 口令错误，直连请求已被系统拦截。'; }
+        } else { errLbl.textContent = '口令错误，直连请求已被系统拦截。'; }
     }).catch(() => { errLbl.textContent = '网络错误，请检查连接后重试。'; });
 }
 
@@ -77,7 +77,7 @@ function addQ(existingData) {
     const n = qCount;
 
     div.innerHTML = `
-        <button class="q-remove-btn" onclick="removeQuestion('${div.id}')" title="删除此题">✕</button>
+        <button class="q-remove-btn" onclick="removeQuestion('${div.id}')" title="删除此题">×</button>
         <div class="q-meta-row">
             <select class="t-type q-type-select" onchange="document.getElementById('opt-box-${n}').style.display = (this.value==='choice')?'block':'none'">
                 <option value="choice">选择题</option><option value="judge">判断题</option>

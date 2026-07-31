@@ -5,7 +5,7 @@
     const banner = document.createElement('div');
     banner.id = 'offline-banner';
     banner.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;background:#fff3cd;color:#856404;text-align:center;padding:8px;font-weight:bold;font-size:13px;z-index:99999;';
-    banner.textContent = '⚠️ 当前处于离线状态，答案已保存到本地，恢复网络后继续答题';
+    banner.textContent = '当前处于离线状态，答案已保存到本地，恢复网络后继续答题';
     document.body.appendChild(banner);
 
     window.addEventListener('offline', () => { banner.style.display = 'block'; });
@@ -99,7 +99,7 @@ function verifyAndStartExam() {
 
     db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
         if (lockSnapshot.exists()) {
-            document.getElementById('auth-error').textContent = `❌ 进入拦截：您(${nameInput})先前已成功提交答卷，不可重复进行考试。`;
+            document.getElementById('auth-error').textContent = `进入拦截：您(${nameInput})先前已成功提交答卷，不可重复进行考试。`;
             return;
         }
 
@@ -196,7 +196,7 @@ function startReviewPackageWorkspace() {
             html += `<div class="options-list" style="margin-top:12px;">`;
             mq.options.forEach(opt => {
                 const isSelected = sAns.text === opt.trim().charAt(0);
-                html += `<div class="option-item ${isSelected ? 'selected' : ''}" style="pointer-events:none;">${opt} ${isSelected ? ' ◀' : ''}</div>`;
+                html += `<div class="option-item ${isSelected ? 'selected' : ''}" style="pointer-events:none;">${opt} ${isSelected ? ' (已选)' : ''}</div>`;
             }); html += `</div>`;
         } else if (mq.type === 'judge') {
             html += `<div class="options-list" style="margin-top:12px;">`;
