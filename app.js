@@ -284,7 +284,7 @@ function loadMyHistory() {
             let completedHours = 0;
             list.forEach(item => {
                 if (item.data.status === 'completed') {
-                    completedHours += calcHoursFromSlot(item.data.time);
+                    completedHours += TimeParser.calcHours(item.data.time);
                 }
             });
 
@@ -311,7 +311,7 @@ function loadMyHistory() {
                     case "canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
                 }
 
-                const hours = calcHoursFromSlot(r.time);
+                const hours = TimeParser.calcHours(r.time);
                 const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(2)}h)</span>` : '';
                 // 统一日期格式：提取完整 YYYY-MM-DD
                 let fullTime = r.time || '';
@@ -334,17 +334,6 @@ function loadMyHistory() {
             console.error('查询历史记录失败:', err);
             container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
         });
-}
-
-// 从排班时间字符串计算课时长（小时）
-function calcHoursFromSlot(timeStr) {
-    if (!timeStr) return 0;
-    const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
-    if (!m) return 0;
-    const startMin = parseInt(m[1]) * 60 + parseInt(m[2]);
-    const endMin = parseInt(m[3]) * 60 + parseInt(m[4]);
-    const diff = endMin - startMin;
-    return diff > 0 ? diff / 60 : 0;
 }
 
 function requestCancelBooking(resKey) {

@@ -29,7 +29,7 @@ function executeManualGateAuth() {
             localStorage.setItem('admin_session_auth', 'true');
             document.getElementById('teacher-gate-login-mask').style.display = 'none';
         } else { errLbl.textContent = '❌ 口令错误，直连请求已被系统拦截。'; }
-    });
+    }).catch(() => { errLbl.textContent = '网络错误，请检查连接后重试。'; });
 }
 
 function switchPane(el, id) {
@@ -602,7 +602,7 @@ function calculateAndRenderRankDashboard() {
 
             tableHtml += `<tr><td style="text-align:center;">${rankLabelHtml}</td><td><b>${escapeHtml(row.name)}</b></td><td>${escapeHtml(row.paperTitle)}</td>
                 <td><span class="rank-score" ondblclick="manuallyOverrideCloudScore('${currentSelectedEncKey}', '${encodeURIComponent(row.name).replace(/\./g, '%2E')}', ${row.score})">${row.score} 分</span></td>
-                <td class="text-gray" style="font-size:12px;">${row.time}</td>
+                <td class="text-gray" style="font-size:12px;">${escapeHtml(row.time)}</td>
                 <td style="text-align:center;"><button class="teacher-btn teacher-btn-sm" style="background:#ff4d4f;color:#fff;" onclick="removeRecordFromCloud('${currentSelectedEncKey}', '${encodeURIComponent(row.name).replace(/\./g, '%2E')}')">删除</button></td></tr>`;
         });
         wrapper.innerHTML = tableHtml + `</table>`;

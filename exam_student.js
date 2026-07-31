@@ -13,7 +13,6 @@
     if (!navigator.onLine) banner.style.display = 'block';
 })();
 
-let rawEncryptedPayload = null;
 let examPaperData = null;
 let studentNameVerified = "";
 let currentQuestionIndex = 0;

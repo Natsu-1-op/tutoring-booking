@@ -30,15 +30,23 @@ const TimeParser = {
     // 校验公历日期是否合法，正确判断闰年
     isValidCalendarDate: (month, day, year) => {
         if (month < 1 || month > 12 || day < 1 || day > 31) return false;
-        // 处理 2 月：闰年最多 29 天，平年最多 28 天
         if (month === 2) {
             if (year) {
                 const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
                 return day <= (isLeap ? 29 : 28);
             }
-            return day <= 29; // 无年份时宽松处理
+            return day <= 29;
         }
         if ([4, 6, 9, 11].includes(month)) return day <= 30;
         return true;
+    },
+
+    // 从排班时间字符串计算课时长（小时）
+    calcHours: (timeStr) => {
+        if (!timeStr) return 0;
+        const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
+        if (!m) return 0;
+        const diff = (parseInt(m[3]) * 60 + parseInt(m[4])) - (parseInt(m[1]) * 60 + parseInt(m[2]));
+        return diff > 0 ? diff / 60 : 0;
     }
 };

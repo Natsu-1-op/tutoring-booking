@@ -404,15 +404,6 @@
         });
     }
 
-    // 计算课时长
-    function calcHoursFromSlot(timeStr) {
-        if (!timeStr) return 0;
-        const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
-        if (!m) return 0;
-        const diff = (parseInt(m[3]) * 60 + parseInt(m[4])) - (parseInt(m[1]) * 60 + parseInt(m[2]));
-        return diff > 0 ? diff / 60 : 0;
-    }
-
     // 显示每学生课时统计
     function showStudentStats() {
         if (reservationsData.length === 0) return alert('当前没有预约记录！');
@@ -420,7 +411,7 @@
         reservationsData.forEach(r => {
             const name = r.nickname || '未知';
             if (!stats[name]) stats[name] = { total: 0, completed: 0, booked: 0, confirmed: 0, canceled: 0 };
-            const hours = calcHoursFromSlot(r.time);
+            const hours = TimeParser.calcHours(r.time);
             stats[name].total++;
             switch (r.status || 'booked') {
                 case 'completed': stats[name].completed += hours; break;
