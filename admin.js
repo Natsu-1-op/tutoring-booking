@@ -404,8 +404,14 @@
         });
     }
 
-    // 显示每学生课时统计
+    // 显示/隐藏每学生课时统计
     function showStudentStats() {
+        const panel = document.getElementById('stats-panel');
+        // 已展开则收起
+        if (panel.style.display === 'block') {
+            panel.style.display = 'none';
+            return;
+        }
         if (reservationsData.length === 0) return alert('当前没有预约记录！');
         const stats = {};
         reservationsData.forEach(r => {
@@ -431,7 +437,6 @@
                 <td class="text-gray">${s.canceled}</td><td>${s.total}</td></tr>`;
         });
         html += '</table>';
-        const panel = document.getElementById('stats-panel');
         panel.innerHTML = html;
         panel.style.display = 'block';
         panel.scrollIntoView({ behavior: 'smooth' });
@@ -857,7 +862,7 @@
         const checked = document.querySelectorAll('.batch-check-item:checked');
         const bar = document.getElementById('batch-action-bar');
         const countEl = document.getElementById('batch-count');
-        if (bar) bar.style.display = checked.length > 0 ? 'flex' : 'none';
+        if (bar) bar.classList.toggle('show', checked.length > 0);
         if (countEl) countEl.textContent = checked.length;
     }
 

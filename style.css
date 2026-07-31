@@ -26,8 +26,8 @@ button.danger:hover { background: #e60000; }
 button.action-btn { width: auto; padding: 6px 12px; font-size: 13px; margin-top: 5px; }
 .btn-cancel-booking { background: #f56c6c; }
 .btn-cancel-booking:hover { background: #e60000; }
-.btn-cal-add { background: #fff; border: 1px solid #ddd; font-size: 16px; padding: 8px 10px; }
-.btn-cal-add:hover { background: #e6f7ff; border-color: #409eff; }
+.btn-cal-add { background: #f0f7ff; color: #409eff; border: 1px solid #b3d8ff; font-size: 12px; padding: 6px 10px; font-weight: bold; }
+.btn-cal-add:hover { background: #409eff; color: #fff; border-color: #409eff; }
 
 /* ========== 导航按钮 ========== */
 .nav-btn-container { display: flex; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
@@ -58,6 +58,8 @@ th { background: #f9f9f9; }
 /* ========== 历史记录卡片 ========== */
 .history-card { border: 1px solid #e4e7ed; border-radius: 8px; padding: 15px; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
 .history-summary { background: #f0f9eb; border: 1px solid #b7eb8f; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 15px; text-align: center; }
+.batch-action-bar { display:none; position:sticky; bottom:0; background:#fff; border-top:2px solid #409eff; padding:12px 16px; margin-top:10px; z-index:50; gap:10px; align-items:center; box-shadow:0 -2px 8px rgba(0,0,0,0.08); }
+.batch-action-bar.show { display:flex; }
 .card-row { margin: 6px 0; font-size: 14px; text-align: left; }
 .card-row-sub { color: #999; font-size: 12px; }
 .card-footer { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 8px; text-align: right; }
