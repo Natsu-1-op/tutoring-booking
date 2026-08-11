@@ -130,28 +130,12 @@
 
         currentActiveDeadlineRefMemory.on('value', snap => {
             const deadlineInput = document.getElementById('deadline-input');
-            if (deadlineInput) {
-                if (snap.val()) {
-                    deadlineInput.value = snap.val();
-                } else {
-                    db.ref('settings/deadline').once('value').then(oldSnap => {
-                        if (oldSnap.val() && !deadlineInput.value) deadlineInput.value = oldSnap.val();
-                    });
-                }
-            }
+            if (deadlineInput && snap.val()) deadlineInput.value = snap.val();
         });
 
         currentActiveAccessCodeRefMemory.on('value', snap => {
             const codeInput = document.getElementById('code-input');
-            if (codeInput) {
-                if (snap.val()) {
-                    codeInput.value = snap.val();
-                } else {
-                    db.ref('settings/accessCode').once('value').then(oldSnap => {
-                        if (oldSnap.val() && !codeInput.value) codeInput.value = oldSnap.val();
-                    });
-                }
-            }
+            if (codeInput && snap.val()) codeInput.value = snap.val();
         });
 
         loadSlotTemplates();
@@ -462,17 +446,8 @@
                 if (p) itemDate = p.date;
             }
             
-            const rawTimeStr = r.time || (r.slotSnapshot ? r.slotSnapshot.rawTime : '') || '';
-            const timeMatch = rawTimeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
-            if (timeMatch) {
-                const startMinutes = parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
-                const endMinutes = parseInt(timeMatch[3], 10) * 60 + parseInt(timeMatch[4], 10);
-                const diffMinutes = endMinutes - startMinutes;
-                
-                if (diffMinutes > 0) {
-                    calculatedHours = Number((diffMinutes / 60).toFixed(2)); 
-                }
-            }
+            const hours = TimeParser.calcHours(r.time);
+            if (hours > 0) calculatedHours = hours;
 
             outputRecords.push({
                 id: "imported_" + (r.id || Math.random().toString(36).substring(2, 9)),
