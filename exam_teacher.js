@@ -230,7 +230,7 @@ let aiGradingBusy = false;
 
 // 加载 AI 配置
 (function loadAiConfig() {
-    db.ref('settings/aiConfig').once('value').then(snap => {
+    SystemRouter.getSettingsRef(SystemRouter.activeYear || '2026').child('aiConfig').once('value').then(snap => {
         const v = snap.val();
         if (v) {
             aiConfig = v;
@@ -252,7 +252,7 @@ function saveAiConfig() {
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
         return alert('请完整填写 API 地址、Key 和模型名称！');
     }
-    db.ref('settings/aiConfig').set(aiConfig).then(() => {
+    SystemRouter.getSettingsRef(SystemRouter.activeYear || '2026').child('aiConfig').set(aiConfig).then(() => {
         document.getElementById('ai-config-status').textContent = '已保存';
         setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2000);
     }).catch(() => { alert('保存失败'); });
