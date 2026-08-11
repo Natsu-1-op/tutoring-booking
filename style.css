@@ -234,6 +234,29 @@ th { background: #f9f9f9; }
 .score-editable { color:#f56c6c; font-weight:bold; cursor:pointer; }
 .rank-score { font-size:16px; font-weight:bold; color:#f56c6c; cursor:pointer; }
 
+/* ---- AI 批改 ---- */
+.ai-config-panel { background:#fafafa; border:1px solid #e4e7ed; border-radius:8px; margin-bottom:16px; overflow:hidden; }
+.ai-config-header { padding:10px 16px; background:#f0f0f0; cursor:pointer; display:flex; justify-content:space-between; font-weight:bold; font-size:13px; color:#666; user-select:none; }
+.ai-config-arrow { font-size:12px; color:#999; }
+.ai-config-body { padding:14px 16px; }
+.ai-config-body.hidden { display:none; }
+.ai-config-row { margin-bottom:8px; }
+.ai-config-row label { display:block; font-size:12px; color:#666; margin-bottom:3px; }
+.ai-grade-btn { background:#8e44ad; color:#fff; }
+.ai-grade-btn:hover { background:#7d3c98; }
+.ai-grade-all-btn { background:#8e44ad; color:#fff; margin-top:10px; }
+.ai-grade-all-btn:hover { background:#7d3c98; }
+.ai-grade-all-btn:disabled { background:#ccc; cursor:not-allowed; }
+.ai-loading { color:#8e44ad; font-size:13px; padding:8px 0; animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.ai-feedback-card { background:#faf5ff; border:1px solid #d4c4e8; border-radius:8px; padding:10px 14px; font-size:13px; line-height:1.6; }
+.ai-feedback-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:8px; border-bottom:1px solid #e8dcf5; }
+.ai-accept-btn { background:#67c23a; color:#fff; border:none; padding:4px 12px; border-radius:4px; font-size:12px; cursor:pointer; width:auto; }
+.ai-accept-btn:hover { background:#5daf34; }
+.ai-accept-btn:disabled { background:#ccc; cursor:default; }
+.ai-feedback-body { color:#555; white-space:pre-wrap; }
+.ai-feedback-error { border-color:#fde2e2; background:#fef0f0; color:#f56c6c; }
+
 /* ---- 教师端复查 ---- */
 .review-card { border:1px solid #e4e7ed; padding:20px; margin-bottom:15px; border-radius:10px; background:#fff; }
 .review-card-wrong { border-left:5px solid #f56c6c; }

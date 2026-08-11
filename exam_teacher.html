@@ -72,6 +72,29 @@
 
         <!-- 评卷中心 -->
         <div class="teacher-pane" id="pane-grade">
+            <!-- AI 配置面板 -->
+            <div class="ai-config-panel" id="ai-config-panel">
+                <div class="ai-config-header" onclick="document.getElementById('ai-config-body').classList.toggle('hidden')">
+                    <span>AI 批改设置</span><span class="ai-config-arrow">展开</span>
+                </div>
+                <div class="ai-config-body hidden" id="ai-config-body">
+                    <div class="ai-config-row">
+                        <label>API 地址</label>
+                        <input type="text" id="ai-api-url" placeholder="https://api.openai.com/v1/chat/completions" class="teacher-input">
+                    </div>
+                    <div class="ai-config-row">
+                        <label>API Key</label>
+                        <input type="password" id="ai-api-key" placeholder="sk-..." class="teacher-input">
+                    </div>
+                    <div class="ai-config-row">
+                        <label>模型名称</label>
+                        <input type="text" id="ai-model" placeholder="gpt-4o / deepseek-chat" class="teacher-input">
+                    </div>
+                    <button class="teacher-btn teacher-btn-sm" style="background:#409eff;color:#fff;" onclick="saveAiConfig()">保存配置</button>
+                    <span id="ai-config-status" class="text-gray" style="font-size:12px;margin-left:10px;"></span>
+                </div>
+            </div>
+
             <div class="import-section import-section-blue">
                 <label>导入教师明文母卷 (Master)</label>
                 <input type="file" id="load-master" accept=".json">
@@ -101,7 +124,8 @@
                     </div>
                     <label class="grading-side-label">题目导航</label>
                     <div class="q-navigation-grid" id="grading-grid-dots"></div>
-                    <button class="teacher-btn teacher-btn-green teacher-btn-full" style="margin-top:20px;" onclick="saveStudentScoreAndPackage()">导出评卷打分包</button>
+                    <button class="teacher-btn teacher-btn-full ai-grade-all-btn" onclick="gradeAllWithAI()">AI 批改全部</button>
+                    <button class="teacher-btn teacher-btn-green teacher-btn-full" style="margin-top:8px;" onclick="saveStudentScoreAndPackage()">导出评卷打分包</button>
                 </div>
             </div>
 

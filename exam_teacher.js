@@ -224,6 +224,219 @@ function triggerDl(obj, name) {
     setTimeout(() => { URL.revokeObjectURL(downloadUrl); }, 1000);
 }
 
+// ================= AI 批改 =================
+let aiConfig = { url: '', key: '', model: '' };
+let aiGradingBusy = false;
+
+// 加载 AI 配置
+(function loadAiConfig() {
+    db.ref('settings/aiConfig').once('value').then(snap => {
+        const v = snap.val();
+        if (v) {
+            aiConfig = v;
+            const urlEl = document.getElementById('ai-api-url');
+            const keyEl = document.getElementById('ai-api-key');
+            const modelEl = document.getElementById('ai-model');
+            if (urlEl) urlEl.value = v.url || '';
+            if (keyEl) keyEl.value = v.key || '';
+            if (modelEl) modelEl.value = v.model || '';
+        }
+    });
+})();
+
+// 保存 AI 配置
+function saveAiConfig() {
+    aiConfig.url = document.getElementById('ai-api-url').value.trim();
+    aiConfig.key = document.getElementById('ai-api-key').value.trim();
+    aiConfig.model = document.getElementById('ai-model').value.trim();
+    if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
+        return alert('请完整填写 API 地址、Key 和模型名称！');
+    }
+    db.ref('settings/aiConfig').set(aiConfig).then(() => {
+        document.getElementById('ai-config-status').textContent = '已保存';
+        setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2000);
+    }).catch(() => { alert('保存失败'); });
+}
+
+// OCR 识别图片中的文字
+async function ocrImage(base64) {
+    const resp = await fetch(aiConfig.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiConfig.key}` },
+        body: JSON.stringify({
+            model: aiConfig.model,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: '请识别图片中的所有文字和公式，直接输出识别结果，不要额外说明。' },
+                    { type: 'image_url', image_url: { url: base64 } }
+                ]
+            }],
+            max_tokens: 1000
+        })
+    });
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content || '(OCR未识别出内容)';
+}
+
+// AI 批改单道题，返回 { score, feedback }
+async function gradeQuestionWithAI(qIndex) {
+    const mq = masterPaper.questions[qIndex];
+    const sAnsObj = studentPaper.answers[mq.id] || { text: '', image: '' };
+    const qNum = qIndex + 1;
+
+    // 设置 loading 状态
+    const fbDiv = document.getElementById(`ai-feedback-${qIndex}`);
+    if (fbDiv) fbDiv.innerHTML = '<div class="ai-loading">AI 批改中...</div>';
+
+    try {
+        let studentText = sAnsObj.text || '';
+
+        // 有图片先 OCR
+        if (sAnsObj.image) {
+            studentText += '\n[手写OCR结果]: ' + await ocrImage(sAnsObj.image);
+        }
+
+        if (!studentText.trim()) {
+            return { score: 0, feedback: '学生未作答。' };
+        }
+
+        // 构建 prompt
+        const prompt = `你是专业课阅卷老师。请严格批改学生答案并给出分数和详细反馈。
+
+【题目】${mq.stem.replace(/\\n/g, '\n')}
+【题型】${mq.type === 'choice' ? '选择题' : mq.type === 'judge' ? '判断题' : '主观题'}
+【满分】${mq.score} 分
+【参考答案】${mq.standardAnswer || '无标准答案，根据题意自行判断'}
+${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : ''}
+【学生答案】${studentText}
+
+请返回 JSON（不要markdown代码块，纯JSON）：
+{"score": 数字(0到${mq.score}), "feedback": "详细批改意见（指出错误和不足，给出改进建议）"}`;
+
+        const resp = await fetch(aiConfig.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiConfig.key}` },
+            body: JSON.stringify({
+                model: aiConfig.model,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 2000,
+                temperature: 0.3
+            })
+        });
+
+        if (!resp.ok) throw new Error(`API ${resp.status}: ${resp.statusText}`);
+
+        const data = await resp.json();
+        let raw = data.choices?.[0]?.message?.content || '';
+
+        // 尝试解析 JSON（可能被包裹在 markdown 代码块中）
+        raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const result = JSON.parse(raw);
+
+        return {
+            score: Math.max(0, Math.min(parseFloat(result.score) || 0, mq.score)),
+            feedback: result.feedback || '无反馈'
+        };
+    } catch (err) {
+        console.error('AI 批改失败:', err);
+        return { score: -1, feedback: '批改失败: ' + err.message };
+    }
+}
+
+// 显示 AI 反馈并更新分数
+function showAIFeedback(qIndex, result) {
+    const fbDiv = document.getElementById(`ai-feedback-${qIndex}`);
+    if (!fbDiv) return;
+
+    if (result.score >= 0) {
+        const mq = masterPaper.questions[qIndex];
+        fbDiv.innerHTML = `<div class="ai-feedback-card">
+            <div class="ai-feedback-header">
+                <span>AI 建议得分: <b class="text-red">${result.score}</b> / ${mq.score}</span>
+                <button class="ai-accept-btn" onclick="acceptAIScore(${qIndex}, ${result.score})">采纳分数</button>
+            </div>
+            <div class="ai-feedback-body">${escapeHtml(result.feedback)}</div>
+        </div>`;
+        // 自动填入分数框
+        const scoreInput = document.getElementById(`score-input-id-${qIndex}`);
+        if (scoreInput) scoreInput.value = result.score;
+        singleScores[mq.id] = result.score;
+        updateLiveScoreUI(qIndex, result.score, mq.score);
+    } else {
+        fbDiv.innerHTML = `<div class="ai-feedback-card ai-feedback-error">${result.feedback}</div>`;
+    }
+}
+
+// 采纳 AI 分数
+function acceptAIScore(qIndex, score) {
+    const mq = masterPaper.questions[qIndex];
+    singleScores[mq.id] = score;
+    const scoreInput = document.getElementById(`score-input-id-${qIndex}`);
+    if (scoreInput) scoreInput.value = score;
+    updateLiveScoreUI(qIndex, score, mq.score);
+    document.getElementById(`ai-feedback-${qIndex}`).querySelector('.ai-accept-btn').textContent = '已采纳';
+    document.getElementById(`ai-feedback-${qIndex}`).querySelector('.ai-accept-btn').disabled = true;
+}
+
+// 更新分数 UI（导航点颜色等）
+function updateLiveScoreUI(index, score, maxScore) {
+    const targetDot = document.querySelector(`.dot-id-${index}`);
+    if (targetDot) {
+        targetDot.className = (score >= maxScore) ? 'q-nav-dot correct active' : 'q-nav-dot wrong active';
+    }
+}
+
+// 单题 AI 批改入口
+async function gradeSingleWithAI(qIndex) {
+    if (!aiConfig.url || !aiConfig.key) return alert('请先在 AI 批改设置中配置 API！');
+    const result = await gradeQuestionWithAI(qIndex);
+    showAIFeedback(qIndex, result);
+}
+
+// AI 批改全部题目
+async function gradeAllWithAI() {
+    if (!aiConfig.url || !aiConfig.key) return alert('请先在 AI 批改设置中配置 API！');
+    if (!masterPaper || !studentPaper) return alert('请先导入母卷和学生答案！');
+    if (aiGradingBusy) return alert('正在批改中，请等待...');
+    if (!confirm(`确定要对全部 ${masterPaper.questions.length} 道题进行 AI 批改吗？`)) return;
+
+    aiGradingBusy = true;
+    const btn = document.querySelector('.ai-grade-all-btn');
+    const origText = btn.textContent;
+    btn.textContent = '批改中...';
+    btn.disabled = true;
+
+    for (let i = 0; i < masterPaper.questions.length; i++) {
+        btn.textContent = `批改中 ${i + 1}/${masterPaper.questions.length}...`;
+        // 切换到单题模式以便看到每道题
+        if (currentGradingViewMode !== 'single') {
+            document.getElementById('mode-btn-single').click();
+        }
+        navigateSingleQTo(i);
+
+        const result = await gradeQuestionWithAI(i);
+        showAIFeedback(i, result);
+
+        // 短暂延迟避免 API 限流
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    btn.textContent = origText;
+    btn.disabled = false;
+    aiGradingBusy = false;
+    alert('AI 批改全部完成！请逐一检查并调整分数后导出。');
+}
+
+// 单题跳转（用于 AI 批改逐题展示）
+function navigateSingleQTo(index) {
+    document.querySelectorAll('.grade-item-card').forEach(c => c.classList.add('hidden-card'));
+    currentGradingSingleIndex = index;
+    const curCard = document.querySelector(`.g-card-idx-${index}`);
+    if (curCard) curCard.classList.remove('hidden-card');
+    highlightActiveDot(index);
+}
+
 // ================= 阶段二：评卷中心 =================
 document.getElementById('load-master').onchange = function(e) {
     const file = e.target.files[0]; if (!file) return;
@@ -325,6 +538,11 @@ function renderGradingInterface() {
                 </div>
             </div>`;
         }
+        // AI 批改按钮 + 反馈区
+        html += `<div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+            <button class="teacher-btn teacher-btn-sm ai-grade-btn" onclick="gradeSingleWithAI(${index})" style="background:#8e44ad;color:#fff;">AI 批改本题</button>
+            <div id="ai-feedback-${index}" style="flex:1;"></div>
+        </div>`;
         div.innerHTML = html; container.appendChild(div);
 
         const dot = document.createElement('div');
