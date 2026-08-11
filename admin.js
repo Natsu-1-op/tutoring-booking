@@ -101,8 +101,8 @@
     function handleViewingYearChange(forceYear) {
         if (!isAdminAuthenticated) return;
         const selectEl = document.getElementById('admin-year-select');
-        // 程序化调用时可传入强制年份，避免读旧下拉值
-        if (forceYear) {
+        // forceYear 仅当程序化传入了字符串年份才生效（onchange 事件传的是 Event 对象）
+        if (typeof forceYear === 'string') {
             viewingYear = forceYear;
             if (selectEl) selectEl.value = forceYear;
         } else if (selectEl && selectEl.value) {
