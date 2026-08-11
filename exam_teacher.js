@@ -521,76 +521,111 @@ function renderGradingInterface() {
     gridDots.innerHTML = '';
     singleScores = {};
 
+    const typeNames = { choice: '选择题', judge: '判断题', 'blank-auto': '客观填空', 'blank-hand': '主观填空', calculation: '计算题' };
+
     masterPaper.questions.forEach((mq, index) => {
         const sAnsObj = studentPaper.answers[mq.id] || { text: "", image: "" };
         const textAns = (sAnsObj.text || "").trim();
         const imageAns = sAnsObj.image || "";
-        const div = document.createElement('div');
-        div.className = `grade-item-card g-card-idx-${index}`;
-        div.id = `grade-card-id-${mq.id}`;
-
-        const isCorrect = (textAns.toUpperCase() === mq.standardAnswer.trim().toUpperCase());
+        const refAns = (mq.standardAnswer || "").trim();
+        const isCorrect = refAns && (textAns.toUpperCase() === refAns.toUpperCase());
         const autoScore = (mq.type === 'choice' || mq.type === 'judge' || mq.type === 'blank-auto') ? (isCorrect ? mq.score : 0) : 0;
         singleScores[mq.id] = autoScore;
 
         let cleanStem = mq.stem.replace(/\\n/g, "\n");
-        let html = `<div class="grade-item-stem"><b>题目 ${index + 1}</b> [型: ${mq.type}]：\n${escapeHtml(cleanStem)}</div>`;
-        if (mq.stemImage) html += `<img src="${mq.stemImage}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)" title="点击查看大图">`;
 
-        html += `
-            <div class="grading-answer-editor">
-                <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
-                    <b>修改参考答案：</b>
-                    <input type="text" value="${mq.standardAnswer || ''}" class="grading-ans-input"
-                        oninput="liveUpdateStandardAnswer('${mq.id}', this.value, ${index})">
-                </div>
-                <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap: wrap;">
-                    <b>更新评分细则附图：</b>
-                    <input type="file" accept="image/*" onchange="liveUpdateMasterQImage(this, '${mq.id}', ${index})" style="width:auto; max-width:220px; font-size:12px;">
-                </div>
-                <div id="live-master-img-box-${index}" style="margin-top:8px; ${mq.standardAnswerImage ? 'display:block' : 'display:none'}">
-                    <img id="live-master-img-render-${index}" src="${mq.standardAnswerImage || ''}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)">
-                </div>
-            </div>`;
+        // === 题目区 ===
+        let html = `<div class="grade-card-header">
+            <span class="grade-q-badge">第 ${index + 1} 题 · ${typeNames[mq.type] || mq.type}</span>
+            <span class="grade-q-score">满分 ${mq.score} 分</span>
+        </div>`;
+        html += `<div class="grade-item-stem">${escapeHtml(cleanStem)}</div>`;
+        if (mq.stemImage) html += `<img src="${mq.stemImage}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)">`;
 
-        let imgAppendHtml = imageAns ? `<br><img class="click-zoom-img" src="${imageAns}" onclick="openGlobalLightbox(this.src)">` : ``;
+        // === 选项区（选择题专属）===
+        if (mq.type === 'choice' && mq.options && mq.options.length > 0) {
+            html += `<div class="grade-options-row">`;
+            mq.options.forEach(opt => {
+                const optLetter = opt.trim().charAt(0);
+                const isStudentPick = textAns === optLetter;
+                const isCorrectOpt = refAns === optLetter;
+                let cls = 'grade-opt';
+                if (isStudentPick && isCorrectOpt) cls += ' grade-opt-correct';
+                else if (isStudentPick) cls += ' grade-opt-wrong';
+                else if (isCorrectOpt) cls += ' grade-opt-answer';
+                html += `<span class="${cls}">${escapeHtml(opt)}${isStudentPick ? ' ← 学生' : ''}${isCorrectOpt ? ' ✓' : ''}</span>`;
+            });
+            html += `</div>`;
+        }
 
-        if (mq.type === 'choice' || mq.type === 'judge' || mq.type === 'blank-auto') {
-            html += `<div class="grading-split">
-                <div class="ans-panel" id="ans-panel-render-${index}" style="background:${isCorrect ? '#f0f9eb' : '#fef0f0'}">
-                    <div>同学填报文字：<b id="stud-text-lbl-${index}">${escapeHtml(textAns) || '(空)'}</b> | 动态标答比对：<b id="master-text-lbl-${index}" class="text-blue">${escapeHtml(mq.standardAnswer)}</b></div>${imgAppendHtml}
-                </div>
-                <div class="score-panel">
-                    <label class="score-input-label">终审赋分框：</label>
-                    <input type="number" min="0" max="${mq.score}" step="0.5" id="score-input-id-${index}" value="${autoScore}"
-                        onchange="updateLiveScore('${mq.id}', this.value, ${index})">
-                </div>
-            </div>`;
-        } else {
-            let imgHtml = imageAns
-                ? `<img class="click-zoom-img" src="${imageAns}" onclick="openGlobalLightbox(this.src)">`
-                : `<span class="text-gray" style="font-size:13px;">（该同学未拍照提交有效证明演算草稿）</span>`;
-            html += `<div class="grading-split">
-                <div class="ans-panel"><div>同学打字或简答应答：<code>${escapeHtml(textAns) || '(无)'}</code></div>
-                <div style="margin-top:8px; border-top:1px dashed #eee; padding-top:5px;">手写快照：<br>${imgHtml}</div></div>
-                <div class="score-panel">
-                    <label class="score-input-label">本题满分 ${mq.score} 分</label>
-                    <input type="number" min="0" max="${mq.score}" step="0.5" placeholder="请在此赋分"
-                        onchange="updateLiveScore('${mq.id}', this.value, ${index})" class="manual-score-input">
-                </div>
+        // === 判断题特殊处理 ===
+        if (mq.type === 'judge') {
+            const stuLabel = textAns === '√' ? '正确' : textAns === '×' ? '错误' : '未答';
+            const refLabel = refAns === '√' ? '正确' : refAns === '×' ? '错误' : '未设';
+            html += `<div class="grade-judge-row">
+                <span class="grade-judge-item ${isCorrect ? 'grade-judge-correct' : 'grade-judge-wrong'}">学生：${stuLabel}</span>
+                <span class="text-gray" style="margin:0 8px;">|</span>
+                <span class="grade-judge-item grade-judge-answer">标答：${refLabel}</span>
             </div>`;
         }
-        // AI 批改按钮 + 反馈区
-        html += `<div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
-            <button class="teacher-btn teacher-btn-sm ai-grade-btn" onclick="gradeSingleWithAI(${index})" style="background:#8e44ad;color:#fff;">AI 批改本题</button>
-            <div id="ai-feedback-${index}" style="flex:1;"></div>
+
+        // === 参考答案编辑区 ===
+        html += `<div class="grading-answer-editor">
+            <div class="grading-editor-row">
+                <b>参考答案：</b>
+                <input type="text" value="${escapeHtml(refAns)}" class="grading-ans-input"
+                    oninput="liveUpdateStandardAnswer('${mq.id}', this.value, ${index})">
+                <input type="file" accept="image/*" onchange="liveUpdateMasterQImage(this, '${mq.id}', ${index})" style="font-size:12px; max-width:180px;">
+            </div>
+            <div id="live-master-img-box-${index}" style="margin-top:6px; ${mq.standardAnswerImage ? 'display:block' : 'display:none'}">
+                <img id="live-master-img-render-${index}" src="${mq.standardAnswerImage || ''}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)">
+            </div>
         </div>`;
-        div.innerHTML = html; container.appendChild(div);
+
+        // === 学生作答区 ===
+        html += `<div class="grade-student-answer">
+            <div class="grade-student-label">学生作答</div>`;
+        if (textAns) {
+            html += `<div class="grade-student-text">${escapeHtml(textAns)}</div>`;
+        } else {
+            html += `<span class="text-gray" style="font-size:13px;">（未作答）</span>`;
+        }
+        if (imageAns) {
+            html += `<img src="${imageAns}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)" style="margin-top:8px;">`;
+        }
+        html += `</div>`;
+
+        // === 评分区 ===
+        html += `<div class="grade-score-row">
+            <div class="grade-score-info">
+                ${mq.type === 'choice' || mq.type === 'judge' || mq.type === 'blank-auto'
+                    ? `<span class="grade-auto-badge ${isCorrect ? 'grade-badge-ok' : 'grade-badge-ng'}">${isCorrect ? '自动判定：正确' : '自动判定：错误'}</span>`
+                    : `<span class="grade-auto-badge grade-badge-manual">人工评卷</span>`}
+            </div>
+            <div class="grade-score-input-group">
+                <label class="score-input-label">得分</label>
+                <input type="number" min="0" max="${mq.score}" step="0.5" id="score-input-id-${index}" value="${autoScore}"
+                    onchange="updateLiveScore('${mq.id}', this.value, ${index})" class="grade-score-input">
+                <span class="text-gray" style="font-size:12px;">/ ${mq.score}</span>
+            </div>
+        </div>`;
+
+        // === AI 批改按钮 + 反馈区 ===
+        html += `<div class="grade-ai-row">
+            <button class="teacher-btn teacher-btn-sm ai-grade-btn" onclick="gradeSingleWithAI(${index})">AI 批改本题</button>
+            <div id="ai-feedback-${index}" class="grade-ai-feedback"></div>
+        </div>`;
+
+        const div = document.createElement('div');
+        div.className = `grade-item-card g-card-idx-${index}`;
+        div.id = `grade-card-id-${mq.id}`;
+        div.innerHTML = html;
+        container.appendChild(div);
 
         const dot = document.createElement('div');
         dot.className = `q-nav-dot dot-id-${index}`;
         dot.textContent = index + 1;
-        if ((mq.type === 'choice' || mq.type === 'judge' || mq.type === 'blank-auto')) {
+        if (mq.type === 'choice' || mq.type === 'judge' || mq.type === 'blank-auto') {
             dot.className = isCorrect ? "q-nav-dot correct" : "q-nav-dot wrong";
         }
 
