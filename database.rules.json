@@ -1,0 +1,73 @@
+{
+  "rules": {
+    "system": {
+      ".read": true,
+      ".write": true
+    },
+    "years": {
+      "$year": {
+        ".read": true,
+        ".write": true,
+        "slots": {
+          "$slotId": {
+            "time": { ".validate": "newData.isString() && newData.val().length > 0" },
+            "reserved": { ".validate": "newData.isBoolean()" },
+            "status": { ".validate": "newData.isString()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "reservations": {
+          "$resId": {
+            "nickname": { ".validate": "newData.isString()" },
+            "slotId": { ".validate": "newData.isString()" },
+            "time": { ".validate": "newData.isString()" },
+            "status": { ".validate": "newData.isString()" },
+            "cancelCode": { ".validate": "newData.isString()" },
+            "timestamp": { ".validate": "newData.isNumber()" },
+            "archived": { ".validate": "newData.isBoolean() || newData.val() === null" },
+            "slotSnapshot": { ".validate": "newData.hasChildren()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "settings": {
+          "$key": {
+            ".validate": "newData.isString() || newData.isBoolean() || newData.isNumber() || newData.hasChildren()"
+          }
+        },
+        "studentWhitelist": {
+          "$id": {
+            ".validate": "newData.isString()"
+          }
+        },
+        "operationLog": {},
+        "metadata": {},
+        "dailyLocks": {}
+      }
+    },
+    "examRankings": {
+      ".read": true,
+      ".write": true,
+      "$paper": {
+        "$student": {
+          "name": { ".validate": "newData.isString()" },
+          "paperTitle": { ".validate": "newData.isString()" },
+          "time": { ".validate": "newData.isString()" },
+          "score": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "submittedExamLocks": {
+      ".read": true,
+      "$paper": {
+        "$student": {
+          ".write": "!data.exists() || data.val() == null"
+        }
+      }
+    },
+    "admin_auth": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}
