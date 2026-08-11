@@ -233,26 +233,53 @@ function triggerDl(obj, name) {
 // ================= AI 批改 =================
 let aiConfig = { url: '', key: '', model: '' };
 let aiGradingBusy = false;
+const AI_KEY_SALT = 'ClassOpticAIKeySalt2026';
 
-// 加载 AI 配置
+// 简单 XOR 加解密（防止 Firebase 中明文暴露 API Key）
+function encryptKey(plain) {
+    let r = '';
+    for (let i = 0; i < plain.length; i++) {
+        r += String.fromCharCode(plain.charCodeAt(i) ^ AI_KEY_SALT.charCodeAt(i % AI_KEY_SALT.length));
+    }
+    return btoa(r);
+}
+function decryptKey(cipher) {
+    try {
+        const raw = atob(cipher);
+        let r = '';
+        for (let i = 0; i < raw.length; i++) {
+            r += String.fromCharCode(raw.charCodeAt(i) ^ AI_KEY_SALT.charCodeAt(i % AI_KEY_SALT.length));
+        }
+        return r;
+    } catch(e) { return ''; }
+}
+
+// 加载配置：URL/模型从 Firebase，Key 从 localStorage（不上传服务器）
 function getAiConfigRef() {
     const year = SystemRouter.activeYear || '2026';
     return db.ref(`years/${year}/settings/aiConfig`);
 }
 
 (function loadAiConfig() {
+    // URL 和模型从 Firebase 加载
     getAiConfigRef().once('value').then(snap => {
         const v = snap.val();
+        const urlEl = document.getElementById('ai-api-url');
+        const modelEl = document.getElementById('ai-model');
         if (v) {
-            aiConfig = v;
-            const urlEl = document.getElementById('ai-api-url');
-            const keyEl = document.getElementById('ai-api-key');
-            const modelEl = document.getElementById('ai-model');
             if (urlEl) urlEl.value = v.url || '';
-            if (keyEl) keyEl.value = v.key || '';
             if (modelEl) modelEl.value = v.model || '';
+            aiConfig.url = v.url || '';
+            aiConfig.model = v.model || '';
         }
     });
+    // Key 从 localStorage 加载（加密存储）
+    const encKey = localStorage.getItem('ai_key_enc');
+    if (encKey) {
+        aiConfig.key = decryptKey(encKey);
+        const keyEl = document.getElementById('ai-api-key');
+        if (keyEl && aiConfig.key) keyEl.value = aiConfig.key;
+    }
 })();
 
 // 保存 AI 配置
@@ -263,9 +290,13 @@ function saveAiConfig() {
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
         return alert('请完整填写 API 地址、Key 和模型名称！');
     }
-    getAiConfigRef().set(aiConfig).then(() => {
-        document.getElementById('ai-config-status').textContent = '已保存';
-        setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2000);
+
+    // URL 和模型存 Firebase，Key 只存 localStorage（加密）
+    const publicConfig = { url: aiConfig.url, model: aiConfig.model };
+    getAiConfigRef().set(publicConfig).then(() => {
+        localStorage.setItem('ai_key_enc', encryptKey(aiConfig.key));
+        document.getElementById('ai-config-status').textContent = '已保存（Key 仅存本机）';
+        setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2500);
     }).catch((err) => { alert('保存失败: ' + (err.message || err)); });
 }
 
