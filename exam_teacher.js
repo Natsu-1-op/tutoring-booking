@@ -19,6 +19,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
+// 初始化学年（从 Firebase 同步，否则 AI 配置会写错路径）
+SystemRouter.system().once('value', snap => {
+    const sys = snap.val();
+    if (sys && sys.activeYear) SystemRouter.activeYear = sys.activeYear;
+});
+
 function executeManualGateAuth() {
     const tokenInput = document.getElementById('gate-pass-input').value.trim();
     const errLbl = document.getElementById('gate-error-lbl');
@@ -229,8 +235,13 @@ let aiConfig = { url: '', key: '', model: '' };
 let aiGradingBusy = false;
 
 // 加载 AI 配置
+function getAiConfigRef() {
+    const year = SystemRouter.activeYear || '2026';
+    return db.ref(`years/${year}/settings/aiConfig`);
+}
+
 (function loadAiConfig() {
-    SystemRouter.getSettingsRef(SystemRouter.activeYear || '2026').child('aiConfig').once('value').then(snap => {
+    getAiConfigRef().once('value').then(snap => {
         const v = snap.val();
         if (v) {
             aiConfig = v;
@@ -252,10 +263,10 @@ function saveAiConfig() {
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
         return alert('请完整填写 API 地址、Key 和模型名称！');
     }
-    SystemRouter.getSettingsRef(SystemRouter.activeYear || '2026').child('aiConfig').set(aiConfig).then(() => {
+    getAiConfigRef().set(aiConfig).then(() => {
         document.getElementById('ai-config-status').textContent = '已保存';
         setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2000);
-    }).catch(() => { alert('保存失败'); });
+    }).catch((err) => { alert('保存失败: ' + (err.message || err)); });
 }
 
 // OCR 识别图片中的文字
