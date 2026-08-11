@@ -667,7 +667,6 @@
             
             SystemRouter.system().update({ activeYear: targetY, activeName: customName }).then(() => {
                 SystemRouter.getLogsRef(targetY).push({ action: `将本学年设为当前开放学年`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                alert('设置成功！学生端已同步。');
             });
         }
     }
@@ -687,8 +686,9 @@
             initialPack[`years/${newY}/settings/accessCode`] = secureRandomCode; 
 
             db.ref().update(initialPack).then(() => {
-                SystemRouter.getLogsRef(newY).push({ action: `新建了学年`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                alert(`新建学年成功！\n默认口令是：【 ${secureRandomCode} 】\n请在下拉框中切换并开始排班。`);
+                SystemRouter.getLogsRef(newY).push({ action: `新建了学年，初始口令: ${secureRandomCode}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                document.getElementById('admin-year-select').value = newY;
+                handleViewingYearChange();
             });
         });
     }
@@ -711,8 +711,7 @@
         
         if (confirmMsg === viewingYear) {
             db.ref(`years/${viewingYear}`).remove().then(() => {
-                alert('该学年已彻底删除。');
-                document.getElementById('admin-year-select').value = SystemRouter.activeYear || '2026';
+                viewingYear = SystemRouter.activeYear || '2026';
                 handleViewingYearChange();
             }).catch(err => { alert('删除失败：' + err.message); });
         } else if (confirmMsg !== null) {
