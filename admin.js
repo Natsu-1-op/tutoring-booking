@@ -60,22 +60,37 @@
                     opt.textContent = name + suffix; selectEl.appendChild(opt);
                 });
                 if (data[savedVal]) selectEl.value = savedVal;
+                else if (data && Object.keys(data).length > 0) selectEl.value = Object.keys(data).sort().reverse()[0];
             } else {
-                const opt = document.createElement('option'); opt.value = "2026"; opt.textContent = "2026学年 [当前开放学年]"; selectEl.appendChild(opt);
+                const opt = document.createElement('option'); opt.value = "2026"; opt.textContent = "2026学年"; selectEl.appendChild(opt);
             }
             updateStatusTextInfo();
-            handleViewingYearChange(); 
+            handleViewingYearChange();
         });
 
         SystemRouter.system().on('value', (snap) => {
             if (!isAdminAuthenticated) return;
             const sys = snap.val();
             if (sys && sys.activeYear) {
-                SystemRouter.activeYear = sys.activeYear; SystemRouter.activeName = sys.activeName; updateStatusTextInfo();
+                SystemRouter.activeYear = sys.activeYear; SystemRouter.activeName = sys.activeName;
+                updateStatusTextInfo();
+                // 刷新下拉框标签（[当前开放学年] vs [历史归档]）
+                refreshYearDropdownLabels();
             }
         });
 
         handleViewingYearChange();
+    }
+
+    function refreshYearDropdownLabels() {
+        const selectEl = document.getElementById('admin-year-select');
+        if (!selectEl) return;
+        Array.from(selectEl.options).forEach(opt => {
+            const y = opt.value;
+            const isActive = y === SystemRouter.activeYear;
+            const baseName = opt.textContent.replace(' [当前开放学年]', '').replace(' [历史归档]', '');
+            opt.textContent = baseName + (isActive ? ' [当前开放学年]' : ' [历史归档]');
+        });
     }
 
     function updateStatusTextInfo() {
@@ -83,10 +98,16 @@
         if (bar) bar.innerHTML = `当前对学生开放的学年是：<span class="text-blue text-bold">${escapeHtml(SystemRouter.activeName)} (${SystemRouter.activeYear || '2026'}年)</span>`;
     }
 
-    function handleViewingYearChange() {
+    function handleViewingYearChange(forceYear) {
         if (!isAdminAuthenticated) return;
         const selectEl = document.getElementById('admin-year-select');
-        if (selectEl && selectEl.value) viewingYear = selectEl.value;
+        // 程序化调用时可传入强制年份，避免读旧下拉值
+        if (forceYear) {
+            viewingYear = forceYear;
+            if (selectEl) selectEl.value = forceYear;
+        } else if (selectEl && selectEl.value) {
+            viewingYear = selectEl.value;
+        }
 
         if (currentActiveSlotsRefMemory) currentActiveSlotsRefMemory.off();
         if (currentActiveReservationsRefMemory) currentActiveReservationsRefMemory.off();
@@ -687,8 +708,7 @@
 
             db.ref().update(initialPack).then(() => {
                 SystemRouter.getLogsRef(newY).push({ action: `新建了学年，初始口令: ${secureRandomCode}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                document.getElementById('admin-year-select').value = newY;
-                handleViewingYearChange();
+                handleViewingYearChange(newY);
             });
         });
     }
@@ -711,8 +731,7 @@
         
         if (confirmMsg === viewingYear) {
             db.ref(`years/${viewingYear}`).remove().then(() => {
-                viewingYear = SystemRouter.activeYear || '2026';
-                handleViewingYearChange();
+                handleViewingYearChange(SystemRouter.activeYear || '2026');
             }).catch(err => { alert('删除失败：' + err.message); });
         } else if (confirmMsg !== null) {
             alert('输入不匹配，已取消删除。');
