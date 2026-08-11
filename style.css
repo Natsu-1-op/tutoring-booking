@@ -1,33 +1,42 @@
 /* style.css — 全局样式 */
+:root {
+    --c-primary: #3b82f6; --c-success: #22c55e; --c-warning: #f59e0b; --c-danger: #ef4444;
+    --c-bg: #f8fafc; --c-surface: #fff; --c-border: #e2e8f0; --c-text: #334155; --c-muted: #94a3b8;
+    --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
 
 /* ========== 基础布局 ========== */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: #f5f7fa; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;
+    background: var(--c-bg); color: var(--c-text); max-width: 600px; margin: 0 auto; padding: 20px;
+    -webkit-font-smoothing: antialiased;
 }
-.container { background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-h1 { font-size: 24px; text-align: center; color: #2c3e50; }
-h2 { font-size: 18px; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 30px;}
+.container { background: var(--c-surface); padding: 28px 24px; border-radius: var(--radius); box-shadow: var(--shadow); }
+h1 { font-size: 22px; text-align: center; color: #1e293b; font-weight: 700; letter-spacing: -0.3px; }
+h2 { font-size: 16px; color: #475569; font-weight: 600; border-bottom: 1px solid var(--c-border); padding-bottom: 10px; margin-top: 28px; }
 
 /* ========== 表单 ========== */
-.form-group { margin-bottom: 20px; }
-label { display: block; margin-bottom: 8px; font-weight: bold; }
+.form-group { margin-bottom: 18px; }
+label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color: #475569; }
 input[type="text"], input[type="date"], input[type="password"], input[type="datetime-local"] {
-    width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box;
+    width: 100%; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: 8px; box-sizing: border-box;
+    font-size: 15px; color: var(--c-text); background: var(--c-bg); transition: border-color 0.15s;
 }
+input:focus { border-color: var(--c-primary); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
 
 /* ========== 按钮 ========== */
 button {
-    background: #0066ff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 16px; width: 100%;
+    background: var(--c-primary); color: #fff; border: none; padding: 11px 18px; border-radius: 8px;
+    cursor: pointer; font-size: 15px; font-weight: 600; width: 100%; transition: all 0.15s;
 }
-button:hover { background: #0055cc; }
-button.danger { background: #ff4d4f; width: auto; padding: 8px 12px; font-size: 14px;}
-button.danger:hover { background: #e60000; }
-button.action-btn { width: auto; padding: 6px 12px; font-size: 13px; margin-top: 5px; }
-.btn-cancel-booking { background: #f56c6c; }
-.btn-cancel-booking:hover { background: #e60000; }
-.btn-cal-add { background: #f0f7ff; color: #409eff; border: 1px solid #b3d8ff; font-size: 12px; padding: 6px 10px; font-weight: bold; }
-.btn-cal-add:hover { background: #409eff; color: #fff; border-color: #409eff; }
+button:hover { filter: brightness(0.95); }
+button.danger { background: var(--c-danger); width: auto; padding: 7px 12px; font-size: 13px; border-radius: 6px; }
+button.danger:hover { background: #dc2626; }
+button.action-btn { width: auto; padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+.btn-cancel-booking { background: #fee2e2; color: var(--c-danger); }
+.btn-cancel-booking:hover { background: var(--c-danger); color: #fff; }
+.btn-cal-add { background: #eff6ff; color: var(--c-primary); border: 1px solid #bfdbfe; font-size: 12px; padding: 5px 10px; font-weight: 600; }
+.btn-cal-add:hover { background: var(--c-primary); color: #fff; }
 
 /* ========== 导航按钮 ========== */
 .nav-btn-container { display: flex; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }

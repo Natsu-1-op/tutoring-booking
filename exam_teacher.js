@@ -219,7 +219,7 @@ function exportJsonPapers() {
     triggerDl({ paperTitle: title, startTime: start, endTime: end, questions: tQ }, 'exam_teacher_master.json');
     const secureStudentCipher = encryptEngine({ paperTitle: title, startTime: start, endTime: end, questions: sQ }, STEALTH_SECRET_SALT);
     triggerDl({ isEncrypted: true, cipher: secureStudentCipher }, 'exam_student_release.json');
-    alert("试卷文件已导出。");
+    // 导出完成
 }
 
 function triggerDl(obj, name) {
@@ -485,7 +485,6 @@ document.getElementById('load-master').onchange = function(e) {
     const r = new FileReader();
     r.onload = function(evt) {
         masterPaper = JSON.parse(evt.target.result);
-        alert(`母卷载入就绪！`);
         document.getElementById('student-file-zone').style.display = 'block';
     }; r.readAsText(file);
 };

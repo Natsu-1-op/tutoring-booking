@@ -523,7 +523,6 @@
                 });
 
                 SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                alert('修改成功！相关的预约单据时间已自动同步。');
             });
         });
     };
@@ -541,11 +540,11 @@
                     canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
                     const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
                     targetRef.child('notice').set(noticeText).then(() => {
-                        targetRef.child('noticeImage').set(compressedBase64).then(() => { fileInput.value = ''; alert('公告发布成功。'); }).catch(() => { alert('图片上传失败，请重试。'); });
+                        targetRef.child('noticeImage').set(compressedBase64).then(() => { fileInput.value = ''; }).catch(() => { alert('图片上传失败，请重试。'); });
                     }).catch(() => { alert('公告保存失败，请重试。'); });
                 }; img.src = e.target.result;
             }; reader.readAsDataURL(file);
-        } else { targetRef.child('notice').set(noticeText).then(() => alert('公告保存成功。')).catch(() => { alert('公告保存失败，请重试。'); }); }
+        } else { targetRef.child('notice').set(noticeText).catch(() => { alert('公告保存失败，请重试。'); }); }
     }
 
     // 加载排班模板（从 Firebase 设置中读取）
@@ -567,9 +566,7 @@
         for (let i = 1; i <= 5; i++) {
             templates.push(document.getElementById(`tpl-time-${i}`).value.trim());
         }
-        SystemRouter.getSettingsRef(viewingYear).child('slotTemplates').set(templates).then(() => {
-            alert('模板已保存。');
-        }).catch(() => { alert('保存失败。'); });
+        SystemRouter.getSettingsRef(viewingYear).child('slotTemplates').set(templates).catch(() => { alert('保存失败。'); });
     }
 
     function addSlot() {
@@ -616,7 +613,7 @@
             if (confirm('确定要批量添加排班吗？')) {
                 db.ref().update(atomicUpdates).then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({ action: `批量新增了 ${okCount} 个排班`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                    document.getElementById('template-date').value = ""; alert('批量排班成功。');
+                    document.getElementById('template-date').value = "";
                 }).catch(() => {
                     alert('批量排班失败，请重试。');
                 });
@@ -634,7 +631,7 @@
                         alert('由于已有学生预约，该时段已在学生端隐藏。');
                     }).catch(() => { alert('操作失败，请重试。'); });
                 } else {
-                    SystemRouter.getSlotsRef(viewingYear).child(slotId).remove().then(() => alert('删除成功。')).catch(() => { alert('删除失败，请重试。'); });
+                    SystemRouter.getSlotsRef(viewingYear).child(slotId).remove().catch(() => { alert('删除失败，请重试。'); });
                 }
             }).catch(() => { alert('读取排班信息失败，请重试。'); });
         }
@@ -715,11 +712,9 @@
         if (confirmMsg === viewingYear) {
             db.ref(`years/${viewingYear}`).remove().then(() => {
                 alert('该学年已彻底删除。');
-                document.getElementById('admin-year-select').value = "2026";
+                document.getElementById('admin-year-select').value = SystemRouter.activeYear || '2026';
                 handleViewingYearChange();
-            }).catch(err => {
-                alert('删除失败：' + err.message);
-            });
+            }).catch(err => { alert('删除失败：' + err.message); });
         } else if (confirmMsg !== null) {
             alert('输入不匹配，已取消删除。');
         }
@@ -736,8 +731,12 @@
                 case "booked": textS = "已预约"; break; case "confirmed": textS = "已确认"; break;
                 case "canceled": textS = "已取消"; break; case "completed": textS = "已完成"; break;
             }
+            // 统一格式化为标准日期
+            let timeDisplay = r.time || '';
+            const p = TimeParser.parseRawText(r.time, viewingYear);
+            if (p) timeDisplay = `${p.date} ${p.startTime}-${p.endTime}`;
             const readableSubmitTime = r.timestamp ? new Date(r.timestamp).toLocaleString() : "未知";
-            csvContent += `"${(r.time || '').replace(/"/g, '""')}","${(r.nickname || '不详').replace(/"/g, '""')}","${textS}","${(r.cancelCode || '-').replace(/"/g, '""')}","${readableSubmitTime}"\n`;
+            csvContent += `"${timeDisplay.replace(/"/g, '""')}","${(r.nickname || '不详').replace(/"/g, '""')}","${textS}","${(r.cancelCode || '-').replace(/"/g, '""')}","${readableSubmitTime}"\n`;
         });
         
         const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
@@ -758,9 +757,7 @@
             clearPacks[`years/${viewingYear}/settings/deadline`] = null;
             clearPacks[`years/${viewingYear}/settings/notice`] = null;
             clearPacks[`years/${viewingYear}/settings/noticeImage`] = null;
-            db.ref().update(clearPacks).then(() => {
-                alert('清空完成。');
-            });
+            db.ref().update(clearPacks);
         }
     }
 

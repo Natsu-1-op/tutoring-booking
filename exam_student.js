@@ -474,8 +474,6 @@ function triggerManualSubmit(isForceSystemTimeout) {
         setTimeout(() => { URL.revokeObjectURL(downloadUrl); }, 1200);
         try { localStorage.removeItem("exam_answer_backup"); } catch(e) {}
 
-        alert("交卷成功！答案包已导出。");
-
         // 重置所有状态
         Object.keys(studentAnswers).forEach(k => { studentAnswers[k].image = ""; });
         examPaperData = null; studentNameVerified = "";
