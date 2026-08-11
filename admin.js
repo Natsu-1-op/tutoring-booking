@@ -49,20 +49,20 @@
         SystemRouter.yearsRoot().on('value', (snapshot) => {
             if (!isAdminAuthenticated) return;
             const data = snapshot.val(); const selectEl = document.getElementById('admin-year-select');
-            const savedVal = selectEl.value || SystemRouter.activeYear || "2026";
+            const savedVal = selectEl.value || viewingYear || SystemRouter.activeYear || "2026";
             selectEl.innerHTML = '';
-            
-            if (data) {
-                Object.keys(data).sort().reverse().forEach(y => {
+
+            const yearKeys = data ? Object.keys(data).sort().reverse() : [];
+            if (yearKeys.length > 0) {
+                yearKeys.forEach(y => {
                     const opt = document.createElement('option'); opt.value = y;
                     const name = (data[y].metadata && data[y].metadata.name) ? data[y].metadata.name : `${y}学年`;
-                    const suffix = (y === SystemRouter.activeYear) ? " [当前开放学年]" : " [历史归档]";
+                    const suffix = (y === SystemRouter.activeYear) ? " [当前]" : "";
                     opt.textContent = name + suffix; selectEl.appendChild(opt);
                 });
-                if (data[savedVal]) selectEl.value = savedVal;
-                else if (data && Object.keys(data).length > 0) selectEl.value = Object.keys(data).sort().reverse()[0];
+                selectEl.value = data[savedVal] ? savedVal : yearKeys[0];
             } else {
-                const opt = document.createElement('option'); opt.value = "2026"; opt.textContent = "2026学年"; selectEl.appendChild(opt);
+                const opt = document.createElement('option'); opt.value = "2026"; opt.textContent = "2026学年 [当前]"; selectEl.appendChild(opt);
             }
             updateStatusTextInfo();
             handleViewingYearChange();
@@ -88,8 +88,8 @@
         Array.from(selectEl.options).forEach(opt => {
             const y = opt.value;
             const isActive = y === SystemRouter.activeYear;
-            const baseName = opt.textContent.replace(' [当前开放学年]', '').replace(' [历史归档]', '');
-            opt.textContent = baseName + (isActive ? ' [当前开放学年]' : ' [历史归档]');
+            const baseName = opt.textContent.replace(' [当前]', '').replace(' [历史]', '');
+            opt.textContent = baseName + (isActive ? ' [当前]' : '');
         });
     }
 
