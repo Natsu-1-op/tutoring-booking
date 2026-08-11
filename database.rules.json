@@ -5,8 +5,8 @@
       ".write": true
     },
     "years": {
+      ".read": true,
       "$year": {
-        ".read": true,
         ".write": true,
         "slots": {
           "$slotId": {
