@@ -235,6 +235,40 @@ let aiConfig = { url: '', key: '', model: '' };
 let aiGradingBusy = false;
 const AI_KEY_SALT = 'ClassOpticAIKeySalt2026';
 
+// 规范化 OpenAI 兼容 API 地址：自动补全常见的 /chat/completions 路径
+function normalizeApiUrl(url) {
+    let u = (url || '').trim();
+    if (!u) return u;
+    while (u.endsWith('/')) u = u.slice(0, -1);
+    if (/\/chat\/completions$/i.test(u)) return u;
+    if (/\/v\d+$/i.test(u)) return u + '/chat/completions';
+    return u + '/v1/chat/completions';
+}
+
+// 统一发送 AI 请求并处理错误（先读文本再解析，避免空响应时晦涩的 JSON 报错）
+async function callAI(body) {
+    const apiUrl = normalizeApiUrl(aiConfig.url);
+    let resp;
+    try {
+        resp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiConfig.key}` },
+            body: JSON.stringify(body)
+        });
+    } catch (e) {
+        throw new Error('无法连接 API 服务，请检查网络或 API 地址：' + e.message);
+    }
+    if (!resp.ok) {
+        let detail = '';
+        try { detail = (await resp.text()).slice(0, 200); } catch (e) {}
+        throw new Error(`API ${resp.status}${detail ? '：' + detail : ''}（请检查 API 地址是否完整，应以 /chat/completions 结尾）`);
+    }
+    const text = await resp.text();
+    if (!text.trim()) throw new Error('API 返回了空响应，请检查 API 地址和模型名称是否正确');
+    try { return JSON.parse(text); }
+    catch (e) { throw new Error('API 返回的不是有效 JSON，请检查 API 地址是否指向 /chat/completions 端点'); }
+}
+
 // 简单 XOR 加解密（防止 Firebase 中明文暴露 API Key）
 function encryptKey(plain) {
     let r = '';
@@ -284,7 +318,7 @@ function getAiConfigRef() {
 
 // 保存 AI 配置
 function saveAiConfig() {
-    aiConfig.url = document.getElementById('ai-api-url').value.trim();
+    aiConfig.url = normalizeApiUrl(document.getElementById('ai-api-url').value.trim());
     aiConfig.key = document.getElementById('ai-api-key').value.trim();
     aiConfig.model = document.getElementById('ai-model').value.trim();
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
@@ -302,22 +336,17 @@ function saveAiConfig() {
 
 // OCR 识别图片中的文字
 async function ocrImage(base64) {
-    const resp = await fetch(aiConfig.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiConfig.key}` },
-        body: JSON.stringify({
-            model: aiConfig.model,
-            messages: [{
-                role: 'user',
-                content: [
-                    { type: 'text', text: '请识别图片中的所有文字和公式，直接输出识别结果，不要额外说明。' },
-                    { type: 'image_url', image_url: { url: base64 } }
-                ]
-            }],
-            max_tokens: 1000
-        })
+    const data = await callAI({
+        model: aiConfig.model,
+        messages: [{
+            role: 'user',
+            content: [
+                { type: 'text', text: '请识别图片中的所有文字和公式，直接输出识别结果，不要额外说明。' },
+                { type: 'image_url', image_url: { url: base64 } }
+            ]
+        }],
+        max_tokens: 1000
     });
-    const data = await resp.json();
     return data.choices?.[0]?.message?.content || '(OCR未识别出内容)';
 }
 
@@ -356,25 +385,20 @@ ${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : 
 请返回 JSON（不要markdown代码块，纯JSON）：
 {"score": 数字(0到${mq.score}), "feedback": "详细批改意见（指出错误和不足，给出改进建议）"}`;
 
-        const resp = await fetch(aiConfig.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiConfig.key}` },
-            body: JSON.stringify({
-                model: aiConfig.model,
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 2000,
-                temperature: 0.3
-            })
+        const data = await callAI({
+            model: aiConfig.model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 2000,
+            temperature: 0.3
         });
-
-        if (!resp.ok) throw new Error(`API ${resp.status}: ${resp.statusText}`);
-
-        const data = await resp.json();
         let raw = data.choices?.[0]?.message?.content || '';
 
         // 尝试解析 JSON（可能被包裹在 markdown 代码块中）
         raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-        const result = JSON.parse(raw);
+        if (!raw) throw new Error('模型未返回内容，请检查模型名称是否正确');
+        let result;
+        try { result = JSON.parse(raw); }
+        catch (e) { throw new Error('模型返回的不是有效 JSON：' + raw.slice(0, 120)); }
 
         return {
             score: Math.max(0, Math.min(parseFloat(result.score) || 0, mq.score)),
