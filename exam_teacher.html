@@ -90,6 +90,10 @@
                         <label>模型名称</label>
                         <input type="text" id="ai-model" placeholder="gpt-4o / deepseek-chat" class="teacher-input">
                     </div>
+                    <div class="ai-config-row">
+                        <label>OCR 模型（可选）</label>
+                        <input type="text" id="ai-ocr-model" placeholder="识别手写图片用，需支持视觉，如 gpt-4o / glm-4v-flash / qwen-vl-max" class="teacher-input">
+                    </div>
                     <button class="teacher-btn teacher-btn-sm" style="background:#409eff;color:#fff;" onclick="saveAiConfig()">保存配置</button>
                     <span id="ai-config-status" class="text-gray" style="font-size:12px;margin-left:10px;"></span>
                 </div>

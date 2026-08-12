@@ -231,7 +231,7 @@ function triggerDl(obj, name) {
 }
 
 // ================= AI 批改 =================
-let aiConfig = { url: '', key: '', model: '' };
+let aiConfig = { url: '', key: '', model: '', ocrModel: '' };
 let aiGradingBusy = false;
 const AI_KEY_SALT = 'ClassOpticAIKeySalt2026';
 
@@ -260,7 +260,11 @@ async function callAI(body) {
     }
     if (!resp.ok) {
         let detail = '';
-        try { detail = (await resp.text()).slice(0, 200); } catch (e) {}
+        try { detail = (await resp.text()).slice(0, 300); } catch (e) {}
+        // 模型不支持视觉输入（OCR 用）时给出明确指引
+        if (/image_url|unknown variant|vision|visual/i.test(detail)) {
+            throw new Error('当前模型不支持图片识别（OCR）。请在 AI 批改设置中填写支持视觉的「OCR 模型」，如 gpt-4o、glm-4v-flash、qwen-vl-max');
+        }
         throw new Error(`API ${resp.status}${detail ? '：' + detail : ''}（请检查 API 地址是否完整，应以 /chat/completions 结尾）`);
     }
     const text = await resp.text();
@@ -303,8 +307,11 @@ function getAiConfigRef() {
         if (v) {
             if (urlEl) urlEl.value = v.url || '';
             if (modelEl) modelEl.value = v.model || '';
+            const ocrModelEl = document.getElementById('ai-ocr-model');
+            if (ocrModelEl) ocrModelEl.value = v.ocrModel || '';
             aiConfig.url = v.url || '';
             aiConfig.model = v.model || '';
+            aiConfig.ocrModel = v.ocrModel || '';
         }
     });
     // Key 从 localStorage 加载（加密存储）
@@ -321,12 +328,14 @@ function saveAiConfig() {
     aiConfig.url = normalizeApiUrl(document.getElementById('ai-api-url').value.trim());
     aiConfig.key = document.getElementById('ai-api-key').value.trim();
     aiConfig.model = document.getElementById('ai-model').value.trim();
+    const ocrModelEl = document.getElementById('ai-ocr-model');
+    aiConfig.ocrModel = ocrModelEl ? ocrModelEl.value.trim() : '';
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
         return alert('请完整填写 API 地址、Key 和模型名称！');
     }
 
     // URL 和模型存 Firebase，Key 只存 localStorage（加密）
-    const publicConfig = { url: aiConfig.url, model: aiConfig.model };
+    const publicConfig = { url: aiConfig.url, model: aiConfig.model, ocrModel: aiConfig.ocrModel };
     getAiConfigRef().set(publicConfig).then(() => {
         localStorage.setItem('ai_key_enc', encryptKey(aiConfig.key));
         document.getElementById('ai-config-status').textContent = '已保存（Key 仅存本机）';
@@ -334,10 +343,10 @@ function saveAiConfig() {
     }).catch((err) => { alert('保存失败: ' + (err.message || err)); });
 }
 
-// OCR 识别图片中的文字
+// OCR 识别图片中的文字（优先用 OCR 模型，未配置则回退主模型）
 async function ocrImage(base64) {
     const data = await callAI({
-        model: aiConfig.model,
+        model: aiConfig.ocrModel || aiConfig.model,
         messages: [{
             role: 'user',
             content: [
