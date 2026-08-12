@@ -90,9 +90,20 @@
                         <label>模型名称</label>
                         <input type="text" id="ai-model" placeholder="gpt-4o / deepseek-chat" class="teacher-input">
                     </div>
+                    <div class="ai-config-row" style="border-top:1px dashed #d9d9d9; padding-top:10px; margin-top:4px;">
+                        <label>OCR API 地址（可选）</label>
+                        <input type="text" id="ai-ocr-url" placeholder="OCR 用，支持视觉的接口，留空则复用上方地址" class="teacher-input">
+                    </div>
                     <div class="ai-config-row">
-                        <label>OCR 模型（可选）</label>
-                        <input type="text" id="ai-ocr-model" placeholder="识别手写图片用，需支持视觉，如 gpt-4o / glm-4v-flash / qwen-vl-max" class="teacher-input">
+                        <label>OCR API Key（可选）</label>
+                        <input type="password" id="ai-ocr-key" placeholder="留空则复用上方 Key" class="teacher-input">
+                    </div>
+                    <div class="ai-config-row">
+                        <label>OCR 模型</label>
+                        <input type="text" id="ai-ocr-model" placeholder="识别手写图片用，需支持视觉，如 glm-4v-flash / qwen-vl-plus" class="teacher-input">
+                    </div>
+                    <div class="ai-config-row" style="margin-top:4px;">
+                        <p style="font-size:12px; color:#888; margin:0; line-height:1.6;">批改模型若是纯文本模型（如 deepseek-chat），识别手写图片需另配一个<b>支持视觉</b>的 OCR 模型。推荐免费方案：智谱开放平台（bigmodel.cn）注册拿 Key，OCR 模型填 <b>glm-4v-flash</b>，OCR API 地址填 <code>https://open.bigmodel.cn/api/paas/v4/chat/completions</code>。</p>
                     </div>
                     <button class="teacher-btn teacher-btn-sm" style="background:#409eff;color:#fff;" onclick="saveAiConfig()">保存配置</button>
                     <span id="ai-config-status" class="text-gray" style="font-size:12px;margin-left:10px;"></span>
