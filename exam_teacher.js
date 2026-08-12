@@ -263,16 +263,27 @@ async function callAI(body, cfg) {
     if (!resp.ok) {
         let detail = '';
         try { detail = (await resp.text()).slice(0, 300); } catch (e) {}
-        // 模型不支持视觉输入（OCR 用）时给出明确指引
+        const isOcr = cfg && cfg !== aiConfig;
+        const tag = isOcr ? 'OCR 请求' : '批改请求';
+        // 按错误类型给出针对性提示
         if (/image_url|unknown variant|vision|visual/i.test(detail)) {
-            throw new Error('当前模型不支持图片识别（OCR）。请在 AI 批改设置中填写支持视觉的「OCR 模型」，如 glm-4v-flash、qwen-vl-plus');
+            throw new Error(`当前模型不支持图片识别（OCR）。请确认 OCR 模型是支持视觉的模型名（智谱免费视觉模型是 glm-4v-flash，注意不是 glm-4.6v-flash）`);
         }
-        throw new Error(`API ${resp.status}${detail ? '：' + detail : ''}（请检查 API 地址是否完整，应以 /chat/completions 结尾）`);
+        if (resp.status === 400 && /model|not found|invalid.*model|does not exist/i.test(detail)) {
+            throw new Error(`${tag}：模型名可能不对 → ${detail.slice(0, 160)}。OCR 用的模型名是 ${(cfg || aiConfig).model}，请核对是否正确（智谱免费视觉模型为 glm-4v-flash）`);
+        }
+        if (resp.status === 401 || resp.status === 403) {
+            throw new Error(`${tag}：${resp.status} 鉴权失败，请检查 API Key 是否正确（请求发往 ${apiUrl}）`);
+        }
+        if (resp.status === 404) {
+            throw new Error(`${tag}：${resp.status} 地址不存在。请检查 API 地址是否为完整端点（应以 /chat/completions 结尾），当前请求发往 ${apiUrl}`);
+        }
+        throw new Error(`${tag}失败：API ${resp.status}${detail ? '：' + detail : ''}（请求发往 ${apiUrl}）`);
     }
     const text = await resp.text();
-    if (!text.trim()) throw new Error('API 返回了空响应，请检查 API 地址和模型名称是否正确');
+    if (!text.trim()) throw new Error(`API 返回了空响应，请检查 API 地址和模型名称是否正确（请求发往 ${apiUrl}）`);
     try { return JSON.parse(text); }
-    catch (e) { throw new Error('API 返回的不是有效 JSON，请检查 API 地址是否指向 /chat/completions 端点'); }
+    catch (e) { throw new Error(`API 返回的不是有效 JSON，请检查 API 地址是否指向 /chat/completions 端点（请求发往 ${apiUrl}）`); }
 }
 
 // 简单 XOR 加解密（防止 Firebase 中明文暴露 API Key）
@@ -351,6 +362,10 @@ function saveAiConfig() {
     // OCR 配置：填了 OCR 地址却没填 Key 才是问题（仅填模型名则可复用主配置）
     if (aiConfig.ocrModel && aiConfig.ocrUrl && !aiConfig.ocrKey) {
         return alert('OCR API 地址已填写但 Key 为空：请同时填写 OCR Key；若与主配置同一家，可将 OCR 地址留空以复用上方配置。');
+    }
+    // OCR 填了模型但地址留空 → 复用主地址，明确告知
+    if (aiConfig.ocrModel && !aiConfig.ocrUrl && aiConfig.url) {
+        alert('提示：OCR 地址留空，将复用上方主配置地址「' + aiConfig.url + '」。若该地址不是支持所选 OCR 模型的服务商，OCR 会失败，请填入对应 API 地址。');
     }
 
     // URL 和模型存 Firebase，Key 只存 localStorage（加密）
