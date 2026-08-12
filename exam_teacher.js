@@ -286,6 +286,13 @@ async function callAI(body, cfg) {
     catch (e) { throw new Error(`API 返回的不是有效 JSON，请检查 API 地址是否指向 /chat/completions 端点（请求发往 ${apiUrl}）`); }
 }
 
+// 按模型适配 max_tokens 上限（智谱等模型限制 1024）
+function maxTokensFor(model) {
+    const m = (model || '').toLowerCase();
+    if (/glm/.test(m)) return 1024;
+    return 2000;
+}
+
 // 简单 XOR 加解密（防止 Firebase 中明文暴露 API Key）
 function encryptKey(plain) {
     let r = '';
@@ -405,7 +412,7 @@ async function ocrImage(base64) {
                 { type: 'image_url', image_url: { url: base64 } }
             ]
         }],
-        max_tokens: 1000
+        max_tokens: maxTokensFor(ocrCfg.model)
     }, ocrCfg);
     return data.choices?.[0]?.message?.content || '(OCR未识别出内容)';
 }
@@ -448,7 +455,7 @@ ${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : 
         const data = await callAI({
             model: aiConfig.model,
             messages: [{ role: 'user', content: prompt }],
-            max_tokens: 2000,
+            max_tokens: maxTokensFor(aiConfig.model),
             temperature: 0.3
         });
         let raw = data.choices?.[0]?.message?.content || '';
