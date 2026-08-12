@@ -233,6 +233,7 @@ function triggerDl(obj, name) {
 // ================= AI 批改 =================
 let aiConfig = { url: '', key: '', model: '', ocrUrl: '', ocrKey: '', ocrModel: '' };
 let aiGradingBusy = false;
+let onAiStatus = null; // 供 callAI 向 UI 汇报加载/等待状态
 const AI_KEY_SALT = 'ClassOpticAIKeySalt2026';
 
 // 规范化 OpenAI 兼容 API 地址：自动补全常见的 /chat/completions 路径
@@ -251,14 +252,31 @@ async function callAI(body, cfg) {
     const c = cfg || aiConfig;
     const apiUrl = normalizeApiUrl(c.url);
     let resp;
-    try {
-        resp = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${c.key}` },
-            body: JSON.stringify(body)
-        });
-    } catch (e) {
-        throw new Error('无法连接 API 服务，请检查网络或 API 地址：' + e.message);
+    // 429 限流自动重试：15s / 30s / 45s 间隔，最多重试 3 次
+    let retries = 0;
+    for (;;) {
+        try {
+            resp = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${c.key}` },
+                body: JSON.stringify(body)
+            });
+        } catch (e) {
+            throw new Error('无法连接 API 服务，请检查网络或 API 地址：' + e.message);
+        }
+        if (resp.status === 429) {
+            resp.text().catch(() => '');
+            if (retries >= 3) {
+                if (typeof onAiStatus === 'function') onAiStatus('');
+                throw new Error('请求过于频繁被限流(429)，已自动重试3次仍失败。请稍后再试，或升级智谱付费套餐提高速率限制');
+            }
+            retries++;
+            const waitMs = 15000 * retries; // 15s, 30s, 45s
+            if (typeof onAiStatus === 'function') onAiStatus(`触发限流(429)，等待 ${Math.round(waitMs / 1000)} 秒后自动重试（第 ${retries} 次）...`);
+            await new Promise(r => setTimeout(r, waitMs));
+            continue;
+        }
+        break;
     }
     if (!resp.ok) {
         let detail = '';
@@ -427,6 +445,11 @@ async function gradeQuestionWithAI(qIndex) {
     const fbDiv = document.getElementById(`ai-feedback-${qIndex}`);
     if (fbDiv) fbDiv.innerHTML = '<div class="ai-loading">AI 批改中...</div>';
 
+    // 让 callAI 能更新加载状态（如限流重试等待）
+    onAiStatus = (msg) => {
+        if (fbDiv) fbDiv.innerHTML = msg ? `<div class="ai-loading">${escapeHtml(msg)}</div>` : '<div class="ai-loading">AI 批改中...</div>';
+    };
+
     try {
         let studentText = sAnsObj.text || '';
 
@@ -474,6 +497,8 @@ ${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : 
     } catch (err) {
         console.error('AI 批改失败:', err);
         return { score: -1, feedback: '批改失败: ' + err.message };
+    } finally {
+        onAiStatus = null;
     }
 }
 
@@ -551,8 +576,8 @@ async function gradeAllWithAI() {
         const result = await gradeQuestionWithAI(i);
         showAIFeedback(i, result);
 
-        // 短暂延迟避免 API 限流
-        await new Promise(r => setTimeout(r, 500));
+        // 请求间隔，降低限流概率（智谱免费模型限流较严）
+        await new Promise(r => setTimeout(r, 2500));
     }
 
     btn.textContent = origText;
