@@ -766,6 +766,64 @@
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
+    // 导出整个数据库备份（system + 所有学年数据），用于本地留档/迁移
+    function exportAllDataJSON() {
+        Promise.all([db.ref('system').once('value'), db.ref('years').once('value')]).then(([sSnap, ySnap]) => {
+            const pkg = {
+                source: "class_optic_full_backup",
+                exportedAt: new Date().toLocaleString(),
+                system: sSnap.val() || null,
+                years: ySnap.val() || null
+            };
+            const dataStr = JSON.stringify(pkg, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `预约系统全量备份_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }).catch(err => alert('导出失败：' + err.message));
+    }
+
+    function triggerRestoreFile() {
+        document.getElementById('restore-file-input').click();
+    }
+
+    // 从全量备份 JSON 还原（覆盖 system 与 years；按学年逐节点写入以兼容当前安全规则）
+    document.getElementById('restore-file-input').onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            try {
+                const parsed = JSON.parse(evt.target.result);
+                if (parsed.source !== "class_optic_full_backup") return alert('这不是本系统的全量备份文件。');
+                const backupYears = Object.keys(parsed.years || {});
+                const hasSystem = parsed.system !== undefined && parsed.system !== null;
+                if (backupYears.length === 0 && !hasSystem) return alert('备份文件中没有可还原的数据。');
+                if (!confirm(`⚠️ 还原将覆盖数据库中当前的 system 与全部学年数据（备份含 ${backupYears.length} 个学年），不可撤销！\n\n确定还原？`)) return;
+
+                db.ref('years').once('value').then(ySnap => {
+                    const jobs = [];
+                    // 删除备份中不存在的学年
+                    Object.keys(ySnap.val() || {}).filter(y => !backupYears.includes(y)).forEach(y => {
+                        jobs.push(db.ref('years/' + y).remove());
+                    });
+                    // 写入备份中的学年
+                    backupYears.forEach(y => jobs.push(db.ref('years/' + y).set(parsed.years[y])));
+                    if (hasSystem) jobs.push(db.ref('system').set(parsed.system));
+                    return Promise.all(jobs);
+                }).then(() => {
+                    alert(`还原成功！已恢复 ${backupYears.length} 个学年${hasSystem ? ' 及系统设置' : ''}。`);
+                }).catch(err => alert('还原失败：' + err.message));
+            } catch (err) {
+                alert('解析失败：' + err.message);
+            }
+        };
+        reader.readAsText(file);
+    };
+
     function clearCurrentYearData() {
         if (confirm('确定要清空当前年份的所有排班和单据吗？')) {
             const clearPacks = {};
@@ -1035,5 +1093,7 @@
     document.getElementById('btn-clear-logs').onclick = clearOperationLogs;
     document.getElementById('btn-add-student').onclick = addNewStudentToWhitelist;
     document.getElementById('new-student-name').onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
+    document.getElementById('btn-export-all').onclick = exportAllDataJSON;
+    document.getElementById('btn-restore-all').onclick = triggerRestoreFile;
 
 })();

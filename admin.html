@@ -175,8 +175,12 @@
             <button id="btn-export-csv" style="background:#52c41a; width:auto; font-size:14px; padding:10px 15px;">导出当年数据 (CSV)</button>
             <button id="btn-export-tutor-json" style="background:#2563eb; color:white; width:auto; font-size:14px; padding:10px 15px; border:none; border-radius:6px; cursor:pointer;">导出课时费对账包 (JSON)</button>
             <button id="btn-show-stats" style="background:#e6a23c; color:white; width:auto; font-size:14px; padding:10px 15px; border:none; border-radius:6px; cursor:pointer;">课时统计</button>
+            <button id="btn-export-all" style="background:#7c3aed; color:white; width:auto; font-size:14px; padding:10px 15px; border:none; border-radius:6px; cursor:pointer;">导出全部数据 (JSON)</button>
+            <button id="btn-restore-all" style="background:#f59e0b; color:white; width:auto; font-size:14px; padding:10px 15px; border:none; border-radius:6px; cursor:pointer;">还原数据 (JSON)</button>
             <button id="btn-clear-year" class="danger" style="width:auto; font-size:14px; padding:10px 15px;">清空本年度数据</button>
         </div>
+        <input type="file" id="restore-file-input" accept=".json" style="display:none;">
+        <p style="font-size:12px; color:#999; margin:6px 0 0 0;">「导出全部数据」备份整个数据库（system + 所有学年的排班/预约/设置/白名单/日志），「还原数据」从该备份完整恢复（会覆盖现有数据，请谨慎）。</p>
         <div id="stats-panel" style="display:none; background:#fff; border:1px solid #e4e7ed; border-radius:8px; padding:16px; margin-bottom:15px;"></div>
 
         <div id="batch-action-bar" class="batch-action-bar">

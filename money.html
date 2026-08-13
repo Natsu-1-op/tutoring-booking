@@ -161,11 +161,13 @@
                 <div class="flex space-x-2">
                     <button type="button" onclick="changeFeePassphrase()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">云端口令</button>
                     <button type="button" onclick="forceUploadCloud()" class="text-white bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded-lg transition text-xs font-medium">上传本机到云端</button>
+                    <button type="button" onclick="deleteCloudData()" class="text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition text-xs font-medium">删除云端数据</button>
                     <button type="button" onclick="refreshPendingList()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">刷新</button>
                 </div>
             </div>
             <div class="bg-white rounded-lg shadow-sm p-4">
-                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略（可恢复）。修改后若与账本里已入账的课时时间重合/相近，会标红/标黄提示并默认跳过（防重复计费），确认无误仍可勾选强制导入。课时数据加密同步到云端（学生端只能看到密文）。</p>
+                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略（可恢复）。修改后若与账本里已入账的课时时间重合/相近，会标红/标黄提示并默认跳过（防重复计费）。课时数据加密同步到云端（学生端只能看到密文）；云端按学年独立存放，仅同步当前学年，其他年份只留本地。</p>
+                <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
                 <div id="pendingFeeList" class="space-y-2"></div>
                 <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
@@ -1110,12 +1112,24 @@ async function decryptFeeData(b64) {
 // ---- 云端同步：每次保存推送，启动时拉取（按 updatedAt 取新）----
 function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
 
+// 取某学年的云端切片：该年记录 + 该年有记录的学生 + 完全无记录的学生（新建档）
+function getYearSlice(year) {
+    const yearRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === year);
+    const noRecordStudents = (data.students || []).filter(s => !(data.records || []).some(r => r.studentName === s.name));
+    const yearStudents = (data.students || []).filter(s =>
+        yearRecords.some(r => r.studentName === s.name) || noRecordStudents.some(n => n.name === s.name)
+    );
+    return { students: yearStudents, records: yearRecords };
+}
+
 async function pushCloud() {
     try {
         if (!db || !activeYear) return false;
+        // 只上传当前学年的数据（其他年份仅保留在本地）
+        const slice = getYearSlice(activeYear);
         const cipher = await encryptFeeData({
-            students: data.students,
-            records: data.records,
+            students: slice.students,
+            records: slice.records,
             lessonOverrides: data.lessonOverrides || {},
             dismissedLessons: data.dismissedLessons || []
         });
@@ -1128,15 +1142,47 @@ async function pushCloud() {
     }
 }
 
-// 一键上传本机账本到云端（强制以本机数据覆盖云端；用于首次迁移/换设备/找回数据）
+// 一键上传本机当年账本到云端（强制以本机当年数据覆盖云端；仅上传当前学年）
 async function forceUploadCloud() {
-    if (!(data.students && data.students.length) && !(data.records && data.records.length)) {
-        showToast('本机暂无数据可上传');
+    const slice = getYearSlice(activeYear);
+    if (!slice.records.length && !slice.students.length) {
+        showToast(`本机没有 ${activeYear} 年的数据可上传`);
         return;
     }
-    if (!confirm(`确定将本机账本一键上传到云端吗？\n（会以本机数据覆盖云端，包含 ${(data.students || []).length} 名学生、${(data.records || []).length} 条记录）`)) return;
+    if (!confirm(`确定将本机 ${activeYear} 年的账本一键上传到云端吗？\n（仅上传 ${activeYear} 年数据，会以本机数据覆盖该年云端，包含 ${slice.students.length} 名学生、${slice.records.length} 条记录；其他年份只留本地）`)) return;
     const ok = await pushCloud();
-    if (ok) alert(`✓ 已一键上传本机账本到云端（AES 加密）：\n学生 ${(data.students || []).length} 名\n记录 ${(data.records || []).length} 条`);
+    if (ok) alert(`✓ 已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
+}
+
+// 判断某条云端记录是否本地已存在（按 sourceId / id / 日期+姓名+课时 三元组）
+function isRecordExisting(rc) {
+    if (rc.sourceId && data.records.some(r => r.sourceId && r.sourceId === rc.sourceId)) return true;
+    if (rc.id && data.records.some(r => r.id && r.id === rc.id)) return true;
+    return data.records.some(r => r.date === rc.date && r.studentName === rc.studentName && Math.abs(Number(r.hours) - Number(rc.hours)) < 0.01);
+}
+
+// 删除当前学年的云端数据（本地数据不受影响）
+async function deleteCloudData() {
+    const ok = await ensureCloudReady();
+    if (!ok) return;
+    if (!confirm(`确定删除云端 ${activeYear} 年的课时费数据吗？\n\n本机数据不会受影响（所有数据仍保留在本地）。`)) return;
+    try {
+        await vaultRef().remove();
+        showToast(`已删除云端 ${activeYear} 年数据，本地保留`);
+        renderYearSummary();
+    } catch (e) {
+        showToast('删除失败：' + (e.message || e));
+    }
+}
+
+// 本机账本年份分类摘要
+function renderYearSummary() {
+    const el = document.getElementById('feeYearSummary');
+    if (!el) return;
+    const yearsSet = new Set((data.records || []).map(r => String(r.date || '').slice(0, 4)).filter(y => /^\d{4}$/.test(y)));
+    if (yearsSet.size === 0) { el.innerHTML = ''; return; }
+    const years = [...yearsSet].sort();
+    el.innerHTML = '📅 本机账本涵盖年份：' + years.map(y => y === activeYear ? `<b>${y}（当前同步年）</b>` : y).join('、') + ' · 云端仅同步当前学年，其他年份只留本地';
 }
 
 async function pullCloud() {
@@ -1146,28 +1192,38 @@ async function pullCloud() {
         const snap = await vaultRef().once('value');
         const vault = snap.val();
         if (!vault || !vault.cipher) {
-            // 云端还没有账本：本机有数据则自动一键上传（完成本地 → 云端迁移）
-            if ((data.students && data.students.length) || (data.records && data.records.length)) {
-                const ok = await pushCloud();
-                if (ok) showToast('本机账本已自动上传云端（' + (data.students || []).length + ' 名学生、' + (data.records || []).length + ' 条记录）');
+            // 云端还没有该学年账本：本机有该年数据则自动一键上传（本地 → 云端迁移）
+            const slice = getYearSlice(activeYear);
+            if (slice.records.length || slice.students.length) {
+                const up = await pushCloud();
+                if (up) showToast(`本机 ${activeYear} 年账本已自动上传云端（${slice.students.length} 名学生、${slice.records.length} 条记录）`);
             }
+            renderYearSummary();
             return;
         }
         if (!ensureFeePassphrase()) return;
-        const localUpdated = data.updatedAt || 0;
-        if ((vault.updatedAt || 0) <= localUpdated) { pushCloud(); return; }
         const cloudData = await decryptFeeData(vault.cipher);
-        if (cloudData && Array.isArray(cloudData.students) && Array.isArray(cloudData.records)) {
-            _applyingCloud = true;
-            data.students = cloudData.students;
-            data.records = cloudData.records;
-            data.lessonOverrides = cloudData.lessonOverrides || {};
-            data.dismissedLessons = cloudData.dismissedLessons || [];
-            data.updatedAt = vault.updatedAt || 0;
-            _applyingCloud = false;
-            saveData();
-            showToast('已从云端同步最新账本');
+        // 合并（并集去重，不覆盖本地独有数据）
+        let changed = false;
+        if (cloudData && Array.isArray(cloudData.records)) {
+            (cloudData.records || []).forEach(rc => {
+                if (rc && !isRecordExisting(rc)) { data.records.push(rc); changed = true; }
+            });
         }
+        if (cloudData && Array.isArray(cloudData.students)) {
+            (cloudData.students || []).forEach(sc => {
+                if (sc && sc.name && !data.students.some(s => s.name === sc.name)) { data.students.push(sc); changed = true; }
+            });
+        }
+        if (changed) {
+            _applyingCloud = true;
+            saveData();
+            _applyingCloud = false;
+            showToast(`已合并云端 ${activeYear} 年账本到本地`);
+        }
+        // 本地较新时反哺云端
+        if ((data.updatedAt || 0) > (vault.updatedAt || 0)) pushCloud();
+        renderYearSummary();
     } catch (e) {
         console.error('云端拉取失败', e);
         showToast('云端拉取失败：' + (e.message || e) + '（口令不一致或网络异常）');
@@ -1276,6 +1332,7 @@ async function refreshPendingList() {
         const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
         statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
+        renderYearSummary();
     } catch (e) {
         console.error(e);
         statusEl.textContent = '⚠️ 读取失败：' + (e.message || e);
