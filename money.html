@@ -1,0 +1,1430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>课时费管家</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .tab-active { color: #2563eb; border-bottom: 2px solid #2563eb; }
+        .tab-inactive { color: #6b7280; }
+        .fab { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .group-header {
+            font-size: 0.75rem;
+            color: #6b7280;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.5rem;
+            margin-bottom: 0.25rem;
+            padding: 0.5rem 0.5rem;
+            background-color: #f3f4f6;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s;
+            user-select: none;
+        }
+        .group-header:hover {
+            background-color: #e5e7eb;
+            color: #374151;
+        }
+        .group-chevron {
+            transition: transform 0.2s ease;
+        }
+        .group-collapsed .group-chevron {
+            transform: rotate(-90deg);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden text-slate-800">
+
+    <header class="bg-white shadow-sm z-10 flex-none">
+        <div class="max-w-3xl mx-auto px-4 py-3">
+            <div class="flex justify-between items-center mb-2">
+                <div class="flex items-baseline">
+                    <h1 class="text-xl font-bold text-blue-600 mr-2">课时费管家</h1>
+                    <span id="saveStatus" class="text-xs text-green-500 font-medium opacity-0 transition-opacity duration-500">已保存</span>
+                </div>
+                <div class="flex space-x-1">
+                    <button type="button" onclick="exportData()" class="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium flex items-center">
+                        存到电脑
+                    </button>
+                    <button type="button" onclick="triggerImport()" class="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium flex items-center">
+                        导入恢复/对接包
+                    </button>
+                    <button type="button" onclick="clearImportedBookingRecords()" class="text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition text-xs font-medium flex items-center">
+                        清除当年约课记录
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex justify-between items-center space-x-2">
+                <button type="button" onclick="openRecordModal()" class="flex-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 active:scale-95 transition shadow-sm flex justify-center items-center">
+                    记一笔
+                </button>
+                <button type="button" onclick="openStudentModal()" class="flex-1 bg-white border border-gray-200 text-blue-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition flex justify-center items-center">
+                    管理学生
+                </button>
+            </div>
+        </div>
+        
+        <div class="flex max-w-3xl mx-auto border-t border-gray-100">
+            <button type="button" onclick="switchTab('calendar')" id="tab-calendar" class="flex-1 py-3 text-sm font-medium text-center tab-active transition-colors">
+                 日历记录
+            </button>
+            <button type="button" onclick="switchTab('stats')" id="tab-stats" class="flex-1 py-3 text-sm font-medium text-center tab-inactive transition-colors">
+                 统计报表
+            </button>
+            <button type="button" onclick="switchTab('fee')" id="tab-fee" class="flex-1 py-3 text-sm font-medium text-center tab-inactive transition-colors">
+                 约课对接
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto relative max-w-3xl mx-auto w-full">
+        
+        <div id="view-calendar" class="p-4 fade-in block pb-24">
+            <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-lg shadow-sm">
+                <button type="button" onclick="changeMonth(-1)" class="p-2 text-gray-500 hover:text-blue-600"><i class="fas fa-chevron-left"></i></button>
+                <h2 id="currentMonthLabel" class="text-lg font-bold text-gray-800">2023年 10月</h2>
+                <button type="button" onclick="changeMonth(1)" class="p-2 text-gray-500 hover:text-blue-600"><i class="fas fa-chevron-right"></i></button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-sm p-2 mb-4">
+                <div class="grid grid-cols-7 gap-1 mb-2 text-center text-xs text-gray-400 font-medium">
+                    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                </div>
+                <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-center text-sm"></div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-sm p-4 min-h-[150px]">
+                <h3 class="text-sm font-bold text-gray-500 mb-3 uppercase flex justify-between items-center">
+                    <span id="selectedDateLabel">今日记录</span>
+                    <span id="dailyTotalLabel" class="text-blue-600">¥0.00</span>
+                </h3>
+                <div id="dailyRecordsList" class="space-y-3">
+                    <div class="text-center text-gray-400 py-4 text-sm">暂无记录</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-stats" class="p-4 fade-in hidden pb-24">
+            
+            <div class="flex space-x-2 mb-4 bg-white p-2 rounded-lg shadow-sm">
+                <select id="statsPeriodType" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2">
+                    <option value="month">按月统计</option>
+                    <option value="year">按年统计</option>
+                </select>
+                <input type="month" id="statsDateFilter" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
+                    <div class="text-blue-100 text-xs mb-1">总收入</div>
+                    <div class="text-2xl font-bold" id="statsTotalIncome">¥0.00</div>
+                </div>
+                <div class="bg-white rounded-xl p-4 text-gray-800 shadow border border-gray-100">
+                    <div class="text-gray-400 text-xs mb-1">总课时</div>
+                    <div class="text-2xl font-bold" id="statsTotalHours">0.00 <span class="text-sm font-normal text-gray-400">小时</span></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
+                <h3 class="text-sm font-bold text-gray-700 mb-4 border-l-4 border-blue-500 pl-2">收入占比 (学生)</h3>
+                <div class="relative h-64 w-full flex justify-center">
+                    <canvas id="incomeChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-4">
+                <h3 class="text-sm font-bold text-gray-700 mb-3 border-l-4 border-green-500 pl-2">详细明细 (含时长)</h3>
+                <div id="statsList" class="divide-y divide-gray-100"></div>
+            </div>
+        </div>
+
+        <div id="view-fee" class="p-4 fade-in hidden pb-24">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-800">约课对接</h2>
+                <div class="flex space-x-2">
+                    <button type="button" onclick="changeFeePassphrase()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">云端口令</button>
+                    <button type="button" onclick="refreshPendingList()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">刷新</button>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-4">
+                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重（同天同课时不误删）。单价取学生档案；未建档的会标黄提示，按 ¥0 导入。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略该时间段（可在下方恢复）。课时数据将加密同步到云端（学生端只能看到密文）。</p>
+                <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
+                <div id="pendingFeeList" class="space-y-2"></div>
+                <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
+                <div id="dismissedFeeList" class="mt-3 border-t border-gray-100 pt-2 hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <button type="button" onclick="openRecordModal()" title="记一笔" class="fab fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full flex items-center justify-center text-2xl transition transform hover:scale-105 active:scale-95 z-50">
+        <i class="fas fa-plus"></i>
+    </button>
+
+    <input type="file" id="fileInput" class="hidden" accept=".json" onchange="handleFileImport(this)">
+
+    <div id="modal-student" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
+            <div class="bg-gray-50 px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700" id="studentModalTitle">管理学生</h3>
+                <button type="button" onclick="closeModal('modal-student'); resetStudentForm();" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-4">
+                <div class="space-y-3 mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                    <input type="hidden" id="editStudentId">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">学生姓名</label>
+                        <input type="text" id="studentName" placeholder="例如：小明" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">分组/类别 (可选)</label>
+                        <input type="text" id="studentGroup" list="groupSuggestions" placeholder="例如：周六班" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                        <datalist id="groupSuggestions"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">课时费 (元/小时)</label>
+                        <input type="number" id="studentRate" placeholder="例如：200" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                    </div>
+                    <div class="flex space-x-2">
+                        <button type="button" id="btnSaveStudent" onclick="saveStudentFormData()" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition text-sm">添加学生</button>
+                        <button type="button" id="btnCancelEdit" onclick="resetStudentForm()" class="hidden w-20 bg-gray-200 text-gray-600 py-2 rounded-lg font-medium hover:bg-gray-300 transition text-sm">取消</button>
+                    </div>
+                </div>
+                
+                <div class="border-t pt-3 flex flex-col h-[280px]">
+                    <p class="text-xs text-gray-400 mb-2 flex-none">学生列表 (按分组)：</p>
+                    <div id="studentList" class="flex-1 overflow-y-auto pr-1"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-record" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm transform transition-all">
+            <div class="bg-gray-50 px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700" id="recordModalTitle">添加上课记录</h3>
+                <button type="button" onclick="closeModal('modal-record')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-4 space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">日期</label>
+                    <input type="date" id="recordDate" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">选择学生</label>
+                    <select id="recordStudent" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-white">
+                        <option value="">请选择...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">上课时长 (小时)</label>
+                    <div class="flex items-center space-x-2">
+                        <button type="button" onclick="adjustHours(-0.5)" class="bg-gray-100 text-gray-600 w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center"><i class="fas fa-minus text-xs"></i></button>
+                        <input type="number" id="recordHours" step="0.01" value="2" class="flex-1 text-center border border-gray-300 rounded-lg px-3 py-2">
+                        <button type="button" onclick="adjustHours(0.5)" class="bg-gray-100 text-gray-600 w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center"><i class="fas fa-plus text-xs"></i></button>
+                    </div>
+                </div>
+                <button type="button" id="btnSaveRecord" onclick="saveRecord()" class="w-full bg-green-600 text-white py-2.5 rounded-lg font-medium hover:bg-green-700 shadow-md transition transform active:scale-95">确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-[60]">
+        操作成功
+    </div>
+
+<script>
+    // --- Data Management ---
+    const DB_KEY = 'tutor_fee_data_v1';
+    let data = {
+        students: [], 
+        records: []
+    };
+
+    function init() {
+        try {
+            const stored = localStorage.getItem(DB_KEY);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed.students)) data.students = parsed.students;
+                if (Array.isArray(parsed.records)) data.records = parsed.records;
+            }
+        } catch (e) {
+            console.error("Data corruption detected, resetting data to prevent crash.", e);
+        }
+        
+        const today = new Date().toISOString().split('T')[0];
+        const dateInput = document.getElementById('recordDate');
+        const filterInput = document.getElementById('statsDateFilter');
+        
+        if(dateInput) dateInput.value = today;
+        if(filterInput) filterInput.value = today.substring(0, 7);
+        
+        selectedDate = today;
+        
+        try {
+            renderCalendar();
+            renderStudentList();
+            updateSelectedDateView();
+        } catch (err) {
+            console.error("Rendering error:", err);
+            showToast("系统初始化遇到问题，建议重置数据");
+        }
+    }
+
+    function saveData() {
+        try {
+            localStorage.setItem(DB_KEY, JSON.stringify(data));
+            renderCalendar();
+            updateSelectedDateView();
+            renderStats();
+            triggerSaveAnimation();
+        } catch (e) {
+            showToast("保存失败，存储空间可能已满");
+        }
+    }
+
+    function triggerSaveAnimation() {
+        const el = document.getElementById('saveStatus');
+        if(el) el.classList.remove('opacity-0');
+        if (window.saveTimeout) clearTimeout(window.saveTimeout);
+        window.saveTimeout = setTimeout(() => {
+            if(el) el.classList.add('opacity-0');
+        }, 2000);
+    }
+
+    // --- State & Navigation ---
+    let currentView = 'calendar';
+    let currentDate = new Date();
+    let selectedDate = new Date().toISOString().split('T')[0];
+    let chartInstance = null;
+
+    function switchTab(view) {
+        currentView = view;
+        const calView = document.getElementById('view-calendar');
+        const statsView = document.getElementById('view-stats');
+        
+        if (view === 'calendar') {
+            calView.classList.remove('hidden');
+            calView.classList.add('block');
+            statsView.classList.add('hidden');
+            statsView.classList.remove('block');
+        } else {
+            statsView.classList.remove('hidden');
+            statsView.classList.add('block');
+            calView.classList.add('hidden');
+            calView.classList.remove('block');
+            renderStats(); 
+        }
+
+        document.getElementById('tab-calendar').className = view === 'calendar' ? 'flex-1 py-3 text-sm font-medium text-center tab-active transition-colors' : 'flex-1 py-3 text-sm font-medium text-center tab-inactive transition-colors';
+        document.getElementById('tab-stats').className = view === 'stats' ? 'flex-1 py-3 text-sm font-medium text-center tab-active transition-colors' : 'flex-1 py-3 text-sm font-medium text-center tab-inactive transition-colors';
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        if(!toast) return;
+        toast.innerText = msg;
+        toast.classList.remove('opacity-0');
+        setTimeout(() => toast.classList.add('opacity-0'), 2000);
+    }
+
+    function closeModal(id) {
+        const modal = document.getElementById(id);
+        if(modal) modal.classList.add('hidden');
+    }
+
+    // --- Student Logic ---
+    let editingStudentId = null;
+
+    function openStudentModal() {
+        document.getElementById('modal-student').classList.remove('hidden');
+        resetStudentForm();
+        renderStudentList();
+        updateGroupSuggestions();
+    }
+
+    function updateGroupSuggestions() {
+        const datalist = document.getElementById('groupSuggestions');
+        if(!datalist) return;
+        datalist.innerHTML = '';
+        const groups = [...new Set(data.students.map(s => s.group).filter(Boolean))];
+        groups.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g;
+            datalist.appendChild(opt);
+        });
+    }
+
+    function resetStudentForm() {
+        editingStudentId = null;
+        document.getElementById('studentName').value = '';
+        document.getElementById('studentGroup').value = '';
+        document.getElementById('studentRate').value = '';
+        const btn = document.getElementById('btnSaveStudent');
+        if(btn) {
+            btn.innerText = '添加学生';
+            btn.classList.remove('bg-orange-500', 'hover:bg-orange-600');
+            btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        }
+        document.getElementById('btnCancelEdit').classList.add('hidden');
+        document.getElementById('studentModalTitle').innerText = '管理学生';
+    }
+
+    function editStudent(id) {
+        const student = data.students.find(s => s.id === id);
+        if (!student) return;
+
+        editingStudentId = id;
+        document.getElementById('studentName').value = student.name;
+        document.getElementById('studentGroup').value = student.group || '';
+        document.getElementById('studentRate').value = student.rate;
+        
+        const btn = document.getElementById('btnSaveStudent');
+        if(btn) {
+            btn.innerText = '保存修改';
+            btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            btn.classList.add('bg-orange-500', 'hover:bg-orange-600');
+        }
+        
+        document.getElementById('btnCancelEdit').classList.remove('hidden');
+        document.getElementById('studentModalTitle').innerText = '编辑学生信息';
+    }
+
+    function saveStudentFormData() {
+        const nameInput = document.getElementById('studentName');
+        const groupInput = document.getElementById('studentGroup');
+        const rateInput = document.getElementById('studentRate');
+        
+        const name = nameInput.value.trim();
+        const group = groupInput.value.trim();
+        const rate = parseFloat(rateInput.value);
+
+        if (!name || isNaN(rate)) {
+            showToast('请填写姓名和课时费');
+            return;
+        }
+
+        if (editingStudentId) {
+            const studentIndex = data.students.findIndex(s => s.id === editingStudentId);
+            if (studentIndex > -1) {
+                data.students[studentIndex].name = name;
+                data.students[studentIndex].group = group;
+                data.students[studentIndex].rate = rate;
+                showToast('学生信息已更新');
+            }
+        } else {
+            const id = Date.now().toString();
+            data.students.push({ id, name, group, rate });
+            showToast('学生添加成功');
+        }
+
+        saveData();
+        resetStudentForm();
+        renderStudentList();
+        updateGroupSuggestions();
+    }
+
+    function deleteStudent(id) {
+        if(confirm('删除学生不会删除历史记账记录，确定删除吗？')) {
+            data.students = data.students.filter(s => s.id !== id);
+            saveData();
+            if (editingStudentId === id) resetStudentForm();
+            renderStudentList();
+            updateGroupSuggestions();
+        }
+    }
+
+    function renderStudentList() {
+        const list = document.getElementById('studentList');
+        if(!list) return;
+        list.innerHTML = '';
+        if (data.students.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 text-xs py-2">暂无学生，请添加</div>';
+            return;
+        }
+
+        const groups = {};
+        const noGroupKey = '默认分组';
+        
+        data.students.forEach(s => {
+            const g = s.group || noGroupKey;
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(s);
+        });
+
+        const groupNames = Object.keys(groups).sort();
+        const fragment = document.createDocumentFragment();
+
+        groupNames.forEach(groupName => {
+            const groupContainer = document.createElement('div');
+            groupContainer.className = 'mb-1';
+
+            const header = document.createElement('div');
+            header.className = 'group-header';
+            header.innerHTML = `
+                <span>${groupName}</span>
+                <i class="fas fa-chevron-down group-chevron text-gray-400"></i>
+            `;
+            
+            const listContainer = document.createElement('div');
+            listContainer.className = 'pl-1 transition-all overflow-hidden';
+            
+            header.onclick = function() {
+                if (listContainer.classList.contains('hidden')) {
+                    listContainer.classList.remove('hidden');
+                    header.classList.remove('group-collapsed');
+                } else {
+                    listContainer.classList.add('hidden');
+                    header.classList.add('group-collapsed');
+                }
+            };
+
+            groups[groupName].forEach(s => {
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center bg-white border border-gray-100 p-3 rounded-lg shadow-sm mb-2';
+                div.innerHTML = `
+                    <div>
+                        <div class="font-bold text-sm text-gray-800">${s.name}</div>
+                        <div class="text-xs text-gray-500">¥${s.rate.toFixed(2)}/小时</div>
+                    </div>
+                    <div class="flex space-x-1">
+                        <button onclick="editStudent('${s.id}')" class="p-2 text-blue-500 hover:bg-blue-50 rounded transition"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteStudent('${s.id}')" class="p-2 text-red-400 hover:bg-red-50 rounded transition"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                `;
+                listContainer.appendChild(div);
+            });
+
+            groupContainer.appendChild(header);
+            groupContainer.appendChild(listContainer);
+            fragment.appendChild(groupContainer);
+        });
+        
+        list.appendChild(fragment);
+    }
+
+    // --- 🌟 导入功能核心通道完全修复 🌟 ---
+    function triggerImport() {
+        document.getElementById('fileInput').click();
+    }
+
+    function handleFileImport(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                
+                if (importedData.source === "class_optic_booking_system" && Array.isArray(importedData.records)) {
+                    let insertCount = 0;
+                    let skipCount = 0;
+                    const noProfileStudents = new Set();
+                    
+                    importedData.records.forEach(impRec => {
+                        const targetStudent = data.students.find(s => s.name === impRec.studentName);
+                        if (!targetStudent) noProfileStudents.add(impRec.studentName);
+                        
+                        // 去重：优先按来源唯一ID（预约ID，形如 imported_<预约ID>）精确判断，
+                        // 同一学生同一天两节相同课时的课不会再被误判为重复丢掉；
+                        // 兼容旧版本已导入（无 sourceId 字段）的记录时，退回 日期+姓名+课时 三元组
+                        const isDuplicate = (() => {
+                            if (impRec.id) {
+                                if (data.records.some(r => r.sourceId && r.sourceId === impRec.id)) return true;
+                                return data.records.some(r => !r.sourceId && r.date === impRec.date && r.studentName === impRec.studentName && Math.abs(Number(r.hours) - Number(impRec.hours)) < 0.01);
+                            }
+                            return data.records.some(r => r.date === impRec.date && r.studentName === impRec.studentName && Math.abs(Number(r.hours) - Number(impRec.hours)) < 0.01);
+                        })();
+                        
+                        if (isDuplicate) {
+                            skipCount++;
+                        } else {
+                            insertCount++;
+                            const rate = targetStudent ? targetStudent.rate : 0; 
+                            const total = Number((rate * Number(impRec.hours)).toFixed(2));
+                            
+                            data.records.push({
+                                id: "booking_" + Date.now() + Math.random().toString(36).substring(2, 5),
+                                sourceId: impRec.id || null,
+                                studentId: targetStudent ? targetStudent.id : "",
+                                studentName: impRec.studentName,
+                                date: impRec.date,
+                                hours: Number(Number(impRec.hours).toFixed(2)),
+                                rate: rate,
+                                total: total
+                            });
+                        }
+                    });
+                    
+                    saveData();
+                    let warnMsg = "";
+                    if (noProfileStudents.size > 0) {
+                        warnMsg = `\n\n⚠️ 以下 ${noProfileStudents.size} 名学生尚未在「管理学生」中建档，已按 ¥0/小时 导入，请及时设置课时费：\n  ` + Array.from(noProfileStudents).join('、');
+                    }
+                    alert(`约课记账包对接成功！\n成功增量导入: ${insertCount} 条高精课时\n自动去重过滤: ${skipCount} 条重复项${warnMsg}`);
+                    
+                } else if (Array.isArray(importedData.students) || Array.isArray(importedData.records)) {
+                    let newStuCount = 0;
+                    let newRecCount = 0;
+                    let skipRecCount = 0;
+                    
+                    if (Array.isArray(importedData.students)) {
+                        importedData.students.forEach(impStu => {
+                            const isStuExist = data.students.some(s => s.name === impStu.name);
+                            if (!isStuExist) {
+                                newStuCount++;
+                                data.students.push({
+                                    id: impStu.id || Date.now().toString() + Math.random().toString(36).substring(2, 5),
+                                    name: impStu.name,
+                                    group: impStu.group || "",
+                                    rate: impStu.rate || 0
+                                });
+                            }
+                        });
+                    }
+                    
+                    if (Array.isArray(importedData.records)) {
+                        importedData.records.forEach(impRec => {
+                            // 备份恢复：优先按记录 id 去重（备份里每条记录 id 唯一，同天同课时的多节课不会互相误删），
+                            // 无 id 的旧记录退回 日期+姓名+课时 三元组
+                            const isRecExist = impRec.id
+                                ? data.records.some(r => r.id === impRec.id)
+                                : data.records.some(r => r.date === impRec.date && r.studentName === impRec.studentName && Math.abs(Number(r.hours) - Number(impRec.hours)) < 0.01);
+                            if (isRecExist) {
+                                skipRecCount++;
+                            } else {
+                                newRecCount++;
+                                data.records.push(impRec);
+                            }
+                        });
+                    }
+                    
+                    saveData();
+                    alert(`系统备份恢复对账完毕！\n新增学生: ${newStuCount} 名\n增量追加流水: ${newRecCount} 条\n自动过滤重复项: ${skipRecCount} 条`);
+                } else {
+                    alert('数据解析失败，上传的文件不是合规的对账包格式。');
+                }
+            } catch (err) {
+                alert('解析异常：' + err.message);
+            }
+            input.value = ''; 
+        };
+        reader.readAsText(file);
+    }
+
+    function exportData() {
+        const dataStr = JSON.stringify(data, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        const date = new Date().toISOString().split('T')[0];
+        a.href = url;
+        a.download = `课时费备份_${date}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('数据已下载到电脑');
+    }
+
+    function clearImportedBookingRecords() {
+        const importedCount = data.records.filter(r => r.id.startsWith('booking_') || r.id.startsWith('imported_')).length;
+        if (importedCount === 0) {
+            return alert('当前本地账册中没有发现任何外部导入的约课流水，无需清除。');
+        }
+
+        if (confirm(`安全提示：\n当前将为您从本地清除 ${importedCount} 条由约课系统导入的记账流。\n该操作不会删除您通过 [记一笔] 手动建立的账目。是否确认清除？`)) {
+            data.records = data.records.filter(r => !r.id.startsWith('booking_') && !r.id.startsWith('imported_'));
+            saveData();
+            // 🌟 正式版清空冗余确认告知弹窗，改由 Toast 轻量级提示
+            showToast('外部导入流水已清空');
+        }
+    }
+
+    // --- Record Logic (Add & Edit) ---
+    let editingRecordId = null;
+
+    function openRecordModal() {
+        if (data.students.length === 0) {
+            showToast('请先添加学生！');
+            openStudentModal();
+            return;
+        }
+        
+        populateStudentSelect();
+        editingRecordId = null;
+        document.getElementById('recordDate').value = selectedDate;
+        document.getElementById('recordHours').value = 2; 
+        document.getElementById('recordStudent').value = '';
+        document.getElementById('recordModalTitle').innerText = '添加上课记录';
+        document.getElementById('btnSaveRecord').innerText = '确认保存';
+        document.getElementById('modal-record').classList.remove('hidden');
+    }
+
+    function populateStudentSelect() {
+        const select = document.getElementById('recordStudent');
+        if(!select) return;
+        select.innerHTML = '<option value="">请选择学生...</option>';
+        
+        const groups = {};
+        const noGroupKey = '默认分组';
+        
+        data.students.forEach(s => {
+            const g = s.group || noGroupKey;
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(s);
+        });
+
+        const groupNames = Object.keys(groups).sort();
+        
+        groupNames.forEach(groupName => {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = groupName;
+            
+            groups[groupName].forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.id;
+                option.text = `${s.name} (${s.rate.toFixed(2)}元/h)`;
+                optgroup.appendChild(option);
+            });
+            select.appendChild(optgroup);
+        });
+    }
+
+    function editRecord(id) {
+        const record = data.records.find(r => r.id === id);
+        if(!record) return;
+
+        populateStudentSelect();
+        editingRecordId = id;
+        document.getElementById('recordDate').value = record.date;
+        document.getElementById('recordStudent').value = record.studentId;
+        document.getElementById('recordHours').value = record.hours;
+        document.getElementById('recordModalTitle').innerText = '修改上课记录';
+        document.getElementById('btnSaveRecord').innerText = '保存修改';
+        document.getElementById('modal-record').classList.remove('hidden');
+    }
+
+    function adjustHours(delta) {
+        const input = document.getElementById('recordHours');
+        if(!input) return;
+        let val = parseFloat(input.value) || 0;
+        val += delta;
+        if (val < 0.01) val = 0.01;
+        input.value = Number(val.toFixed(2)); 
+    }
+
+    function saveRecord() {
+        const date = document.getElementById('recordDate').value;
+        const studentSelect = document.getElementById('recordStudent');
+        const hours = parseFloat(document.getElementById('recordHours').value);
+        
+        if(!studentSelect) return;
+        const studentId = studentSelect.value;
+        if (!date || !studentId || isNaN(hours) || hours <= 0) {
+            showToast('请填写完整信息');
+            return;
+        }
+
+        const student = data.students.find(s => s.id === studentId);
+        if(!student) return;
+
+        if (editingRecordId) {
+            const index = data.records.findIndex(r => r.id === editingRecordId);
+            if (index !== -1) {
+                data.records[index].date = date;
+                data.records[index].studentId = studentId;
+                data.records[index].studentName = student.name;
+                data.records[index].hours = Number(hours.toFixed(2));
+                data.records[index].rate = student.rate; 
+                data.records[index].total = Number((student.rate * hours).toFixed(2));
+                showToast('记录已更新');
+            }
+        } else {
+            const rate = student.rate; 
+            const total = Number((rate * hours).toFixed(2));
+            const record = {
+                id: Date.now().toString(),
+                studentId,
+                studentName: student.name,
+                date,
+                hours: Number(hours.toFixed(2)),
+                rate,
+                total
+            };
+            data.records.push(record);
+            showToast('记录已保存');
+        }
+
+        saveData();
+        closeModal('modal-record');
+
+        selectedDate = date;
+        currentDate = new Date(date);
+        renderCalendar();
+        updateSelectedDateView();
+    }
+
+    function deleteRecord(id) {
+        if(confirm('确定删除这条记录吗？')) {
+            data.records = data.records.filter(r => r.id !== id);
+            saveData();
+            showToast('已删除');
+        }
+    }
+
+    function changeMonth(delta) {
+        currentDate.setMonth(currentDate.getMonth() + delta);
+        renderCalendar();
+    }
+
+    function renderCalendar() {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        
+        document.getElementById('currentMonthLabel').innerText = `${year}年 ${month + 1}月`;
+
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const daysInMonth = lastDay.getDate();
+        const startingDay = firstDay.getDay();
+
+        const grid = document.getElementById('calendarGrid');
+        if(!grid) return;
+        grid.innerHTML = '';
+
+        if (daysInMonth > 31) return; 
+        const fragment = document.createDocumentFragment();
+
+        for (let i = 0; i < startingDay; i++) {
+            const div = document.createElement('div');
+            fragment.appendChild(div);
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const isToday = dateStr === new Date().toISOString().split('T')[0];
+            const isSelected = dateStr === selectedDate;
+            const hasRecord = data.records.some(r => r.date === dateStr);
+            
+            const cell = document.createElement('div');
+            cell.className = `h-14 rounded-lg flex flex-col items-center justify-center cursor-pointer transition border ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-gray-50'}`;
+            cell.onclick = () => {
+                selectedDate = dateStr;
+                renderCalendar();
+                updateSelectedDateView();
+            };
+
+            let html = `<span class="text-sm ${isToday ? 'bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center' : 'text-gray-700'}">${day}</span>`;
+            if (hasRecord) html += `<div class="w-1.5 h-1.5 bg-green-500 rounded-full mt-1"></div>`;
+            
+            cell.innerHTML = html;
+            fragment.appendChild(cell);
+        }
+        grid.appendChild(fragment);
+    }
+
+    function updateSelectedDateView() {
+        const list = document.getElementById('dailyRecordsList');
+        const label = document.getElementById('selectedDateLabel');
+        const totalLabel = document.getElementById('dailyTotalLabel');
+        
+        if(!label || !list) return;
+
+        label.innerText = `${selectedDate} 记录`;
+        list.innerHTML = '';
+
+        const records = data.records.filter(r => r.date === selectedDate);
+        
+        if (records.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-6 text-sm flex flex-col items-center">今日无课</div>';
+            totalLabel.innerText = '¥0.00';
+            return;
+        }
+
+        let dayTotal = 0;
+        const fragment = document.createDocumentFragment();
+
+        records.forEach(r => {
+            dayTotal += r.total;
+            const div = document.createElement('div');
+            div.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100';
+            div.innerHTML = `
+                <div class="flex items-center">
+                    <div class="bg-blue-100 text-blue-600 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mr-3">
+                        ${r.studentName.charAt(0)}
+                    </div>
+                    <div>
+                        <div class="font-bold text-gray-700 text-sm">${r.studentName}</div>
+                        <div class="text-xs text-gray-500">${r.hours.toFixed(2)} 小时 × ¥${r.rate.toFixed(2)}</div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-1">
+                    <span class="font-bold text-gray-800 mr-2">¥${r.total.toFixed(2)}</span>
+                    <button onclick="editRecord('${r.id}')" class="text-blue-400 hover:text-blue-600 p-2 transition"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteRecord('${r.id}')" class="text-gray-300 hover:text-red-500 p-2 transition"><i class="fas fa-trash-alt"></i></button>
+                </div>
+            `;
+            fragment.appendChild(div);
+        });
+        list.appendChild(fragment);
+        totalLabel.innerText = `¥${dayTotal.toFixed(2)}`;
+    }
+
+    function renderStats() {
+        const typeEl = document.getElementById('statsPeriodType');
+        const filterEl = document.getElementById('statsDateFilter');
+        if(!typeEl || !filterEl) return;
+
+        const type = typeEl.value;
+        const filterVal = filterEl.value; 
+        if (!filterVal) return;
+
+        let filteredRecords = [];
+        const [year, month] = filterVal.split('-');
+
+        if (type === 'month') {
+            filteredRecords = data.records.filter(r => r.date.startsWith(filterVal));
+        } else {
+            filteredRecords = data.records.filter(r => r.date.startsWith(year));
+        }
+
+        let totalIncome = 0;
+        let totalHours = 0;
+        let studentStats = {};
+
+        filteredRecords.forEach(r => {
+            totalIncome += r.total;
+            totalHours += r.hours;
+            
+            if (!studentStats[r.studentName]) {
+                studentStats[r.studentName] = { income: 0, hours: 0 };
+            }
+            studentStats[r.studentName].income += r.total;
+            studentStats[r.studentName].hours += r.hours;
+        });
+
+        document.getElementById('statsTotalIncome').innerText = `¥${totalIncome.toFixed(2)}`;
+        document.getElementById('statsTotalHours').innerHTML = `${totalHours.toFixed(2)} <span class="text-sm font-normal text-gray-400">小时</span>`;
+
+        const statsList = document.getElementById('statsList');
+        if(!statsList) return;
+        statsList.innerHTML = '';
+        
+        const sortedStudents = Object.entries(studentStats).sort((a,b) => b[1].income - a[1].income);
+
+        if (sortedStudents.length === 0) {
+            statsList.innerHTML = '<div class="text-center text-gray-400 py-4">该时间段无数据</div>';
+        } else {
+            sortedStudents.forEach(([name, stat]) => {
+                const percent = totalIncome > 0 ? Math.round((stat.income / totalIncome) * 100) : 0;
+                const hoursDisplay = stat.hours.toFixed(2);
+                const incomeDisplay = stat.income.toFixed(2);
+
+                const div = document.createElement('div');
+                div.className = 'py-3 flex justify-between items-center';
+                div.innerHTML = `
+                    <div class="flex items-center w-1/2">
+                        <div class="w-2 h-8 bg-blue-500 rounded mr-3 opacity-80"></div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700">${name}</div>
+                            <div class="text-xs text-gray-400">占比 ${percent}%</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-bold text-gray-800">¥${incomeDisplay}</div>
+                        <div class="text-xs font-medium text-blue-500 mt-0.5">${hoursDisplay} 小时</div>
+                    </div>
+                `;
+                statsList.appendChild(div);
+            });
+        }
+        renderChart(studentStats);
+    }
+
+    function renderChart(studentStats) {
+        const ctxEl = document.getElementById('incomeChart');
+        if(!ctxEl) return;
+        const ctx = ctxEl.getContext('2d');
+        
+        const labels = Object.keys(studentStats);
+        const values = Object.values(studentStats).map(s => s.income);
+        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
+
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        if (labels.length === 0) return;
+
+        chartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: colors,
+                    borderWidth: 0,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { boxWidth: 12, usePointStyle: true }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                const val = context.raw || 0;
+                                const studentName = context.label;
+                                const incomeDisplay = typeof val === 'number' ? val.toFixed(2) : val;
+                                const hours = studentStats[studentName] ? studentStats[studentName].hours.toFixed(2) : '0.00';
+                                return `${label}¥${incomeDisplay} (${hours}小时)`;
+                            }
+                        }
+                    }
+                },
+                layout: { padding: 10 }
+            }
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+</script>
+<script>
+// ============ 课时费管家 · 约课云端联动 v1 ============
+// 数据加密存于约课系统数据库 years/<学年>/feeVault，学生端只能看到密文。
+// 本文件为教师私有（未进入公开仓库），口令仅保存在本机浏览器。
+
+// 约课系统 Firebase 配置（与 config/firebase-env.js 一致）
+const FEE_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4",
+  authDomain: "class-optic.firebaseapp.com",
+  projectId: "class-optic",
+  storageBucket: "class-optic.firebasestorage.app",
+  messagingSenderId: "859111669333",
+  appId: "1:859111669333:web:ec5cea5bd22dc0c495dedc",
+  databaseURL: "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
+
+let db = null;
+let activeYear = null;
+let pendingLessons = [];
+let _applyingCloud = false;
+const FEE_SALT = 'class-optic-fee-vault-v1';
+
+async function ensureCloudReady() {
+    if (db) return true;
+    if (!window.firebase) return false;
+    try {
+        if (!firebase.apps.length) firebase.initializeApp(FEE_FIREBASE_CONFIG);
+        db = firebase.database();
+        const sysSnap = await db.ref('system').once('value');
+        const sys = sysSnap.val();
+        activeYear = (sys && sys.activeYear) || String(new Date().getFullYear());
+        return true;
+    } catch (e) { console.error('云端初始化失败', e); return false; }
+}
+
+// ---- 加密（AES-GCM + PBKDF2，口令仅存本机）----
+function ensureFeePassphrase() {
+    let pass = localStorage.getItem('fee_vault_pass');
+    if (pass) return pass;
+    pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n请牢记！换设备同步时需输入同一口令。');
+    if (pass === null || !pass.trim()) return null;
+    localStorage.setItem('fee_vault_pass', pass.trim());
+    return pass.trim();
+}
+
+async function deriveFeeKey(pass) {
+    const enc = new TextEncoder();
+    const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: enc.encode(FEE_SALT), iterations: 100000, hash: 'SHA-256' },
+        km,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+function bufToB64(buf) {
+    let bin = '';
+    const CH = 0x8000;
+    for (let i = 0; i < buf.length; i += CH) bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH));
+    return btoa(bin);
+}
+async function encryptFeeData(obj) {
+    const pass = ensureFeePassphrase();
+    if (!pass) throw new Error('未设置加密口令');
+    const key = await deriveFeeKey(pass);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plain = new TextEncoder().encode(JSON.stringify(obj));
+    const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+    const combined = new Uint8Array(12 + cipher.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(cipher), 12);
+    return bufToB64(combined);
+}
+async function decryptFeeData(b64) {
+    const pass = ensureFeePassphrase();
+    if (!pass) throw new Error('未设置加密口令');
+    const key = await deriveFeeKey(pass);
+    const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, key, raw.slice(12));
+    return JSON.parse(new TextDecoder().decode(plain));
+}
+
+// ---- 云端同步：每次保存推送，启动时拉取（按 updatedAt 取新）----
+function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
+
+async function pushCloud() {
+    try {
+        if (!db || !activeYear) return;
+        const cipher = await encryptFeeData({
+            students: data.students,
+            records: data.records,
+            lessonOverrides: data.lessonOverrides || {},
+            dismissedLessons: data.dismissedLessons || []
+        });
+        await vaultRef().set({ updatedAt: Date.now(), cipher });
+    } catch (e) {
+        console.error('云端同步失败', e);
+        showToast('云端同步失败：' + (e.message || e));
+    }
+}
+
+async function pullCloud() {
+    try {
+        const ok = await ensureCloudReady();
+        if (!ok) return;
+        const snap = await vaultRef().once('value');
+        const vault = snap.val();
+        if (!vault || !vault.cipher) return;
+        if (!ensureFeePassphrase()) return;
+        const localUpdated = data.updatedAt || 0;
+        if ((vault.updatedAt || 0) <= localUpdated) { pushCloud(); return; }
+        const cloudData = await decryptFeeData(vault.cipher);
+        if (cloudData && Array.isArray(cloudData.students) && Array.isArray(cloudData.records)) {
+            _applyingCloud = true;
+            data.students = cloudData.students;
+            data.records = cloudData.records;
+            data.lessonOverrides = cloudData.lessonOverrides || {};
+            data.dismissedLessons = cloudData.dismissedLessons || [];
+            data.updatedAt = vault.updatedAt || 0;
+            _applyingCloud = false;
+            saveData();
+            showToast('已从云端同步最新账本');
+        }
+    } catch (e) {
+        console.error('云端拉取失败', e);
+        showToast('云端拉取失败：' + (e.message || e) + '（口令不一致或网络异常）');
+    }
+}
+
+// 每次保存自动推云端（云端口令未设置时静默跳过，本地照常可用）
+const _origSaveData = saveData;
+saveData = function() {
+    if (!_applyingCloud) data.updatedAt = Date.now();
+    _origSaveData();
+    if (!_applyingCloud) pushCloud();
+};
+
+// ---- 约课对接：拉取已完成预约 → 待入账 ----
+function parseLessonTime(rawText, year) {
+    if (!rawText) return null;
+    const m = String(rawText).trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):?(\d{2})-(\d{2}):?(\d{2})/);
+    if (!m) return null;
+    const date = `${year}-${String(+m[1]).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
+    const diff = ((+m[5] * 60 + +m[6]) - (+m[3] * 60 + +m[4])) / 60;
+    return { date, hours: diff > 0 ? diff : 0 };
+}
+
+function parseLessonFromReservation(r) {
+    let date = null, hours = 0;
+    if (r.slotSnapshot && r.slotSnapshot.date) {
+        date = r.slotSnapshot.date;
+        if (r.slotSnapshot.startTime && r.slotSnapshot.endTime) {
+            const [sh, sm] = r.slotSnapshot.startTime.split(':').map(Number);
+            const [eh, em] = r.slotSnapshot.endTime.split(':').map(Number);
+            hours = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+        }
+    }
+    if (!date || !hours) {
+        const parsed = parseLessonTime(r.time, activeYear);
+        if (parsed) { if (!date) date = parsed.date; if (!hours) hours = parsed.hours; }
+    }
+    if (!date || hours <= 0) return null;
+    return { date, hours, studentName: ((r.nickname || '').trim() || '未知') };
+}
+
+function isLessonImported(lesson) {
+    if (data.records.some(r => r.sourceId && r.sourceId === lesson.sourceId)) return true;
+    return data.records.some(r => !r.sourceId && r.date === lesson.date && r.studentName === lesson.studentName && Math.abs(Number(r.hours) - Number(lesson.hours)) < 0.01);
+}
+
+async function refreshPendingList() {
+    const statusEl = document.getElementById('feeSyncStatus');
+    const listEl = document.getElementById('pendingFeeList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
+    try {
+        const ok = await ensureCloudReady();
+        if (!ok) { statusEl.textContent = '⚠️ 无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
+        const snap = await db.ref(`years/${activeYear}/reservations`).once('value');
+        const res = snap.val() || {};
+        pendingLessons = [];
+        const dismissedKeys = (data.dismissedLessons || []).map(d => d.resKey);
+        Object.keys(res).forEach(key => {
+            const r = res[key];
+            if (!r || r.status !== 'completed') return;
+            if (dismissedKeys.includes(key)) return; // 教师已忽略的时间段
+            const lesson = parseLessonFromReservation(r);
+            if (!lesson) return;
+            lesson.resKey = key;
+            lesson.sourceId = 'imported_' + key;
+            // 应用教师修改过的时间（覆盖约课系统里填错的时间）
+            const ov = (data.lessonOverrides || {})[key];
+            if (ov) {
+                if (ov.date) lesson.date = ov.date;
+                if (ov.hours) lesson.hours = ov.hours;
+                lesson.overridden = true;
+            }
+            lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
+            if (!isLessonImported(lesson)) pendingLessons.push(lesson);
+        });
+        pendingLessons.sort((a, b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName));
+        renderPendingList();
+        statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条已完成预约待入账`;
+    } catch (e) {
+        console.error(e);
+        statusEl.textContent = '⚠️ 读取失败：' + (e.message || e);
+        listEl.innerHTML = '';
+    }
+}
+
+function renderPendingList() {
+    const listEl = document.getElementById('pendingFeeList');
+    const btn = document.getElementById('btnImportSelected');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (pendingLessons.length === 0) {
+        listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">没有待入账的已完成预约 🎉</div>';
+        btn.textContent = '导入选中 (0)';
+        btn.disabled = true;
+        renderDismissed();
+        return;
+    }
+    pendingLessons.forEach((p, i) => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100';
+        div.id = `pending-row-${i}`;
+        div.innerHTML = `
+            <label class="flex items-center gap-3 cursor-pointer flex-1">
+                <input type="checkbox" class="pending-check" data-idx="${i}" checked style="width:auto;">
+                <div>
+                    <div class="font-bold text-gray-700 text-sm">${p.date} ${p.studentName}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
+                    <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
+                </div>
+            </label>
+            <div class="flex space-x-1">
+                <button type="button" onclick="editPendingLesson(${i})" class="text-blue-500 p-1.5 hover:bg-blue-50 rounded transition" title="修改时间段"><i class="fas fa-pen text-xs"></i></button>
+                <button type="button" onclick="dismissPendingLesson(${i})" class="text-red-400 p-1.5 hover:bg-red-50 rounded transition" title="忽略该时间段"><i class="fas fa-trash-alt text-xs"></i></button>
+            </div>
+        `;
+        listEl.appendChild(div);
+    });
+    listEl.querySelectorAll('.pending-check').forEach(cb => cb.onchange = updateImportBtn);
+    updateImportBtn();
+    renderDismissed();
+}
+
+function updateImportBtn() {
+    const btn = document.getElementById('btnImportSelected');
+    if (!btn) return;
+    const n = document.querySelectorAll('.pending-check:checked').length;
+    btn.textContent = `导入选中 (${n})`;
+    btn.disabled = n === 0;
+}
+
+function importSelectedPending() {
+    const checked = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]);
+    if (checked.length === 0) return;
+    if (!confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return;
+    const noProfile = new Set();
+    checked.forEach(p => {
+        const targetStudent = data.students.find(s => s.name === p.studentName);
+        if (!targetStudent) noProfile.add(p.studentName);
+        const rate = targetStudent ? targetStudent.rate : 0;
+        const total = Number((rate * p.hours).toFixed(2));
+        data.records.push({
+            id: "booking_" + Date.now() + Math.random().toString(36).substring(2, 5),
+            sourceId: p.sourceId,
+            studentId: targetStudent ? targetStudent.id : "",
+            studentName: p.studentName,
+            date: p.date,
+            hours: Number(Number(p.hours).toFixed(2)),
+            rate: rate,
+            total: total
+        });
+    });
+    saveData();
+    let warn = "";
+    if (noProfile.size > 0) warn = `\n\n⚠️ 以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
+    showToast(`已入账 ${checked.length} 条`);
+    alert(`约课入账成功！已导入 ${checked.length} 条。${warn}`);
+    refreshPendingList();
+}
+
+// ---- 时间段修改 / 忽略（约课系统里当时填的时间可能有误）----
+function editPendingLesson(i) {
+    const p = pendingLessons[i];
+    const row = document.getElementById('pending-row-' + i);
+    if (!p || !row) return;
+    row.innerHTML = `
+        <div class="flex-1 space-y-2">
+            <div class="flex items-center gap-2">
+                <input type="date" id="edit-date-${i}" value="${p.date}" class="border border-gray-300 rounded-lg px-2 py-1 text-xs flex-1">
+                <input type="number" id="edit-hours-${i}" value="${p.hours}" step="0.5" min="0.5" class="border border-gray-300 rounded-lg px-2 py-1 text-xs w-20">
+                <span class="text-xs text-gray-500">小时</span>
+            </div>
+            <div class="flex space-x-3">
+                <button type="button" onclick="saveEditPendingLesson(${i})" class="text-blue-600 text-xs font-medium hover:underline">保存修改</button>
+                <button type="button" onclick="renderPendingList()" class="text-gray-500 text-xs hover:underline">取消</button>
+            </div>
+        </div>
+    `;
+}
+
+function saveEditPendingLesson(i) {
+    const p = pendingLessons[i];
+    if (!p) return;
+    const date = document.getElementById('edit-date-' + i).value;
+    const hours = parseFloat(document.getElementById('edit-hours-' + i).value);
+    if (!date) return alert('请选择日期');
+    if (!(hours > 0)) return alert('请输入有效课时');
+    data.lessonOverrides = data.lessonOverrides || {};
+    data.lessonOverrides[p.resKey] = { date: date, hours: Number(Number(hours).toFixed(2)) };
+    p.date = date;
+    p.hours = Number(Number(hours).toFixed(2));
+    p.overridden = true;
+    saveData(); // 修改随账本加密同步云端
+    showToast('已修改，导入时将使用新时间');
+    renderPendingList();
+}
+
+function dismissPendingLesson(i) {
+    const p = pendingLessons[i];
+    if (!p) return;
+    if (!confirm(`确定忽略这条预约吗？\n${p.date} ${p.studentName} ${p.hours.toFixed(2)} 小时\n\n忽略后不会自动导入，可在下方「已忽略的时间段」中恢复。`)) return;
+    data.dismissedLessons = data.dismissedLessons || [];
+    if (!data.dismissedLessons.some(d => d.resKey === p.resKey)) {
+        data.dismissedLessons.push({ resKey: p.resKey, date: p.date, studentName: p.studentName, hours: p.hours });
+    }
+    saveData();
+    showToast('已忽略该时间段');
+    refreshPendingList();
+}
+
+function renderDismissed() {
+    const box = document.getElementById('dismissedFeeList');
+    if (!box) return;
+    const d = data.dismissedLessons || [];
+    box.classList.toggle('hidden', d.length === 0);
+    box.innerHTML = '';
+    if (d.length === 0) return;
+    const title = document.createElement('div');
+    title.className = 'text-xs font-bold text-gray-500 mb-1';
+    title.textContent = `已忽略的时间段 (${d.length})`;
+    box.appendChild(title);
+    d.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex justify-between items-center text-xs text-gray-500 py-1';
+        row.innerHTML = `<span>${item.date} ${item.studentName} ${Number(item.hours || 0).toFixed(2)}h</span>
+            <button type="button" onclick="restoreDismissed(${idx})" class="text-blue-500 font-medium hover:underline">恢复</button>`;
+        box.appendChild(row);
+    });
+}
+
+function restoreDismissed(idx) {
+    (data.dismissedLessons || []).splice(idx, 1);
+    saveData();
+    renderPendingList();
+    refreshPendingList();
+}
+
+function changeFeePassphrase() {
+    const pass = prompt('输入新的云端加密口令（留空 = 取消）：');
+    if (pass === null) return;
+    if (!pass.trim()) { showToast('已取消'); return; }
+    localStorage.setItem('fee_vault_pass', pass.trim());
+    showToast('口令已更新，正在重新加密上传…');
+    pushCloud();
+}
+
+// ---- 覆盖 Tab 切换以支持「约课对接」视图 ----
+switchTab = function(view) {
+    currentView = view;
+    const calView = document.getElementById('view-calendar');
+    const statsView = document.getElementById('view-stats');
+    const feeView = document.getElementById('view-fee');
+    calView.classList.toggle('hidden', view !== 'calendar');
+    calView.classList.toggle('block', view === 'calendar');
+    statsView.classList.toggle('hidden', view !== 'stats');
+    statsView.classList.toggle('block', view === 'stats');
+    if (feeView) { feeView.classList.toggle('hidden', view !== 'fee'); feeView.classList.toggle('block', view === 'fee'); }
+    const cls = (active) => `flex-1 py-3 text-sm font-medium text-center ${active ? 'tab-active' : 'tab-inactive'} transition-colors`;
+    document.getElementById('tab-calendar').className = cls(view === 'calendar');
+    document.getElementById('tab-stats').className = cls(view === 'stats');
+    const tabFee = document.getElementById('tab-fee');
+    if (tabFee) tabFee.className = cls(view === 'fee');
+    if (view === 'stats') renderStats();
+    if (view === 'fee') refreshPendingList();
+};
+
+// ---- 启动时：本地数据就绪后拉云端（含 updatedAt 初始化）----
+function onReady() {
+    data.updatedAt = data.updatedAt || 0;
+    data.lessonOverrides = data.lessonOverrides || {};
+    data.dismissedLessons = data.dismissedLessons || [];
+    pullCloud();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+} else {
+    onReady();
+}
+</script>
+</body>
+</html>
