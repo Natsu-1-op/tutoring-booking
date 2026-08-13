@@ -188,6 +188,12 @@ function startReviewPackageWorkspace() {
                 <span>判定：${isWrong ? '扣分项' : '完全正确'}</span><span>实际得分：${earnedScore} / ${mq.score} 分</span>
             </div>`;
 
+        // 教师批改评语（随评卷打分包导出，教师可修改后公开）
+        const reviewFeedback = activeReviewPackageData.feedbackMap && activeReviewPackageData.feedbackMap[mq.id];
+        if (reviewFeedback) {
+            html += `<div class="review-teacher-feedback"><b>教师评语：</b>${escapeHtml(reviewFeedback).replace(/\n/g, '<br>')}</div>`;
+        }
+
         if (mq.standardAnswerImage) {
             html += `<div style="margin-top:8px;"><label class="exam-img-label">标准评分细则附图 (点击查看大图)：</label><img src="${mq.standardAnswerImage}" class="click-zoom-img" onclick="openGlobalLightbox(this.src)"></div>`;
         }

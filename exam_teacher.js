@@ -3,6 +3,7 @@ let qCount = 0;
 let masterPaper = null;
 let studentPaper = null;
 let singleScores = {};
+let feedbackMap = {}; // 每题批改评语（AI 生成或教师手写，可修改；随评卷打分包展示给学生）
 let classResults = [];
 let currentGradingViewMode = "full";
 let currentGradingSingleIndex = 0;
@@ -231,7 +232,7 @@ function triggerDl(obj, name) {
 }
 
 // ================= AI 批改 =================
-let aiConfig = { url: '', key: '', model: '', ocrUrl: '', ocrKey: '', ocrModel: '' };
+let aiConfig = { url: '', key: '', model: '', ocrUrl: '', ocrKey: '', ocrModel: '', directVision: false, reasoningModel: false };
 let aiGradingBusy = false;
 let onAiStatus = null; // 供 callAI 向 UI 汇报加载/等待状态
 const AI_KEY_SALT = 'ClassOpticAIKeySalt2026';
@@ -268,7 +269,7 @@ async function callAI(body, cfg) {
             resp.text().catch(() => '');
             if (retries >= 3) {
                 if (typeof onAiStatus === 'function') onAiStatus('');
-                throw new Error('请求过于频繁被限流(429)，已自动重试3次仍失败。请稍后再试，或升级智谱付费套餐提高速率限制');
+                throw new Error('请求过于频繁被限流(429)，已自动重试3次仍失败。请稍后再试，或升级对应 API 服务商的套餐以提高速率限制');
             }
             retries++;
             const waitMs = 15000 * retries; // 15s, 30s, 45s
@@ -285,7 +286,7 @@ async function callAI(body, cfg) {
         const tag = isOcr ? 'OCR 请求' : '批改请求';
         // 按错误类型给出针对性提示
         if (/image_url|unknown variant|vision|visual/i.test(detail)) {
-            throw new Error(`当前模型不支持图片识别（OCR）。请确认 OCR 模型是支持视觉的模型名（智谱免费视觉模型是 glm-4v-flash，注意不是 glm-4.6v-flash）`);
+            throw new Error(`模型不支持图片输入：若批改模型是纯文本（如 deepseek-chat），请配置支持视觉的 OCR 模型（推荐 glm-4v-flash，注意不是 glm-4.6v-flash）；若已勾选"直接看图"，请取消勾选或换用支持视觉的模型（如 gpt-4o / glm-4v / qwen-vl）。`);
         }
         if (resp.status === 400 && /model|not found|invalid.*model|does not exist/i.test(detail)) {
             throw new Error(`${tag}：模型名可能不对 → ${detail.slice(0, 160)}。OCR 用的模型名是 ${(cfg || aiConfig).model}，请核对是否正确（智谱免费视觉模型为 glm-4v-flash）`);
@@ -304,11 +305,52 @@ async function callAI(body, cfg) {
     catch (e) { throw new Error(`API 返回的不是有效 JSON，请检查 API 地址是否指向 /chat/completions 端点（请求发往 ${apiUrl}）`); }
 }
 
-// 按模型适配 max_tokens 上限（智谱等模型限制 1024）
-function maxTokensFor(model) {
+// 判断是否为推理模型（思考过程会额外占用输出预算，需区别对待）
+// 自动识别常见推理模型名；deepseek-v4 系列（如 deepseek-v4-flash）实际会输出思考过程，一并纳入
+function isReasoningModel(model) {
     const m = (model || '').toLowerCase();
+    return /reasoner|r1|o1|o3|qwq|thinking|kimi|deepseek[-_]?v\d/i.test(m);
+}
+
+// 按模型适配 max_tokens 上限（智谱等模型限制 1024；DeepSeek 支持长输出；推理模型思考+答案共用预算，需给足）
+function maxTokensFor(model, isReasoning) {
+    const m = (model || '').toLowerCase();
+    if (isReasoning) return 32000;
     if (/glm/.test(m)) return 1024;
+    if (/deepseek/.test(m)) return 8000;
     return 2000;
+}
+
+// 从模型响应中取回最终文本答案。
+// 注意：reasoning_content / reasoning 是推理模型的"思考过程"，不是最终答案——不能当作答案解析
+// （否则思考过程会被误当成答案，导致 JSON 解析失败）。
+// 依次尝试 message.content / 多模态 content 数组 / choice.text / 顶层字段。
+function extractContent(data) {
+    if (!data) return '';
+    const choice = data.choices && data.choices[0];
+    const msg = (choice && choice.message) || {};
+
+    // 1) content 是字符串（绝大多数 OpenAI 兼容接口的最终答案都在这里）
+    if (typeof msg.content === 'string' && msg.content.trim()) return msg.content;
+
+    // 2) content 是多模态数组（[ {type:'text', text:'...'}, ... ]）
+    if (Array.isArray(msg.content)) {
+        const joined = msg.content
+            .map(p => (typeof p === 'string') ? p : (p && p.text) || '')
+            .filter(Boolean)
+            .join('\n');
+        if (joined.trim()) return joined;
+    }
+
+    // 3) 旧版 completions 格式
+    if (choice && typeof choice.text === 'string' && choice.text.trim()) return choice.text;
+
+    // 4) 部分接口把结果放在顶层字段
+    for (const f of ['content', 'output_text', 'output', 'result']) {
+        const v = data[f];
+        if (typeof v === 'string' && v.trim()) return v;
+    }
+    return '';
 }
 
 // 简单 XOR 加解密（防止 Firebase 中明文暴露 API Key）
@@ -353,6 +395,12 @@ function getAiConfigRef() {
             aiConfig.model = v.model || '';
             aiConfig.ocrUrl = v.ocrUrl || '';
             aiConfig.ocrModel = v.ocrModel || '';
+            aiConfig.directVision = !!v.directVision;
+            const dvEl = document.getElementById('ai-direct-vision');
+            if (dvEl) dvEl.checked = aiConfig.directVision;
+            aiConfig.reasoningModel = !!v.reasoningModel;
+            const rmEl = document.getElementById('ai-reasoning-model');
+            if (rmEl) rmEl.checked = aiConfig.reasoningModel;
         }
     });
     // Key 从 localStorage 加载（加密存储）
@@ -381,6 +429,10 @@ function saveAiConfig() {
     aiConfig.ocrUrl = normalizeApiUrl(ocrUrlEl ? ocrUrlEl.value.trim() : '');
     aiConfig.ocrKey = ocrKeyEl ? ocrKeyEl.value.trim() : '';
     aiConfig.ocrModel = ocrModelEl ? ocrModelEl.value.trim() : '';
+    const dvEl = document.getElementById('ai-direct-vision');
+    aiConfig.directVision = dvEl ? dvEl.checked : false;
+    const rmEl = document.getElementById('ai-reasoning-model');
+    aiConfig.reasoningModel = rmEl ? rmEl.checked : false;
     if (!aiConfig.url || !aiConfig.key || !aiConfig.model) {
         return alert('请完整填写 API 地址、Key 和模型名称！');
     }
@@ -394,13 +446,20 @@ function saveAiConfig() {
     }
 
     // URL 和模型存 Firebase，Key 只存 localStorage（加密）
-    const publicConfig = { url: aiConfig.url, model: aiConfig.model, ocrUrl: aiConfig.ocrUrl, ocrModel: aiConfig.ocrModel };
+    const publicConfig = { url: aiConfig.url, model: aiConfig.model, ocrUrl: aiConfig.ocrUrl, ocrModel: aiConfig.ocrModel, directVision: aiConfig.directVision, reasoningModel: aiConfig.reasoningModel };
     getAiConfigRef().set(publicConfig).then(() => {
         localStorage.setItem('ai_key_enc', encryptKey(aiConfig.key));
         if (aiConfig.ocrKey) localStorage.setItem('ai_ocr_key_enc', encryptKey(aiConfig.ocrKey));
         document.getElementById('ai-config-status').textContent = '已保存（Key 仅存本机）';
         setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2500);
     }).catch((err) => { alert('保存失败: ' + (err.message || err)); });
+}
+
+// 判断模型名是否支持直接看图（多模态）。DeepSeek 官方模型一律视为纯文本（需走 OCR）。
+function isVisionModel(model) {
+    const m = (model || '').toLowerCase();
+    if (/deepseek/.test(m)) return false;
+    return /vl|vision|visual|glm-4v|qwen-vl|gpt-4o|gpt-4\.1|gpt-4-turbo|gemini|claude|step-1v|internvl|minicpm|doubao-.*-vl|hunyuan-vision/i.test(m);
 }
 
 // 组装 OCR 请求配置：有独立 OCR 配置则用它，否则复用主配置
@@ -432,7 +491,81 @@ async function ocrImage(base64) {
         }],
         max_tokens: maxTokensFor(ocrCfg.model)
     }, ocrCfg);
-    return data.choices?.[0]?.message?.content || '(OCR未识别出内容)';
+    const ocrText = extractContent(data);
+    return ocrText || '(OCR未识别出内容)';
+}
+
+// 容错解析模型返回的 JSON：依次尝试 完整解析 → 截取首{末}解析 → 正则抽取 score/feedback
+// 目的：容忍模型输出被截断、JSON 前后夹带多余文字、字符串内出现未转义真实换行等情况
+function parseModelJsonResult(raw) {
+    if (!raw) return null;
+    let s = String(raw).replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+    if (!s) return null;
+
+    // 1) 完整解析
+    try { return JSON.parse(s); } catch (e) {}
+
+    // 2) 截取第一个 { 到最后一个 }（容忍模型在 JSON 前后输出多余文字）
+    const start = s.indexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+        try { return JSON.parse(s.slice(start, end + 1)); } catch (e) {}
+    }
+
+    // 3) 正则直接抽取（容忍字符串内未转义的真实换行等非法 JSON）
+    const scoreMatch = s.match(/"score"\s*[:：]\s*(\d+(?:\.\d+)?)/);
+    const fbMatch = s.match(/"feedback"\s*[:：]\s*"((?:[^"\\]|\\.)*)"\s*[},]/);
+    if (scoreMatch) {
+        const obj = { score: parseFloat(scoreMatch[1]) };
+        if (fbMatch) {
+            obj.feedback = fbMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        } else {
+            // feedback 可能被截断：尽量抓取剩余文本
+            const fbTrunc = s.match(/"feedback"\s*[:：]\s*"([\s\S]*)$/);
+            if (fbTrunc) {
+                obj.feedback = fbTrunc[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/"\s*[},]*$/, '').trim();
+            }
+        }
+        return obj;
+    }
+    return null;
+}
+
+// 给请求追加"直接输出 JSON、禁止思考过程"的强硬指令（推理模型专用，防止思考过程挤占输出预算）
+function withFirmInstruction(messages, forceful) {
+    const note = forceful
+        ? '\n\n【重要】只输出一个 JSON 对象。禁止输出任何思考过程、分析过程、代码块或多余文字。'
+        : '\n\n请直接输出最终 JSON 结果，不要输出任何思考过程或分析过程。';
+    return messages.map(m => {
+        if (typeof m.content === 'string') {
+            return { role: m.role, content: m.content + note };
+        }
+        if (Array.isArray(m.content)) {
+            const parts = m.content.map(p => {
+                if (p && p.type === 'text') return { type: 'text', text: p.text + note };
+                return p;
+            });
+            return { role: m.role, content: parts };
+        }
+        return m;
+    });
+}
+
+// 构建批改 prompt（文字版；多模态直读时图片会单独附加）
+function buildGradingPrompt(qIndex, studentText) {
+    const mq = masterPaper.questions[qIndex];
+    return `你是专业课阅卷老师。请严格批改学生答案并给出分数和详细反馈。
+
+【题目】${mq.stem.replace(/\\n/g, '\n')}
+【题型】${mq.type === 'choice' ? '选择题' : mq.type === 'judge' ? '判断题' : '主观题'}
+【满分】${mq.score} 分
+【参考答案】${mq.standardAnswer || '无标准答案，根据题意自行判断'}
+${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : ''}
+【学生答案】${studentText}
+
+请简明扼要地给出反馈（一般 200 字以内，重点指出失分点与改进建议）。
+请返回 JSON（不要markdown代码块，纯JSON）：
+{"score": 数字(0到${mq.score}), "feedback": "简明批改意见"}`;
 }
 
 // AI 批改单道题，返回 { score, feedback }
@@ -451,44 +584,69 @@ async function gradeQuestionWithAI(qIndex) {
     };
 
     try {
-        let studentText = sAnsObj.text || '';
+        const hasImage = !!sAnsObj.image;
+        // 多模态直读：勾选"直接看图"或模型名本身支持视觉 → 图片直接发给批改模型，跳过 OCR
+        const directVision = aiConfig.directVision || isVisionModel(aiConfig.model);
 
-        // 有图片先 OCR
-        if (sAnsObj.image) {
-            studentText += '\n[手写OCR结果]: ' + await ocrImage(sAnsObj.image);
+        let requestMessages;
+        if (hasImage && directVision) {
+            const prompt = buildGradingPrompt(qIndex, sAnsObj.text || '(学生未填写文字，仅上传了图片答案)');
+            requestMessages = [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: prompt },
+                    { type: 'image_url', image_url: { url: sAnsObj.image } }
+                ]
+            }];
+        } else {
+            let studentText = sAnsObj.text || '';
+            // 有图片先 OCR 转文字（DeepSeek 等纯文本模型专用路径）
+            if (hasImage) {
+                studentText += '\n[手写OCR结果]: ' + await ocrImage(sAnsObj.image);
+            }
+            if (!studentText.trim()) {
+                return { score: 0, feedback: '学生未作答。' };
+            }
+            requestMessages = [{ role: 'user', content: buildGradingPrompt(qIndex, studentText) }];
         }
 
-        if (!studentText.trim()) {
-            return { score: 0, feedback: '学生未作答。' };
-        }
-
-        // 构建 prompt
-        const prompt = `你是专业课阅卷老师。请严格批改学生答案并给出分数和详细反馈。
-
-【题目】${mq.stem.replace(/\\n/g, '\n')}
-【题型】${mq.type === 'choice' ? '选择题' : mq.type === 'judge' ? '判断题' : '主观题'}
-【满分】${mq.score} 分
-【参考答案】${mq.standardAnswer || '无标准答案，根据题意自行判断'}
-${mq.type === 'choice' && mq.options ? '【选项】' + mq.options.join(', ') : ''}
-【学生答案】${studentText}
-
-请返回 JSON（不要markdown代码块，纯JSON）：
-{"score": 数字(0到${mq.score}), "feedback": "详细批改意见（指出错误和不足，给出改进建议）"}`;
-
-        const data = await callAI({
+        // 组装请求体：deepseek-chat 纯文本请求走 JSON 模式更稳；推理模型不支持 temperature / response_format
+        const modelName = (aiConfig.model || '').toLowerCase();
+        // 手动勾选"这是推理模型"优先；否则按模型名自动识别（deepseek-v4 系列已纳入）
+        const reasoningModel = !!aiConfig.reasoningModel || isReasoningModel(modelName);
+        const body = {
             model: aiConfig.model,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: maxTokensFor(aiConfig.model),
-            temperature: 0.3
-        });
-        let raw = data.choices?.[0]?.message?.content || '';
+            messages: requestMessages,
+            max_tokens: maxTokensFor(aiConfig.model, reasoningModel)
+        };
+        if (!reasoningModel) body.temperature = 0.3;
+        if (!hasImage && /deepseek/.test(modelName) && !reasoningModel) {
+            body.response_format = { type: 'json_object' };
+        }
+        // 推理模型：追加"直接输出 JSON、禁止思考过程"指令，避免思考过程挤占输出预算
+        if (reasoningModel) body.messages = withFirmInstruction(requestMessages, false);
 
-        // 尝试解析 JSON（可能被包裹在 markdown 代码块中）
-        raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-        if (!raw) throw new Error('模型未返回内容，请检查模型名称是否正确');
-        let result;
-        try { result = JSON.parse(raw); }
-        catch (e) { throw new Error('模型返回的不是有效 JSON：' + raw.slice(0, 120)); }
+        let data = await callAI(body);
+        let raw = extractContent(data);
+        let result = raw.trim() ? parseModelJsonResult(raw) : null;
+
+        // 第一次没拿到有效结果 → 用更强硬指令重试一次（推理模型思考过长会导致 content 为空/被截断）
+        if (!result) {
+            body.messages = withFirmInstruction(requestMessages, true);
+            if (reasoningModel) body.max_tokens = 32000;
+            data = await callAI(body);
+            raw = extractContent(data);
+            result = raw.trim() ? parseModelJsonResult(raw) : null;
+        }
+
+        if (!result) {
+            const choice = data && data.choices && data.choices[0];
+            const fr = choice && choice.finish_reason;
+            if (raw.trim()) {
+                throw new Error('模型返回的内容无法解析为 JSON（可能仍是思考过程或格式错误）：' + raw.slice(0, 180) + (raw.length > 180 ? '…' : ''));
+            }
+            throw new Error('模型未返回最终答案' + (fr ? '（finish_reason: ' + fr + '）' : '') + '。若为 length，说明输出被截断（推理模型思考过长），请换输出上限更高的模型或让反馈更简短。');
+        }
 
         return {
             score: Math.max(0, Math.min(parseFloat(result.score) || 0, mq.score)),
@@ -520,11 +678,20 @@ function showAIFeedback(qIndex, result) {
         const scoreInput = document.getElementById(`score-input-id-${qIndex}`);
         if (scoreInput) scoreInput.value = result.score;
         singleScores[mq.id] = result.score;
+        // 写入评语编辑框（教师可修改，将随打分包展示给学生）
+        feedbackMap[mq.id] = result.feedback || '';
+        const fbInput = document.getElementById(`feedback-input-${qIndex}`);
+        if (fbInput) fbInput.value = feedbackMap[mq.id];
         updateLiveScoreUI(qIndex, result.score, mq.score);
     } else {
         fbDiv.innerHTML = `<div class="ai-feedback-card ai-feedback-error">${result.feedback}</div>`;
     }
 }
+
+// 教师手动修改/填写批改评语（随评卷打分包展示给学生）
+window.updateFeedback = function(qId, val) {
+    feedbackMap[qId] = val.trim();
+};
 
 // 采纳 AI 分数
 function acceptAIScore(qIndex, score) {
@@ -635,6 +802,7 @@ function renderGradingInterface() {
     const gridDots = document.getElementById('grading-grid-dots');
     gridDots.innerHTML = '';
     singleScores = {};
+    feedbackMap = {};
 
     const typeNames = { choice: '选择题', judge: '判断题', 'blank-auto': '客观填空', 'blank-hand': '主观填空', calculation: '计算题' };
 
@@ -729,6 +897,12 @@ function renderGradingInterface() {
         html += `<div class="grade-ai-row">
             <button class="teacher-btn teacher-btn-sm ai-grade-btn" onclick="gradeSingleWithAI(${index})">AI 批改本题</button>
             <div id="ai-feedback-${index}" class="grade-ai-feedback"></div>
+        </div>`;
+
+        // === 批改评语编辑框（AI 自动填入后可修改，随打分包展示给学生）===
+        html += `<div class="grade-feedback-editor">
+            <label class="score-input-label">批改评语（会展示给学生，可修改）</label>
+            <textarea id="feedback-input-${index}" class="feedback-textarea" placeholder="点「AI 批改本题」自动生成，也可手动输入评语…" oninput="updateFeedback('${mq.id}', this.value)"></textarea>
         </div>`;
 
         const div = document.createElement('div');
@@ -870,6 +1044,7 @@ function saveStudentScoreAndPackage() {
         examTimeWindow: studentPaper.examTimeWindow,
         totalScoreResult: total,
         scoredMap: singleScores,
+        feedbackMap: feedbackMap, // 每题评语（教师可修改，学生复盘端展示）
         masterPaperSnapshot: masterPaper,
         studentAnswersSnapshot: studentPaper.answers
     };
@@ -1114,6 +1289,11 @@ function renderReviewWorkspace(pack) {
                 <input type="text" value="只读锁定" disabled class="score-readonly-input">
             </div>
         </div>`;
+        // 展示随包导出的批改评语（与学生端复盘看到的一致）
+        const reviewFb = pack.feedbackMap && pack.feedbackMap[mq.id];
+        if (reviewFb) {
+            h += `<div class="review-teacher-feedback"><b>教师评语：</b>${escapeHtml(reviewFb).replace(/\n/g, '<br>')}</div>`;
+        }
         card.innerHTML = h; container.appendChild(card);
 
         const dot = document.createElement('div');

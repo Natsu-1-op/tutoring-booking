@@ -105,6 +105,18 @@
                     <div class="ai-config-row" style="margin-top:4px;">
                         <p style="font-size:12px; color:#888; margin:0; line-height:1.6;">批改模型若是纯文本模型（如 deepseek-chat），识别手写图片需另配一个<b>支持视觉</b>的 OCR 模型。推荐免费方案：智谱开放平台（bigmodel.cn）注册拿 Key，OCR 模型填 <b>glm-4v-flash</b>，OCR API 地址填 <code>https://open.bigmodel.cn/api/paas/v4/chat/completions</code>。</p>
                     </div>
+                    <div class="ai-config-row" style="border-top:1px dashed #d9d9d9; padding-top:10px; margin-top:4px;">
+                        <p style="font-size:12px; color:#888; margin:0; line-height:1.6;">💡 提示：批改模型支持任意 OpenAI 兼容接口（如 DeepSeek，官方模型 deepseek-chat / deepseek-reasoner 是<b>纯文本模型，不能直接看图片</b>）——批改手写图片题时，系统会先调用 OCR 模型把图片转成文字，再交批改模型打分。若你的批改模型本身支持看图（如 gpt-4o / glm-4v / qwen-vl），勾选下方"直接看图"即可跳过 OCR。</p>
+                        <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+                            <label style="font-size:13px; color:#555; font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="ai-direct-vision" style="width:auto;"> 批改模型可直接看图（多模态，跳过 OCR）
+                            </label>
+                            <label style="font-size:13px; color:#555; font-weight:normal; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="ai-reasoning-model" style="width:auto;"> 这是推理模型（会输出思考过程，如 deepseek-v4 / reasoner）
+                            </label>
+                        </div>
+                        <p style="font-size:12px; color:#b8860b; margin:6px 0 0 0; line-height:1.6;">⚠️ 若你的模型会先"思考"再作答（返回的答案里夹带"Need review / 分析过程"之类内容，或最终答案字段经常为空），请勾选上方的<b>"这是推理模型"</b>：系统会加大输出上限、要求它直接输出 JSON，并在失败时自动重试。</p>
+                    </div>
                     <button class="teacher-btn teacher-btn-sm" style="background:#409eff;color:#fff;" onclick="saveAiConfig()">保存配置</button>
                     <span id="ai-config-status" class="text-gray" style="font-size:12px;margin-left:10px;"></span>
                 </div>
