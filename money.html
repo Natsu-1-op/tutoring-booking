@@ -160,6 +160,7 @@
                 <h2 class="text-lg font-bold text-gray-800">约课对接</h2>
                 <div class="flex space-x-2">
                     <button type="button" onclick="changeFeePassphrase()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">云端口令</button>
+                    <button type="button" onclick="forceUploadCloud()" class="text-white bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded-lg transition text-xs font-medium">上传本机到云端</button>
                     <button type="button" onclick="refreshPendingList()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">刷新</button>
                 </div>
             </div>
@@ -1111,7 +1112,7 @@ function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
 
 async function pushCloud() {
     try {
-        if (!db || !activeYear) return;
+        if (!db || !activeYear) return false;
         const cipher = await encryptFeeData({
             students: data.students,
             records: data.records,
@@ -1119,10 +1120,23 @@ async function pushCloud() {
             dismissedLessons: data.dismissedLessons || []
         });
         await vaultRef().set({ updatedAt: Date.now(), cipher });
+        return true;
     } catch (e) {
         console.error('云端同步失败', e);
         showToast('云端同步失败：' + (e.message || e));
+        return false;
     }
+}
+
+// 一键上传本机账本到云端（强制以本机数据覆盖云端；用于首次迁移/换设备/找回数据）
+async function forceUploadCloud() {
+    if (!(data.students && data.students.length) && !(data.records && data.records.length)) {
+        showToast('本机暂无数据可上传');
+        return;
+    }
+    if (!confirm(`确定将本机账本一键上传到云端吗？\n（会以本机数据覆盖云端，包含 ${(data.students || []).length} 名学生、${(data.records || []).length} 条记录）`)) return;
+    const ok = await pushCloud();
+    if (ok) alert(`✓ 已一键上传本机账本到云端（AES 加密）：\n学生 ${(data.students || []).length} 名\n记录 ${(data.records || []).length} 条`);
 }
 
 async function pullCloud() {
@@ -1131,7 +1145,14 @@ async function pullCloud() {
         if (!ok) return;
         const snap = await vaultRef().once('value');
         const vault = snap.val();
-        if (!vault || !vault.cipher) return;
+        if (!vault || !vault.cipher) {
+            // 云端还没有账本：本机有数据则自动一键上传（完成本地 → 云端迁移）
+            if ((data.students && data.students.length) || (data.records && data.records.length)) {
+                const ok = await pushCloud();
+                if (ok) showToast('本机账本已自动上传云端（' + (data.students || []).length + ' 名学生、' + (data.records || []).length + ' 条记录）');
+            }
+            return;
+        }
         if (!ensureFeePassphrase()) return;
         const localUpdated = data.updatedAt || 0;
         if ((vault.updatedAt || 0) <= localUpdated) { pushCloud(); return; }
