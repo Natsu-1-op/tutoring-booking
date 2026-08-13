@@ -164,7 +164,7 @@
                 </div>
             </div>
             <div class="bg-white rounded-lg shadow-sm p-4">
-                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重（同天同课时不误删）。单价取学生档案；未建档的会标黄提示，按 ¥0 导入。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略该时间段（可在下方恢复）。课时数据将加密同步到云端（学生端只能看到密文）。</p>
+                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略（可恢复）。修改后若与账本里已入账的课时时间重合/相近，会标红/标黄提示并默认跳过（防重复计费），确认无误仍可勾选强制导入。课时数据加密同步到云端（学生端只能看到密文）。</p>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
                 <div id="pendingFeeList" class="space-y-2"></div>
                 <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
@@ -1194,6 +1194,31 @@ function isLessonImported(lesson) {
     return data.records.some(r => !r.sourceId && r.date === lesson.date && r.studentName === lesson.studentName && Math.abs(Number(r.hours) - Number(lesson.hours)) < 0.01);
 }
 
+// 检查待入账与已入账记录（及待入账列表内其他条目）的时间重合
+// 改过时间后可能与账本里已有的课时重叠：同学生+同日期+课时相同=疑似重复；课时相近(差≤0.5h)=疑似相邻冲突
+function findLessonConflicts(lesson, includePending) {
+    const conflicts = [];
+    const sameDay = (a) => a.studentName === lesson.studentName && a.date === lesson.date;
+    (data.records || []).forEach(r => {
+        if (!sameDay(r)) return;
+        const diff = Math.abs(Number(r.hours) - Number(lesson.hours));
+        if (diff < 0.01) {
+            conflicts.push({ kind: 'exact', label: `已入账 ${r.date} ${r.studentName} ${Number(r.hours).toFixed(2)}h` });
+        } else if (diff <= 0.5) {
+            conflicts.push({ kind: 'near', label: `已入账 ${r.date} ${r.studentName} ${Number(r.hours).toFixed(2)}h（差${diff.toFixed(2)}h）` });
+        }
+    });
+    if (includePending) {
+        (pendingLessons || []).forEach(o => {
+            if (o === lesson || !sameDay(o)) return;
+            if (Math.abs(Number(o.hours) - Number(lesson.hours)) < 0.01) {
+                conflicts.push({ kind: 'exact', label: `本次待入账内重复 ${o.date} ${o.studentName} ${Number(o.hours).toFixed(2)}h` });
+            }
+        });
+    }
+    return conflicts;
+}
+
 async function refreshPendingList() {
     const statusEl = document.getElementById('feeSyncStatus');
     const listEl = document.getElementById('pendingFeeList');
@@ -1225,8 +1250,11 @@ async function refreshPendingList() {
             if (!isLessonImported(lesson)) pendingLessons.push(lesson);
         });
         pendingLessons.sort((a, b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName));
+        // 检查与已入账记录 / 待入账列表内其他条目的时间重合（改过时间后可能与已有课时重叠）
+        pendingLessons.forEach(p => { p.conflicts = findLessonConflicts(p, true); });
+        const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
-        statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条已完成预约待入账`;
+        statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
     } catch (e) {
         console.error(e);
         statusEl.textContent = '⚠️ 读取失败：' + (e.message || e);
@@ -1247,15 +1275,19 @@ function renderPendingList() {
         return;
     }
     pendingLessons.forEach((p, i) => {
+        const exact = (p.conflicts || []).filter(c => c.kind === 'exact');
+        const near = (p.conflicts || []).filter(c => c.kind === 'near');
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100';
         div.id = `pending-row-${i}`;
         div.innerHTML = `
             <label class="flex items-center gap-3 cursor-pointer flex-1">
-                <input type="checkbox" class="pending-check" data-idx="${i}" checked style="width:auto;">
+                <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 ? 'checked' : ''} style="width:auto;">
                 <div>
                     <div class="font-bold text-gray-700 text-sm">${p.date} ${p.studentName}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
                     <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
+                    ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">⚠️ ' + exact.map(c => c.label).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
+                    ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">⚠️ ' + near.map(c => c.label).join('；') + '</div>' : ''}
                 </div>
             </label>
             <div class="flex space-x-1">
@@ -1282,6 +1314,16 @@ function importSelectedPending() {
     const checked = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]);
     if (checked.length === 0) return;
     if (!confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return;
+    // 重合检查：与已入账记录时间重合/相近的，先提示再确认，防止重复计费
+    const conflictLines = [];
+    checked.forEach(p => {
+        (p.conflicts || []).forEach(c => conflictLines.push(`${p.date} ${p.studentName} ${p.hours.toFixed(2)}h ← ${c.label}`));
+    });
+    if (conflictLines.length > 0) {
+        const shown = conflictLines.slice(0, 10).join('\n');
+        const more = conflictLines.length > 10 ? `\n…还有 ${conflictLines.length - 10} 条` : '';
+        if (!confirm(`⚠️ 以下 ${conflictLines.length} 条与已入账记录时间重合或相近，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用 ✎ 修改时间或 🗑 忽略。确定仍要导入这 ${checked.length} 条吗？`)) return;
+    }
     const noProfile = new Set();
     checked.forEach(p => {
         const targetStudent = data.students.find(s => s.name === p.studentName);
@@ -1339,6 +1381,8 @@ function saveEditPendingLesson(i) {
     p.date = date;
     p.hours = Number(Number(hours).toFixed(2));
     p.overridden = true;
+    // 修改后的时间可能与已入账记录/其他待入账重合，重新检测
+    pendingLessons.forEach(x => { x.conflicts = findLessonConflicts(x, true); });
     saveData(); // 修改随账本加密同步云端
     showToast('已修改，导入时将使用新时间');
     renderPendingList();
