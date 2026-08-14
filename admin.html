@@ -33,13 +33,6 @@
         .admin-mini-btn { width: auto; padding: 6px 12px; font-size: 12px; border-radius: 6px; font-weight: 600; }
         .admin-btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-        /* 预约处理 */
-        .approval-box { background: #fffdf6; border: 1px dashed #e6a23c; padding: 12px 14px; border-radius: 8px; margin-bottom: 12px; }
-        .approval-box h3 { margin: 0 0 10px 0; font-size: 14px; color: #e6a23c; }
-        .approval-item { display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border: 1px solid #efdfca; border-radius: 6px; margin-bottom: 8px; font-size: 13px; gap: 8px; flex-wrap: wrap; }
-        .approval-btns { display: flex; gap: 6px; }
-        .approval-btns button { width: auto; padding: 4px 10px; font-size: 12px; }
-
         /* 排班 */
         .template-panel { background: #f0f9eb; border: 1px solid #c2e7b0; padding: 12px 14px; border-radius: 8px; margin-bottom: 14px; }
         .template-panel h4 { margin: 0 0 8px 0; color: #67c23a; font-size: 13px; }
@@ -125,21 +118,6 @@
             </div>
         </div>
 
-        <!-- 预约处理 -->
-        <div class="admin-card">
-            <div class="admin-card-h"><span>预约处理</span></div>
-            <div class="admin-card-b">
-                <div id="pending-approval-panel" class="approval-box" style="display: none;">
-                    <h3>待确认的预约</h3>
-                    <div id="pending-approval-list"></div>
-                </div>
-                <div id="cancel-approval-panel" class="approval-box" style="display: none; border-color: #f56c6c;">
-                    <h3>待处理的取消申请</h3>
-                    <div id="cancel-approval-list"></div>
-                </div>
-            </div>
-        </div>
-
         <!-- 排班管理 -->
         <div class="admin-card">
             <div class="admin-card-h"><span>排班管理</span></div>
@@ -211,6 +189,19 @@
             </div>
         </div>
 
+        <!-- 预约记录 -->
+        <h2 style="font-size:15px; margin-top: 24px;">预约记录</h2>
+        <div id="batch-action-bar" class="batch-action-bar">
+            <span class="text-bold" style="font-size:13px;">已选 <b id="batch-count" class="text-red">0</b> 条</span>
+            <select id="batch-target-status" style="padding:6px 10px; border-radius:4px; font-weight:bold; font-size:13px;">
+                <option value="">-- 改为 --</option>
+                <option value="booked">已预约</option><option value="confirmed">已确认</option>
+                <option value="completed">已完成</option><option value="canceled">已取消</option>
+            </select>
+            <button id="btn-batch-apply" class="admin-mini-btn" style="background:#409eff; color:#fff;">应用</button>
+        </div>
+        <div id="admin-reservations-container">读取中...</div>
+
         <!-- 数据管理 -->
         <div class="admin-card">
             <div class="admin-card-h"><span>数据管理</span></div>
@@ -227,19 +218,6 @@
                 <div id="stats-panel"></div>
             </div>
         </div>
-
-        <!-- 预约记录 -->
-        <h2 style="font-size:15px; margin-top: 24px;">预约记录</h2>
-        <div id="batch-action-bar" class="batch-action-bar">
-            <span class="text-bold" style="font-size:13px;">已选 <b id="batch-count" class="text-red">0</b> 条</span>
-            <select id="batch-target-status" style="padding:6px 10px; border-radius:4px; font-weight:bold; font-size:13px;">
-                <option value="">-- 改为 --</option>
-                <option value="booked">已预约</option><option value="confirmed">已确认</option>
-                <option value="completed">已完成</option><option value="canceled">已取消</option>
-            </select>
-            <button id="btn-batch-apply" class="admin-mini-btn" style="background:#409eff; color:#fff;">应用</button>
-        </div>
-        <div id="admin-reservations-container">读取中...</div>
 
         <!-- 系统日志 -->
         <div class="date-group" style="margin-top: 24px; border-color: #909399;">

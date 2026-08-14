@@ -243,12 +243,8 @@
 
         currentActiveReservationsRefMemory.on('value', (snapshot) => {
             const res = snapshot.val(); const container = document.getElementById('admin-reservations-container');
-            const pendingPanel = document.getElementById('pending-approval-panel');
-            const cancelPanel = document.getElementById('cancel-approval-panel');
 
             container.innerHTML = '';
-            if (pendingPanel) pendingPanel.style.display = 'none';
-            if (cancelPanel) cancelPanel.style.display = 'none';
             reservationsData = [];
             if (!res) { container.innerHTML = '<p class="empty-hint">当前没有预约记录。</p>'; return; }
 
