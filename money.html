@@ -124,11 +124,25 @@
         <div id="view-stats" class="p-4 fade-in hidden pb-24">
             
             <div class="flex space-x-2 mb-4 bg-white p-2 rounded-lg shadow-sm">
-                <select id="statsPeriodType" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2">
+                <select id="statsPeriodType" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 flex-none w-28">
                     <option value="month">按月统计</option>
                     <option value="year">按年统计</option>
                 </select>
-                <input type="month" id="statsDateFilter" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2">
+                <select id="statsYearFilter" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 min-w-0"></select>
+                <select id="statsMonthFilter" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2 min-w-0 disabled:opacity-60">
+                    <option value="01">1月</option>
+                    <option value="02">2月</option>
+                    <option value="03">3月</option>
+                    <option value="04">4月</option>
+                    <option value="05">5月</option>
+                    <option value="06">6月</option>
+                    <option value="07">7月</option>
+                    <option value="08">8月</option>
+                    <option value="09">9月</option>
+                    <option value="10">10月</option>
+                    <option value="11">11月</option>
+                    <option value="12">12月</option>
+                </select>
             </div>
 
             <div class="grid grid-cols-2 gap-3 mb-6">
@@ -277,10 +291,11 @@
         
         const today = new Date().toISOString().split('T')[0];
         const dateInput = document.getElementById('recordDate');
-        const filterInput = document.getElementById('statsDateFilter');
-        
+
         if(dateInput) dateInput.value = today;
-        if(filterInput) filterInput.value = today.substring(0, 7);
+        // 统计页月份下拉默认当月（年份选项随数据由 populateStatsYearSelect 动态刷新）
+        const monthEl = document.getElementById('statsMonthFilter');
+        if (monthEl) monthEl.value = String(new Date().getMonth() + 1).padStart(2, '0');
         
         selectedDate = today;
         
@@ -897,17 +912,40 @@
         totalLabel.innerText = `¥${dayTotal.toFixed(2)}`;
     }
 
+    // 统计页：从课时记录与当前年份汇总年份下拉，保留当前选择
+    // 已选的年份即使当月没有记录也保留在选项里，避免切到空年份时被弹回有数据的年份
+    function populateStatsYearSelect(yearEl) {
+        if (!yearEl) return;
+        const prev = yearEl.value;
+        const years = new Set([new Date().getFullYear()]);
+        (data.records || []).forEach(r => {
+            if (r.date && r.date.length >= 4) years.add(Number(r.date.substring(0, 4)));
+        });
+        if (prev && /^\d{4}$/.test(String(prev))) years.add(Number(prev));
+        const sorted = Array.from(years).sort((a, b) => b - a);
+        yearEl.innerHTML = sorted.map(y => `<option value="${y}">${y} 年</option>`).join('');
+        yearEl.value = prev && sorted.map(String).includes(String(prev)) ? prev : String(sorted[0]);
+    }
+
     function renderStats() {
         const typeEl = document.getElementById('statsPeriodType');
-        const filterEl = document.getElementById('statsDateFilter');
-        if(!typeEl || !filterEl) return;
+        const yearEl = document.getElementById('statsYearFilter');
+        const monthEl = document.getElementById('statsMonthFilter');
+        if(!typeEl || !yearEl) return;
+
+        populateStatsYearSelect(yearEl);
 
         const type = typeEl.value;
-        const filterVal = filterEl.value; 
-        if (!filterVal) return;
+        const year = yearEl.value;
+        if (!year) return;
+
+        // 按年统计时月份下拉置灰（不影响已选值）
+        if (monthEl) monthEl.disabled = (type !== 'month');
+
+        const month = monthEl ? monthEl.value : '01';
+        const filterVal = `${year}-${month}`;
 
         let filteredRecords = [];
-        const [year, month] = filterVal.split('-');
 
         if (type === 'month') {
             filteredRecords = data.records.filter(r => r.date.startsWith(filterVal));
