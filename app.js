@@ -30,9 +30,20 @@ SystemRouter.system().on('value', (snap) => {
     }
 });
 
+let activeYearListeners = []; // 当前学年已绑定的监听器，切换学年时先卸载再重绑，避免监听器累积
+
 function bindActiveYearListeners() {
     const year = SystemRouter.activeYear;
-    
+
+    // 先卸载上一学年绑定的监听器，否则每次切换都会多一套，导致重复渲染、跨学年公告串台
+    activeYearListeners.forEach(({ ref, handler }) => ref.off('value', handler));
+    activeYearListeners = [];
+
+    function bind(ref, handler) {
+        ref.on('value', handler);
+        activeYearListeners.push({ ref, handler });
+    }
+
     let currentNoticeText = "";
     let currentNoticeImgHtml = "";
 
@@ -51,19 +62,19 @@ function bindActiveYearListeners() {
         board.style.display = 'block';
     }
 
-    SystemRouter.getSettingsRef(year).child('notice').on('value', (snapshot) => {
+    bind(SystemRouter.getSettingsRef(year).child('notice'), (snapshot) => {
         const notice = snapshot.val();
         currentNoticeText = (notice && notice.trim() !== "") ? notice : "";
         renderFullNoticeBoard();
     });
 
-    SystemRouter.getSettingsRef(year).child('noticeImage').on('value', (snapshot) => {
+    bind(SystemRouter.getSettingsRef(year).child('noticeImage'), (snapshot) => {
         const imgBase64 = snapshot.val();
         currentNoticeImgHtml = imgBase64 ? `<br><img src="${imgBase64}" style="max-width:100%; height:auto; border-radius:6px; margin-top:10px; display:block; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">` : "";
         renderFullNoticeBoard();
     });
 
-    SystemRouter.getSettingsRef(year).child('deadline').on('value', (snapshot) => {
+    bind(SystemRouter.getSettingsRef(year).child('deadline'), (snapshot) => {
         const deadline = snapshot.val();
         let deadlineHint = document.getElementById('deadline-hint');
         if (!deadlineHint) {
@@ -73,7 +84,7 @@ function bindActiveYearListeners() {
             const formEl = document.getElementById('booking-form');
             if (formEl) formEl.parentNode.insertBefore(deadlineHint, formEl);
         }
-        
+
         if (deadline && !isNaN(new Date(deadline).getTime()) && new Date() > new Date(deadline)) {
             isDeadlined = true;
             document.getElementById('booking-form').style.display = 'none';
@@ -85,7 +96,7 @@ function bindActiveYearListeners() {
         }
     });
 
-    SystemRouter.getSlotsRef(year).on('value', (snapshot) => {
+    bind(SystemRouter.getSlotsRef(year), (snapshot) => {
         if (isDeadlined) return;
         const slots = snapshot.val();
         const container = document.getElementById('slots-container');
@@ -106,7 +117,7 @@ function bindActiveYearListeners() {
         sortedSlots.forEach(item => {
             const div = document.createElement('div');
             div.className = `slot-item ${item.data.reserved ? 'disabled' : ''}`;
-            
+
             const parsed = TimeParser.parseRawText(item.data.time, SystemRouter.activeYear);
             const displayTime = parsed ? parsed.formattedSlotText : item.data.time;
 

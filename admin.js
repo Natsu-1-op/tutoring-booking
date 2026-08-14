@@ -6,7 +6,8 @@
     let resCollapseState = {};
     let reservationsData = [];
     let viewingYear = "2026";
-    const GROUP_CUTOFF = new Date('2026-07-26T00:00:00+08:00').getTime(); 
+    // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
+    const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
 
     let currentActiveSlotsRefMemory = null;
     let currentActiveReservationsRefMemory = null;
@@ -273,7 +274,7 @@
                     if (lessonTs === null && r.timestamp) {
                         lessonTs = new Date(r.timestamp).getTime();
                     }
-                    groupKey = (lessonTs !== null && lessonTs >= GROUP_CUTOFF) ? '当前排课' : '历史归档';
+                    groupKey = (lessonTs !== null && lessonTs >= getGroupCutoff()) ? '当前排课' : '历史归档';
                 }
 
                 if (!resGroups[groupKey]) resGroups[groupKey] = [];
@@ -715,11 +716,11 @@
 
     function setDeadline() {
         const d = document.getElementById('deadline-input').value; if (!d) return alert('请选择时间');
-        SystemRouter.getSettingsRef(viewingYear).update({ deadline: d }).then(() => alert('截止时间保存成功！'));
+        SystemRouter.getSettingsRef(viewingYear).update({ deadline: d }).catch(() => alert('保存失败，请重试。'));
     }
     function setCode() {
         const c = document.getElementById('code-input').value.trim(); if (!c) return alert('口令不能为空');
-        SystemRouter.getSettingsRef(viewingYear).update({ accessCode: c }).then(() => alert('口令修改成功！'));
+        SystemRouter.getSettingsRef(viewingYear).update({ accessCode: c }).catch(() => alert('保存失败，请重试。'));
     }
 
     window.destroyCurrentYearData = function() {
@@ -802,7 +803,7 @@
                 const backupYears = Object.keys(parsed.years || {});
                 const hasSystem = parsed.system !== undefined && parsed.system !== null;
                 if (backupYears.length === 0 && !hasSystem) return alert('备份文件中没有可还原的数据。');
-                if (!confirm(`⚠️ 还原将覆盖数据库中当前的 system 与全部学年数据（备份含 ${backupYears.length} 个学年），不可撤销！\n\n确定还原？`)) return;
+                if (!confirm(`还原将覆盖数据库中当前的 system 与全部学年数据（备份含 ${backupYears.length} 个学年），不可撤销！\n\n确定还原？`)) return;
 
                 db.ref('years').once('value').then(ySnap => {
                     const jobs = [];
@@ -815,7 +816,7 @@
                     if (hasSystem) jobs.push(db.ref('system').set(parsed.system));
                     return Promise.all(jobs);
                 }).then(() => {
-                    alert(`还原成功！已恢复 ${backupYears.length} 个学年${hasSystem ? ' 及系统设置' : ''}。`);
+                    alert('还原完成。');
                 }).catch(err => alert('还原失败：' + err.message));
             } catch (err) {
                 alert('解析失败：' + err.message);
@@ -931,13 +932,29 @@
             updates[`years/${viewingYear}/reservations/${key}/status`] = newStatus;
         });
 
-        db.ref().update(updates).then(() => {
-            SystemRouter.getLogsRef(viewingYear).push({
-                action: `批量修改 ${checked.length} 条记录状态为 [${statusLabels[newStatus]}]`,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
+        // 批量改为已取消时，同步释放对应排班 slot（与单条取消行为保持一致）
+        const slotReleases = [];
+        if (newStatus === 'canceled') {
+            checked.forEach(cb => {
+                const key = cb.dataset.key;
+                slotReleases.push(
+                    SystemRouter.getReservationsRef(viewingYear).child(key).once('value').then(snap => {
+                        const r = snap.val();
+                        if (r && r.slotId) updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = false;
+                    })
+                );
             });
-            document.getElementById('batch-target-status').value = '';
-        }).catch(() => { alert('操作失败，请重试。'); });
+        }
+
+        Promise.all(slotReleases).then(() => {
+            db.ref().update(updates).then(() => {
+                SystemRouter.getLogsRef(viewingYear).push({
+                    action: `批量修改 ${checked.length} 条记录状态为 [${statusLabels[newStatus]}]`,
+                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                });
+                document.getElementById('batch-target-status').value = '';
+            }).catch(() => { alert('操作失败，请重试。'); });
+        }).catch(() => { alert('读取预约信息失败，请重试。'); });
     }
 
     // 绑定 checkbox 变化和批量按钮
@@ -963,12 +980,12 @@
         const updates = {};
         updates[`years/${viewingYear}/reservations/${resKey}/status`] = newStatus;
 
-        // 如果改为已取消，释放排班 slot
-        if (newStatus === 'canceled') {
+        // 改为已取消：释放排班 slot；从已取消改回其他状态：重新占用 slot
+        if (newStatus === 'canceled' || oldStatus === 'canceled') {
             SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snap => {
                 const r = snap.val();
                 if (r && r.slotId) {
-                    updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = false;
+                    updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = newStatus !== 'canceled';
                 }
                 applyStatusUpdate();
             }).catch(() => { alert('读取预约信息失败，请重试。'); });

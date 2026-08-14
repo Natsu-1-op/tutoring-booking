@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
 SystemRouter.system().once('value', snap => {
     const sys = snap.val();
     if (sys && sys.activeYear) SystemRouter.activeYear = sys.activeYear;
+    loadAiConfig(); // activeYear 就绪后再读 AI 配置，避免固定读到 2026 学年
 });
 
 function executeManualGateAuth() {
@@ -189,7 +190,6 @@ document.getElementById('reimport-master-to-edit').onchange = function(e) {
             document.getElementById('builder-list-container').innerHTML = "";
             qCount = 0;
             oldMaster.questions.forEach(q => { addQ(q); });
-            alert(`试卷数据重载成功！`);
         } catch (err) { alert("读取失败！"); }
     }; r.readAsText(file);
 };
@@ -378,7 +378,7 @@ function getAiConfigRef() {
     return db.ref(`years/${year}/settings/aiConfig`);
 }
 
-(function loadAiConfig() {
+function loadAiConfig() {
     // URL 和模型从 Firebase 加载
     getAiConfigRef().once('value').then(snap => {
         const v = snap.val();
@@ -416,7 +416,7 @@ function getAiConfigRef() {
         const ocrKeyEl = document.getElementById('ai-ocr-key');
         if (ocrKeyEl && aiConfig.ocrKey) ocrKeyEl.value = aiConfig.ocrKey;
     }
-})();
+}
 
 // 保存 AI 配置
 function saveAiConfig() {
@@ -440,16 +440,12 @@ function saveAiConfig() {
     if (aiConfig.ocrModel && aiConfig.ocrUrl && !aiConfig.ocrKey) {
         return alert('OCR API 地址已填写但 Key 为空：请同时填写 OCR Key；若与主配置同一家，可将 OCR 地址留空以复用上方配置。');
     }
-    // OCR 填了模型但地址留空 → 复用主地址，明确告知
-    if (aiConfig.ocrModel && !aiConfig.ocrUrl && aiConfig.url) {
-        alert('提示：OCR 地址留空，将复用上方主配置地址「' + aiConfig.url + '」。若该地址不是支持所选 OCR 模型的服务商，OCR 会失败，请填入对应 API 地址。');
-    }
-
     // URL 和模型存 Firebase，Key 只存 localStorage（加密）
     const publicConfig = { url: aiConfig.url, model: aiConfig.model, ocrUrl: aiConfig.ocrUrl, ocrModel: aiConfig.ocrModel, directVision: aiConfig.directVision, reasoningModel: aiConfig.reasoningModel };
     getAiConfigRef().set(publicConfig).then(() => {
         localStorage.setItem('ai_key_enc', encryptKey(aiConfig.key));
         if (aiConfig.ocrKey) localStorage.setItem('ai_ocr_key_enc', encryptKey(aiConfig.ocrKey));
+        else localStorage.removeItem('ai_ocr_key_enc'); // 清空 OCR Key 时需同步移除旧值，否则刷新后旧 Key 仍生效
         document.getElementById('ai-config-status').textContent = '已保存（Key 仅存本机）';
         setTimeout(() => { document.getElementById('ai-config-status').textContent = ''; }, 2500);
     }).catch((err) => { alert('保存失败: ' + (err.message || err)); });
@@ -732,25 +728,28 @@ async function gradeAllWithAI() {
     btn.textContent = '批改中...';
     btn.disabled = true;
 
-    for (let i = 0; i < masterPaper.questions.length; i++) {
-        btn.textContent = `批改中 ${i + 1}/${masterPaper.questions.length}...`;
-        // 切换到单题模式以便看到每道题
-        if (currentGradingViewMode !== 'single') {
-            document.getElementById('mode-btn-single').click();
+    try {
+        for (let i = 0; i < masterPaper.questions.length; i++) {
+            btn.textContent = `批改中 ${i + 1}/${masterPaper.questions.length}...`;
+            // 切换到单题模式以便看到每道题
+            if (currentGradingViewMode !== 'single') {
+                document.getElementById('mode-btn-single').click();
+            }
+            navigateSingleQTo(i);
+
+            const result = await gradeQuestionWithAI(i);
+            showAIFeedback(i, result);
+
+            // 请求间隔，降低限流概率（智谱免费模型限流较严）
+            await new Promise(r => setTimeout(r, 2500));
         }
-        navigateSingleQTo(i);
-
-        const result = await gradeQuestionWithAI(i);
-        showAIFeedback(i, result);
-
-        // 请求间隔，降低限流概率（智谱免费模型限流较严）
-        await new Promise(r => setTimeout(r, 2500));
+        alert('AI 批改完成。');
+    } finally {
+        // 无论成功还是中途异常都复位批改状态，避免卡死在"批改中"
+        btn.textContent = origText;
+        btn.disabled = false;
+        aiGradingBusy = false;
     }
-
-    btn.textContent = origText;
-    btn.disabled = false;
-    aiGradingBusy = false;
-    alert('AI 批改全部完成！请逐一检查并调整分数后导出。');
 }
 
 // 单题跳转（用于 AI 批改逐题展示）
@@ -769,6 +768,8 @@ document.getElementById('load-master').onchange = function(e) {
     r.onload = function(evt) {
         masterPaper = JSON.parse(evt.target.result);
         document.getElementById('student-file-zone').style.display = 'block';
+        // 先导入母卷、后导入答案时，答案加载处已渲染；若先导入答案再导入母卷，这里补渲染
+        if (studentPaper) renderGradingInterface();
     }; r.readAsText(file);
 };
 
@@ -1075,7 +1076,6 @@ function saveStudentScoreAndPackage() {
             paperTitle: masterPaper.paperTitle
         });
         renderGlobalScoreSummaryTable();
-        alert(`保存完成，打分包已导出。`);
     }).catch(() => { alert('保存失败，请检查网络后重试。'); });
 }
 
@@ -1091,19 +1091,35 @@ function renderGlobalScoreSummaryTable() {
     document.getElementById('summary-zone').style.display = classResults.length > 0 ? 'block' : 'none';
 }
 
+// 汇总表记录对应的云端排名节点（与 saveStudentScoreAndPackage 相同的路径编码）
+function rankingRefFor(record) {
+    const safePaperKey = encodeURIComponent(record.paperTitle).replace(/\./g, '%2E');
+    const safeStudentKey = encodeURIComponent(record.name).replace(/\./g, '%2E');
+    return db.ref(`examRankings/${safePaperKey}/${safeStudentKey}`);
+}
+
 window.manuallyOverrideTotalScore = function(idx) {
     const oldS = classResults[idx].score;
     const newS = prompt(`请输入 ` + classResults[idx].name + ` 的最新总分：`, oldS);
     if (newS !== null && !isNaN(parseFloat(newS))) {
         classResults[idx].score = parseFloat(newS);
         renderGlobalScoreSummaryTable();
+        // 同步云端排名，避免汇总表与排名页分数分叉
+        const r = classResults[idx];
+        rankingRefFor(r).set({ name: r.name, paperTitle: r.paperTitle, time: r.time, score: parseFloat(newS) })
+            .catch(() => alert('总分已修改，但同步到云端排名失败（请检查网络）。'));
     }
 };
 
 window.removeRecordFromSummaryTable = function(idx) {
     if (confirm(`确定要删除该记录吗？`)) {
+        const removed = classResults[idx];
         classResults.splice(idx, 1);
         renderGlobalScoreSummaryTable();
+        // 同步删除云端排名
+        if (removed) {
+            rankingRefFor(removed).remove().catch(() => alert('记录已从本地列表移除，但云端排名删除失败（请检查网络）。'));
+        }
     }
 };
 

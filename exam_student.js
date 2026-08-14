@@ -416,6 +416,8 @@ window.removeImg = function(qId) {
 function startCountUpTimer() {
     const timerEl = document.getElementById('exam-timer');
     const endTimestamp = new Date(examPaperData.endTime).getTime();
+    // 先清理旧计时器，防止双击「进入考试」等重复进入导致双计时器（耗时 2 倍速累加）
+    if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
         if (new Date().getTime() >= endTimestamp) {
             clearInterval(timerInterval);

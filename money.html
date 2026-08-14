@@ -166,7 +166,7 @@
                 </div>
             </div>
             <div class="bg-white rounded-lg shadow-sm p-4">
-                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。若当时约课的时间填错了：用 ✎ 修改后再导入，或用 🗑 忽略（可恢复）。修改后若与账本里已入账的课时时间重合/相近，会标红/标黄提示并默认跳过（防重复计费）。课时数据加密同步到云端（学生端只能看到密文）；云端按学年独立存放，仅同步当前学年，其他年份只留本地。</p>
+                <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。时间填错可修改后导入或忽略（可恢复）；与已入账课时时间重合会标红提示并默认跳过（防重复计费）。课时数据加密同步到云端，按学年独立存放。</p>
                 <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
                 <div id="pendingFeeList" class="space-y-2"></div>
@@ -267,6 +267,9 @@
                 const parsed = JSON.parse(stored);
                 if (Array.isArray(parsed.students)) data.students = parsed.students;
                 if (Array.isArray(parsed.records)) data.records = parsed.records;
+                // 时间修改记录与已忽略时间段也要从本地恢复，否则刷新即丢（云端只兜底）
+                if (parsed.lessonOverrides && typeof parsed.lessonOverrides === 'object') data.lessonOverrides = parsed.lessonOverrides;
+                if (Array.isArray(parsed.dismissedLessons)) data.dismissedLessons = parsed.dismissedLessons;
             }
         } catch (e) {
             console.error("Data corruption detected, resetting data to prevent crash.", e);
@@ -580,7 +583,7 @@
                     saveData();
                     let warnMsg = "";
                     if (noProfileStudents.size > 0) {
-                        warnMsg = `\n\n⚠️ 以下 ${noProfileStudents.size} 名学生尚未在「管理学生」中建档，已按 ¥0/小时 导入，请及时设置课时费：\n  ` + Array.from(noProfileStudents).join('、');
+                        warnMsg = `\n\n以下 ${noProfileStudents.size} 名学生尚未在「管理学生」中建档，已按 ¥0/小时 导入，请及时设置课时费：\n  ` + Array.from(noProfileStudents).join('、');
                     }
                     alert(`约课记账包对接成功！\n成功增量导入: ${insertCount} 条高精课时\n自动去重过滤: ${skipCount} 条重复项${warnMsg}`);
                     
@@ -1151,7 +1154,7 @@ async function forceUploadCloud() {
     }
     if (!confirm(`确定将本机 ${activeYear} 年的账本一键上传到云端吗？\n（仅上传 ${activeYear} 年数据，会以本机数据覆盖该年云端，包含 ${slice.students.length} 名学生、${slice.records.length} 条记录；其他年份只留本地）`)) return;
     const ok = await pushCloud();
-    if (ok) alert(`✓ 已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
+    if (ok) alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
 }
 
 // 判断某条云端记录是否本地已存在（按 sourceId / id / 日期+姓名+课时 三元组）
@@ -1182,7 +1185,7 @@ function renderYearSummary() {
     const yearsSet = new Set((data.records || []).map(r => String(r.date || '').slice(0, 4)).filter(y => /^\d{4}$/.test(y)));
     if (yearsSet.size === 0) { el.innerHTML = ''; return; }
     const years = [...yearsSet].sort();
-    el.innerHTML = '📅 本机账本涵盖年份：' + years.map(y => y === activeYear ? `<b>${y}（当前同步年）</b>` : y).join('、') + ' · 云端仅同步当前学年，其他年份只留本地';
+    el.innerHTML = '本机账本涵盖年份：' + years.map(y => y === activeYear ? `<b>${y}（当前同步年）</b>` : y).join('、') + ' · 云端仅同步当前学年，其他年份只留本地';
 }
 
 async function pullCloud() {
@@ -1203,7 +1206,14 @@ async function pullCloud() {
         }
         if (!ensureFeePassphrase()) return;
         const cloudData = await decryptFeeData(vault.cipher);
-        // 合并（并集去重，不覆盖本地独有数据）
+        // 本地比云端新：整体覆盖云端（本地已删的流水、改过的时间得以传播），
+        // 不做并集合并——否则云端残留的旧记录会被合并回来，删除被撤销。
+        if ((data.updatedAt || 0) > (vault.updatedAt || 0)) {
+            pushCloud();
+            renderYearSummary();
+            return;
+        }
+        // 云端较新或相同：并集合并（去重，不覆盖本地独有数据）
         let changed = false;
         if (cloudData && Array.isArray(cloudData.records)) {
             (cloudData.records || []).forEach(rc => {
@@ -1215,14 +1225,25 @@ async function pullCloud() {
                 if (sc && sc.name && !data.students.some(s => s.name === sc.name)) { data.students.push(sc); changed = true; }
             });
         }
+        // 时间修改记录与已忽略时间段同样合并（云推送含这两项，拉取时不能丢）
+        data.lessonOverrides = data.lessonOverrides || {};
+        data.dismissedLessons = data.dismissedLessons || [];
+        if (cloudData && typeof cloudData.lessonOverrides === 'object') {
+            Object.keys(cloudData.lessonOverrides).forEach(k => {
+                if (k && !data.lessonOverrides[k]) { data.lessonOverrides[k] = cloudData.lessonOverrides[k]; changed = true; }
+            });
+        }
+        if (cloudData && Array.isArray(cloudData.dismissedLessons)) {
+            (cloudData.dismissedLessons || []).forEach(d => {
+                if (d && d.resKey && !data.dismissedLessons.some(x => x.resKey === d.resKey)) { data.dismissedLessons.push(d); changed = true; }
+            });
+        }
         if (changed) {
             _applyingCloud = true;
             saveData();
             _applyingCloud = false;
             showToast(`已合并云端 ${activeYear} 年账本到本地`);
         }
-        // 本地较新时反哺云端
-        if ((data.updatedAt || 0) > (vault.updatedAt || 0)) pushCloud();
         renderYearSummary();
     } catch (e) {
         console.error('云端拉取失败', e);
@@ -1303,7 +1324,7 @@ async function refreshPendingList() {
     listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
     try {
         const ok = await ensureCloudReady();
-        if (!ok) { statusEl.textContent = '⚠️ 无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
+        if (!ok) { statusEl.textContent = '无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
         const snap = await db.ref(`years/${activeYear}/reservations`).once('value');
         const res = snap.val() || {};
         pendingLessons = [];
@@ -1335,7 +1356,7 @@ async function refreshPendingList() {
         renderYearSummary();
     } catch (e) {
         console.error(e);
-        statusEl.textContent = '⚠️ 读取失败：' + (e.message || e);
+        statusEl.textContent = '读取失败：' + (e.message || e);
         listEl.innerHTML = '';
     }
 }
@@ -1346,7 +1367,7 @@ function renderPendingList() {
     if (!listEl) return;
     listEl.innerHTML = '';
     if (pendingLessons.length === 0) {
-        listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">没有待入账的已完成预约 🎉</div>';
+        listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">没有待入账的已完成预约</div>';
         btn.textContent = '导入选中 (0)';
         btn.disabled = true;
         renderDismissed();
@@ -1364,8 +1385,8 @@ function renderPendingList() {
                 <div>
                     <div class="font-bold text-gray-700 text-sm">${p.date} ${p.studentName}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
                     <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
-                    ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">⚠️ ' + exact.map(c => c.label).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
-                    ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">⚠️ ' + near.map(c => c.label).join('；') + '</div>' : ''}
+                    ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">重复：' + exact.map(c => c.label).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
+                    ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">相近：' + near.map(c => c.label).join('；') + '</div>' : ''}
                 </div>
             </label>
             <div class="flex space-x-1">
@@ -1400,7 +1421,7 @@ function importSelectedPending() {
     if (conflictLines.length > 0) {
         const shown = conflictLines.slice(0, 10).join('\n');
         const more = conflictLines.length > 10 ? `\n…还有 ${conflictLines.length - 10} 条` : '';
-        if (!confirm(`⚠️ 以下 ${conflictLines.length} 条与已入账记录时间重合或相近，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用 ✎ 修改时间或 🗑 忽略。确定仍要导入这 ${checked.length} 条吗？`)) return;
+        if (!confirm(`以下 ${conflictLines.length} 条与已入账记录时间重合或相近，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用「修改时间」或「忽略」处理。确定仍要导入这 ${checked.length} 条吗？`)) return;
     }
     const noProfile = new Set();
     checked.forEach(p => {
@@ -1421,8 +1442,7 @@ function importSelectedPending() {
     });
     saveData();
     let warn = "";
-    if (noProfile.size > 0) warn = `\n\n⚠️ 以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
-    showToast(`已入账 ${checked.length} 条`);
+    if (noProfile.size > 0) warn = `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
     alert(`约课入账成功！已导入 ${checked.length} 条。${warn}`);
     refreshPendingList();
 }
@@ -1462,8 +1482,45 @@ function saveEditPendingLesson(i) {
     // 修改后的时间可能与已入账记录/其他待入账重合，重新检测
     pendingLessons.forEach(x => { x.conflicts = findLessonConflicts(x, true); });
     saveData(); // 修改随账本加密同步云端
-    showToast('已修改，导入时将使用新时间');
+    showToast('已修改');
     renderPendingList();
+    syncReservationTime(p); // 同步修改约课后台的预约时间与时长
+}
+
+// 修改时间段时同步更新约课后台的预约记录（时间、时长），
+// 让学生端历史记录与管理端预约记录都显示修正后的时间，而不是只改了本账本
+async function syncReservationTime(p) {
+    if (!db || !activeYear || !p.resKey) return;
+    try {
+        const snap = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
+        const r = snap.val();
+        if (!r) return;
+        // 取原开始时间：优先 slotSnapshot，其次从 time 字符串解析
+        let startTime = (r.slotSnapshot && r.slotSnapshot.startTime) || null;
+        if (!startTime && r.time) {
+            const m = String(r.time).match(/(\d{1,2}):(\d{2})/);
+            if (m) startTime = `${String(+m[1]).padStart(2, '0')}:${m[2]}`;
+        }
+        if (!startTime) return;
+        // 结束时间 = 开始时间 + 修正后的课时长
+        const [sh, sm] = startTime.split(':').map(Number);
+        const totalMin = sh * 60 + sm + Math.round(Number(p.hours) * 60);
+        const eh = Math.floor((totalMin % (24 * 60)) / 60);
+        const em = totalMin % 60;
+        const endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+        const md = String(p.date).split('-'); // YYYY-MM-DD
+        const newTime = `${+md[1]}/${+md[2]} ${startTime}-${endTime}`; // 与排班时间字符串格式一致
+        await db.ref(`years/${activeYear}/reservations/${p.resKey}`).update({
+            time: newTime,
+            'slotSnapshot/date': p.date,
+            'slotSnapshot/startTime': startTime,
+            'slotSnapshot/endTime': endTime
+        });
+        showToast('已修改，后台预约时间已同步更新');
+    } catch (e) {
+        console.error('同步后台预约时间失败', e);
+        showToast('后台预约时间同步失败：' + (e.message || e) + '（本地修改仍生效）');
+    }
 }
 
 function dismissPendingLesson(i) {
