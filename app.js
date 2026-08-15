@@ -16,6 +16,35 @@ let isSubmitting = false;
     }
 })();
 
+// 课时总量/已占用时长缓存，用于学生端显示剩余课时
+let hoursCache = { totals: {}, used: {} };
+
+function computeUsedHours(reservations) {
+    const used = {};
+    if (!reservations) return used;
+    Object.values(reservations).forEach(r => {
+        if (!r || !r.nickname || r.status === 'canceled') return;
+        used[r.nickname] = (used[r.nickname] || 0) + TimeParser.calcHours(r.time);
+    });
+    return used;
+}
+
+function updateHoursHint() {
+    const el = document.getElementById('hours-hint');
+    if (!el) return;
+    const nickname = (document.getElementById('nickname').value || '').trim();
+    if (!nickname) { el.style.display = 'none'; return; }
+    const total = hoursCache.totals[nickname];
+    if (total === undefined || total === null || Number(total) <= 0) { el.style.display = 'none'; return; }
+    const used = hoursCache.used[nickname] || 0;
+    const remaining = Math.max(0, Number(total) - used);
+    el.textContent = `我的总课时：${Number(total)} 小时，已约 ${used.toFixed(2)} 小时，剩余 ${remaining.toFixed(2)} 小时`;
+    el.style.display = 'block';
+}
+
+// 输入姓名时实时刷新剩余课时提示
+document.getElementById('nickname').addEventListener('input', updateHoursHint);
+
 SystemRouter.system().on('value', (snap) => {
     const sys = snap.val();
     if (sys && sys.activeYear) {
@@ -130,6 +159,18 @@ function bindActiveYearListeners() {
             container.appendChild(div);
         });
     });
+
+    // 课时总量与已占用时长监听，驱动学生端剩余课时提示
+    hoursCache.totals = {};
+    hoursCache.used = {};
+    bind(db.ref(`years/${year}/studentHours`), (snapshot) => {
+        hoursCache.totals = snapshot.val() || {};
+        updateHoursHint();
+    });
+    bind(SystemRouter.getReservationsRef(year), (snapshot) => {
+        hoursCache.used = computeUsedHours(snapshot.val());
+        updateHoursHint();
+    });
 }
 
 function showMessage(msg, isSuccess) {
@@ -200,41 +241,62 @@ function submitBooking() {
                         }
                     }
 
+                    // 计算该学生已占用的时长（未取消的预约合计），用于总时长上限校验
+                    let usedHours = 0;
+                    if (existing) {
+                        Object.values(existing).forEach(r => {
+                            if (r && r.status !== 'canceled') usedHours += TimeParser.calcHours(r.time);
+                        });
+                    }
+                    const slotHours = TimeParser.calcHours(parsedTimeObj.formattedSlotText);
+
                     // 通过所有校验，开始约课
-                    SystemRouter.getSettingsRef(year).child('accessCode').once('value').then((snapshot) => {
-                        if (accessCode !== (snapshot.val() || "123456")) {
-                            showMessage('预约口令错误！', false); resetBtn(); return;
-                        }
-
-                        SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
-                            if (slot && !slot.reserved && slot.status !== "hidden") {
-                                slot.reserved = true; return slot;
-                            }
-                            return;
-                        }, (err, committed) => {
-                            if (!committed) {
-                                showMessage('手慢了，该时间段已被约满！', false); resetBtn(); return;
+                    function proceedToBook() {
+                        SystemRouter.getSettingsRef(year).child('accessCode').once('value').then((snapshot) => {
+                            if (accessCode !== (snapshot.val() || "123456")) {
+                                showMessage('预约口令错误！', false); resetBtn(); return;
                             }
 
-                            const resKey = SystemRouter.getReservationsRef(year).push().key;
-                            const cancelSecureCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+                            SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
+                                if (slot && !slot.reserved && slot.status !== "hidden") {
+                                    slot.reserved = true; return slot;
+                                }
+                                return;
+                            }, (err, committed) => {
+                                if (!committed) {
+                                    showMessage('手慢了，该时间段已被约满！', false); resetBtn(); return;
+                                }
 
-                            SystemRouter.getReservationsRef(year).child(resKey).set({
-                                nickname: nickname, slotId: slotId, time: parsedTimeObj.formattedSlotText, status: "booked", cancelCode: cancelSecureCode,
-                                slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
-                            }).then(() => {
-                                SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                                // 记住姓名和口令
-                                try { localStorage.setItem('booking_last_inputs', JSON.stringify({ name: nickname, code: accessCode })); } catch(e) {}
-                                document.getElementById('nickname').value = ''; resetBtn();
-                                showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
-                                // 自动下载日历文件（含提前15分钟提醒）
-                                downloadICS(parsedTimeObj, cancelSecureCode);
-                            }).catch(() => {
-                                SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
-                                showMessage('网络异常，请重试！', false); resetBtn();
+                                const resKey = SystemRouter.getReservationsRef(year).push().key;
+                                const cancelSecureCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+
+                                SystemRouter.getReservationsRef(year).child(resKey).set({
+                                    nickname: nickname, slotId: slotId, time: parsedTimeObj.formattedSlotText, status: "booked", cancelCode: cancelSecureCode,
+                                    slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
+                                }).then(() => {
+                                    SystemRouter.getLogsRef(year).push({ action: `学生 [${nickname}] 预约成功: [${parsedTimeObj.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                                    // 记住姓名和口令
+                                    try { localStorage.setItem('booking_last_inputs', JSON.stringify({ name: nickname, code: accessCode })); } catch(e) {}
+                                    document.getElementById('nickname').value = ''; resetBtn();
+                                    showMessage(`预约成功！您的取消凭证码为:【 ${cancelSecureCode} 】, 查询记录时需要输入此凭证！`, true);
+                                    // 自动下载日历文件（含提前15分钟提醒）
+                                    downloadICS(parsedTimeObj, cancelSecureCode);
+                                }).catch(() => {
+                                    SystemRouter.getSlotsRef(year).child(slotId).update({ reserved: false });
+                                    showMessage('网络异常，请重试！', false); resetBtn();
+                                });
                             });
                         });
+                    }
+
+                    // 总时长上限校验：超过剩余时长则拦截
+                    db.ref(`years/${year}/studentHours/${nickname}`).once('value').then((hs) => {
+                        const total = hs.val();
+                        if (total !== null && total !== undefined && Number(total) > 0 && usedHours + slotHours > Number(total)) {
+                            showMessage(`预约拦截：该时段为 ${slotHours.toFixed(2)} 小时，您当前剩余课时仅 ${Math.max(0, Number(total) - usedHours).toFixed(2)} 小时，无法预约。`, false);
+                            resetBtn(); return;
+                        }
+                        proceedToBook();
                     });
                 });
         }).catch((err) => {

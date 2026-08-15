@@ -43,6 +43,9 @@
         .student-tag { display: inline-flex; align-items: center; background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; padding: 4px 10px; border-radius: 4px; margin-right: 8px; margin-bottom: 8px; font-size: 13px; }
         .student-tag-del { margin-left: 6px; color: #ff4d4f; cursor: pointer; font-weight: bold; }
         .student-tag-del:hover { color: #f5222d; }
+        .student-tag-hours { margin-left: 6px; color: #fa8c16; cursor: pointer; font-weight: 600; }
+        .student-tag-hours:hover { text-decoration: underline; }
+        .student-tag-hours.tag-hours-none { color: #bbb; font-weight: normal; }
         .whitelist-box { margin-top: 10px; background: #fff; padding: 12px; border-radius: 8px; min-height: 40px; border: 1px solid #e4e7ed; }
 
         /* 数据管理 */
@@ -167,8 +170,10 @@
                 <div style="border-top: 1px dashed #e2e8f0; padding-top: 12px; margin-top: 4px;">
                     <div class="control-panel" style="margin-bottom: 8px;">
                         <input type="text" id="new-student-name" placeholder="请输入准入同学姓名">
+                        <input type="number" id="new-student-hours" placeholder="总时长(小时)" min="0" step="0.5" style="width:130px;">
                         <button id="btn-add-student" class="admin-mini-btn" style="white-space: nowrap; background: #409eff; color: #fff;">添加</button>
                     </div>
+                    <div class="text-gray" style="font-size:12px; margin-bottom:8px;">总时长用于控制预约上限：同学约满该时长后无法再约。点名单里同学的 (XXh) 可修改或清除，未填则不限制。</div>
                     <div class="whitelist-box" id="admin-student-whitelist-container">正在调取名单...</div>
                 </div>
             </div>

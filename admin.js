@@ -15,6 +15,7 @@
     let currentActiveNoticeTextRefMemory = null;
     let currentActiveNoticeImgRefMemory = null;
     let currentActiveStudentListRefMemory = null;
+    let currentActiveStudentHoursRefMemory = null;
     let currentActiveDeadlineRefMemory = null;
     let currentActiveAccessCodeRefMemory = null;
 
@@ -116,15 +117,17 @@
         if (currentActiveNoticeTextRefMemory) currentActiveNoticeTextRefMemory.off();
         if (currentActiveNoticeImgRefMemory) currentActiveNoticeImgRefMemory.off();
         if (currentActiveStudentListRefMemory) currentActiveStudentListRefMemory.off();
+        if (currentActiveStudentHoursRefMemory) currentActiveStudentHoursRefMemory.off();
         if (currentActiveDeadlineRefMemory) currentActiveDeadlineRefMemory.off();
         if (currentActiveAccessCodeRefMemory) currentActiveAccessCodeRefMemory.off();
 
         currentActiveSlotsRefMemory = SystemRouter.getSlotsRef(viewingYear);
         currentActiveReservationsRefMemory = SystemRouter.getReservationsRef(viewingYear);
-        currentActiveLogsRefMemory = SystemRouter.getLogsRef(viewingYear).orderByChild('timestamp').limitToLast(60); 
+        currentActiveLogsRefMemory = SystemRouter.getLogsRef(viewingYear).orderByChild('timestamp').limitToLast(60);
         currentActiveNoticeTextRefMemory = SystemRouter.getSettingsRef(viewingYear).child('notice');
         currentActiveNoticeImgRefMemory = SystemRouter.getSettingsRef(viewingYear).child('noticeImage');
         currentActiveStudentListRefMemory = db.ref(`years/${viewingYear}/studentWhitelist`);
+        currentActiveStudentHoursRefMemory = db.ref(`years/${viewingYear}/studentHours`);
         currentActiveDeadlineRefMemory = SystemRouter.getSettingsRef(viewingYear).child('deadline');
         currentActiveAccessCodeRefMemory = SystemRouter.getSettingsRef(viewingYear).child('accessCode');
 
@@ -162,34 +165,77 @@
 
         loadSlotTemplates();
 
-        currentActiveStudentListRefMemory.on('value', (snapshot) => {
+        let currentStudentList = null;
+        let studentHoursCache = {};
+
+        function renderWhitelist() {
             const container = document.getElementById('admin-student-whitelist-container');
+            if (!container) return;
             container.innerHTML = '';
-            const list = snapshot.val();
-            if(!list) {
+            if (!currentStudentList || Object.keys(currentStudentList).length === 0) {
                 container.innerHTML = '<span class="text-gray" style="font-size:13px;">当前学年未录入准入学生，任何人都无法提交预约。</span>';
                 return;
             }
-            Object.keys(list).forEach(sId => {
-                const sName = list[sId];
+            Object.keys(currentStudentList).forEach(sId => {
+                const sName = currentStudentList[sId];
+                const total = studentHoursCache[sName];
+                const hasHours = total !== undefined && total !== null && Number(total) > 0;
+                const hoursText = `<span class="student-tag-hours ${hasHours ? '' : 'tag-hours-none'}" data-name="${escapeHtml(sName)}" title="点击修改总时长">(${hasHours ? Number(total) + 'h' : '未设'})</span>`;
                 const tag = document.createElement('span');
                 tag.className = 'student-tag';
-                tag.innerHTML = `<span>${escapeHtml(sName)}</span><span class="student-tag-del" data-id="${sId}" data-name="${escapeHtml(sName)}">×</span>`;
+                tag.innerHTML = `<span>${escapeHtml(sName)}</span>${hoursText}<span class="student-tag-del" data-id="${sId}" data-name="${escapeHtml(sName)}">×</span>`;
                 container.appendChild(tag);
             });
-            
+
             document.querySelectorAll('.student-tag-del').forEach(btn => {
                 btn.onclick = function() {
                     const id = this.dataset.id; const name = this.dataset.name;
                     if(confirm(`确定将 [${name}] 从当前学年准入名单中移除吗？`)) {
-                        db.ref(`years/${viewingYear}/studentWhitelist/${id}`).remove().then(() => {
+                        Promise.all([
+                            db.ref(`years/${viewingYear}/studentWhitelist/${id}`).remove(),
+                            db.ref(`years/${viewingYear}/studentHours/${name}`).remove()
+                        ]).then(() => {
                             SystemRouter.getLogsRef(viewingYear).push({
                                 action: `移除了准入学生：[${name}]`, timestamp: firebase.database.ServerValue.TIMESTAMP
+                            });
+                        }).catch(() => alert('移除失败，请重试。'));
+                    }
+                };
+            });
+
+            document.querySelectorAll('.student-tag-hours').forEach(span => {
+                span.onclick = function() {
+                    const name = this.dataset.name;
+                    const current = studentHoursCache[name];
+                    const raw = prompt(`设置 [${name}] 的总时长（小时），留空或填 0 表示不限制：`, (current !== undefined && current !== null && Number(current) > 0) ? current : '');
+                    if (raw === null) return;
+                    const v = parseFloat(raw);
+                    const hoursRef = db.ref(`years/${viewingYear}/studentHours/${name}`);
+                    if (isNaN(v) || v <= 0) {
+                        hoursRef.remove().then(() => {
+                            SystemRouter.getLogsRef(viewingYear).push({
+                                action: `清除了学生 [${name}] 的总时长限制`, timestamp: firebase.database.ServerValue.TIMESTAMP
+                            });
+                        });
+                    } else {
+                        hoursRef.set(v).then(() => {
+                            SystemRouter.getLogsRef(viewingYear).push({
+                                action: `设置学生 [${name}] 总时长为 ${v} 小时`, timestamp: firebase.database.ServerValue.TIMESTAMP
                             });
                         });
                     }
                 };
             });
+        }
+
+        currentActiveStudentHoursRefMemory.on('value', (snap) => {
+            studentHoursCache = snap.val() || {};
+            renderWhitelist();
+        });
+
+        currentActiveStudentListRefMemory.on('value', (snapshot) => {
+            currentStudentList = snapshot.val() || null;
+            renderWhitelist();
         });
 
         currentActiveSlotsRefMemory.on('value', (snapshot) => {
@@ -391,17 +437,25 @@
 
     function addNewStudentToWhitelist() {
         const input = document.getElementById('new-student-name'); const name = input.value.trim();
+        const hoursInput = document.getElementById('new-student-hours');
         if(!name) return alert('请输入名字！'); if(name.includes(',')) return alert('名字里不能带逗号！');
+        const hoursRaw = hoursInput ? hoursInput.value.trim() : '';
+        const parsedHours = hoursRaw === '' ? null : parseFloat(hoursRaw);
+        const validHours = parsedHours !== null && !isNaN(parsedHours) && parsedHours > 0;
 
         db.ref(`years/${viewingYear}/studentWhitelist`).once('value').then(snap => {
             const exist = snap.val() || {}; const isDup = Object.values(exist).some(v => v === name);
             if(isDup) return alert('该同学已经在名单中了！');
 
             db.ref(`years/${viewingYear}/studentWhitelist`).push(name).then(() => {
+                if (validHours) {
+                    db.ref(`years/${viewingYear}/studentHours/${name}`).set(parsedHours);
+                }
                 SystemRouter.getLogsRef(viewingYear).push({
-                    action: `新增准入白名单学生：[${name}]`, timestamp: firebase.database.ServerValue.TIMESTAMP
+                    action: `新增准入白名单学生：[${name}]${validHours ? `，总时长 ${parsedHours} 小时` : ''}`, timestamp: firebase.database.ServerValue.TIMESTAMP
                 });
                 input.value = '';
+                if (hoursInput) hoursInput.value = '';
             });
         });
     }
@@ -1106,6 +1160,8 @@
     document.getElementById('btn-clear-logs').onclick = clearOperationLogs;
     document.getElementById('btn-add-student').onclick = addNewStudentToWhitelist;
     document.getElementById('new-student-name').onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
+    const newStudentHoursInput = document.getElementById('new-student-hours');
+    if (newStudentHoursInput) newStudentHoursInput.onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
     document.getElementById('btn-export-all').onclick = exportAllDataJSON;
     document.getElementById('btn-restore-all').onclick = triggerRestoreFile;
 
