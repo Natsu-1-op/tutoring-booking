@@ -16,35 +16,6 @@ let isSubmitting = false;
     }
 })();
 
-// 课时总量/已占用时长缓存，用于学生端显示剩余课时
-let hoursCache = { totals: {}, used: {} };
-
-function computeUsedHours(reservations) {
-    const used = {};
-    if (!reservations) return used;
-    Object.values(reservations).forEach(r => {
-        if (!r || !r.nickname || r.status === 'canceled') return;
-        used[r.nickname] = (used[r.nickname] || 0) + TimeParser.calcHours(r.time);
-    });
-    return used;
-}
-
-function updateHoursHint() {
-    const el = document.getElementById('hours-hint');
-    if (!el) return;
-    const nickname = (document.getElementById('nickname').value || '').trim();
-    if (!nickname) { el.style.display = 'none'; return; }
-    const total = hoursCache.totals[nickname];
-    if (total === undefined || total === null || Number(total) <= 0) { el.style.display = 'none'; return; }
-    const used = hoursCache.used[nickname] || 0;
-    const remaining = Math.max(0, Number(total) - used);
-    el.textContent = `我的总课时：${Number(total)} 小时，已约 ${used.toFixed(2)} 小时，剩余 ${remaining.toFixed(2)} 小时`;
-    el.style.display = 'block';
-}
-
-// 输入姓名时实时刷新剩余课时提示
-document.getElementById('nickname').addEventListener('input', updateHoursHint);
-
 SystemRouter.system().on('value', (snap) => {
     const sys = snap.val();
     if (sys && sys.activeYear) {
@@ -158,18 +129,6 @@ function bindActiveYearListeners() {
             }
             container.appendChild(div);
         });
-    });
-
-    // 课时总量与已占用时长监听，驱动学生端剩余课时提示
-    hoursCache.totals = {};
-    hoursCache.used = {};
-    bind(db.ref(`years/${year}/studentHours`), (snapshot) => {
-        hoursCache.totals = snapshot.val() || {};
-        updateHoursHint();
-    });
-    bind(SystemRouter.getReservationsRef(year), (snapshot) => {
-        hoursCache.used = computeUsedHours(snapshot.val());
-        updateHoursHint();
     });
 }
 
@@ -368,6 +327,12 @@ function loadMyHistory() {
                 summaryHtml = `<div class="history-summary">已完成辅导累计：<b class="text-green">${completedHours.toFixed(2)} 小时</b></div>`;
             }
 
+            // 已占用课时（未取消的预约合计），用于剩余课时展示
+            let usedHours = 0;
+            list.forEach(item => {
+                if (item.data.status !== 'canceled') usedHours += TimeParser.calcHours(item.data.time);
+            });
+
             let listHtml = "";
             list.forEach(item => {
                 const r = item.data; const key = item.key;
@@ -406,8 +371,18 @@ function loadMyHistory() {
                     </div>`;
             });
 
-            if (list.length === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
-            else container.innerHTML = summaryHtml + listHtml;
+            // 剩余课时只在身份验证通过后读取并展示（避免输入姓名就泄露他人课时）
+            db.ref(`years/${SystemRouter.activeYear}/studentHours/${searchName}`).once('value').then((hs) => {
+                const total = hs.val();
+                let remainingHtml = '';
+                if (total !== null && total !== undefined && Number(total) > 0) {
+                    const remaining = Math.max(0, Number(total) - usedHours);
+                    remainingHtml = `<div class="history-summary">剩余课时：<b class="text-blue">${remaining.toFixed(2)} 小时</b><span class="text-gray" style="font-size:12px;">（总课时 ${Number(total)} 小时，已用 ${usedHours.toFixed(2)} 小时）</span></div>`;
+                }
+
+                if (list.length === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
+                else container.innerHTML = summaryHtml + remainingHtml + listHtml;
+            });
         }).catch((err) => {
             console.error('查询历史记录失败:', err);
             container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
