@@ -5,6 +5,7 @@
     let dateCollapseState = {};
     let resCollapseState = {};
     let reservationsData = [];
+    let studentHoursCache = {};
     let viewingYear = "2026";
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
     const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
@@ -166,7 +167,7 @@
         loadSlotTemplates();
 
         let currentStudentList = null;
-        let studentHoursCache = {};
+        studentHoursCache = {};
 
         function renderWhitelist() {
             const container = document.getElementById('admin-student-whitelist-container');
@@ -183,7 +184,7 @@
                 const hoursText = `<span class="student-tag-hours ${hasHours ? '' : 'tag-hours-none'}" data-name="${escapeHtml(sName)}" title="点击修改总时长">(${hasHours ? Number(total) + 'h' : '未设'})</span>`;
                 const tag = document.createElement('span');
                 tag.className = 'student-tag';
-                tag.innerHTML = `<span>${escapeHtml(sName)}</span>${hoursText}<span class="student-tag-del" data-id="${sId}" data-name="${escapeHtml(sName)}">×</span>`;
+                tag.innerHTML = `<span class="student-tag-name" data-name="${escapeHtml(sName)}" title="双击修改总时长">${escapeHtml(sName)}</span>${hoursText}<span class="student-tag-del" data-id="${sId}" data-name="${escapeHtml(sName)}">×</span>`;
                 container.appendChild(tag);
             });
 
@@ -204,28 +205,55 @@
             });
 
             document.querySelectorAll('.student-tag-hours').forEach(span => {
-                span.onclick = function() {
-                    const name = this.dataset.name;
-                    const current = studentHoursCache[name];
-                    const raw = prompt(`设置 [${name}] 的总时长（小时），留空或填 0 表示不限制：`, (current !== undefined && current !== null && Number(current) > 0) ? current : '');
-                    if (raw === null) return;
-                    const v = parseFloat(raw);
-                    const hoursRef = db.ref(`years/${viewingYear}/studentHours/${name}`);
-                    if (isNaN(v) || v <= 0) {
-                        hoursRef.remove().then(() => {
-                            SystemRouter.getLogsRef(viewingYear).push({
-                                action: `清除了学生 [${name}] 的总时长限制`, timestamp: firebase.database.ServerValue.TIMESTAMP
-                            });
-                        });
-                    } else {
-                        hoursRef.set(v).then(() => {
-                            SystemRouter.getLogsRef(viewingYear).push({
-                                action: `设置学生 [${name}] 总时长为 ${v} 小时`, timestamp: firebase.database.ServerValue.TIMESTAMP
-                            });
-                        });
-                    }
-                };
+                span.onclick = function() { editStudentHours(this.dataset.name); };
             });
+
+            document.querySelectorAll('.student-tag-name').forEach(span => {
+                span.ondblclick = function() { editStudentHours(this.dataset.name); };
+            });
+        }
+
+        // 修改同学总时长：双击名字或点 (XXh)，弹窗内显示历史课时供参考
+        function editStudentHours(name) {
+            const current = studentHoursCache[name];
+            const totalNow = (current !== undefined && current !== null && Number(current) > 0) ? Number(current) : 0;
+
+            // 从本学年预约记录缓存中统计该同学的已用/已完成课时
+            let usedHours = 0, completedHours = 0;
+            reservationsData.forEach(r => {
+                if (!r || r.nickname !== name || r.status === 'canceled') return;
+                const h = TimeParser.calcHours(r.time);
+                usedHours += h;
+                if (r.status === 'completed') completedHours += h;
+            });
+
+            const infoLines = [`当前总时长：${totalNow > 0 ? totalNow + ' 小时' : '未设置'}`];
+            if (usedHours > 0 || completedHours > 0) {
+                infoLines.push(`本学年已用：${usedHours.toFixed(2)} 小时${completedHours > 0 ? `（其中已完成 ${completedHours.toFixed(2)} 小时）` : ''}`);
+            } else {
+                infoLines.push('本学年暂无课时记录');
+            }
+
+            const raw = prompt(
+                `设置 [${name}] 的总时长（小时），留空或填 0 表示不限制：\n\n${infoLines.join('\n')}`,
+                totalNow > 0 ? totalNow : ''
+            );
+            if (raw === null) return;
+            const v = parseFloat(raw);
+            const hoursRef = db.ref(`years/${viewingYear}/studentHours/${name}`);
+            if (isNaN(v) || v <= 0) {
+                hoursRef.remove().then(() => {
+                    SystemRouter.getLogsRef(viewingYear).push({
+                        action: `清除了学生 [${name}] 的总时长限制`, timestamp: firebase.database.ServerValue.TIMESTAMP
+                    });
+                });
+            } else {
+                hoursRef.set(v).then(() => {
+                    SystemRouter.getLogsRef(viewingYear).push({
+                        action: `设置学生 [${name}] 总时长为 ${v} 小时`, timestamp: firebase.database.ServerValue.TIMESTAMP
+                    });
+                });
+            }
         }
 
         currentActiveStudentHoursRefMemory.on('value', (snap) => {
@@ -486,10 +514,13 @@
 
         const sorted = Object.entries(stats).sort((a, b) => b[1].completed - a[1].completed);
         let html = `<table style="width:100%; border-collapse:collapse; font-size:13px;">
-            <tr style="background:#f5f7fa;"><th>学生</th><th>已完成(h)</th><th>已确认</th><th>已预约</th><th>已取消</th><th>总次数</th></tr>`;
+            <tr style="background:#f5f7fa;"><th>学生</th><th>已完成/总时长(h)</th><th>已确认</th><th>已预约</th><th>已取消</th><th>总次数</th></tr>`;
         sorted.forEach(([name, s]) => {
+            const totalHours = studentHoursCache[name];
+            const hasTotal = totalHours !== undefined && totalHours !== null && Number(totalHours) > 0;
+            const completedCell = hasTotal ? `${s.completed.toFixed(2)}/${Number(totalHours)}` : `${s.completed.toFixed(2)}<span class="text-gray">/未设</span>`;
             html += `<tr><td><b>${escapeHtml(name)}</b></td>
-                <td><span class="text-green text-bold">${s.completed.toFixed(2)}</span></td>
+                <td><span class="text-green text-bold">${completedCell}</span></td>
                 <td>${s.confirmed}</td><td>${s.booked}</td>
                 <td class="text-gray">${s.canceled}</td><td>${s.total}</td></tr>`;
         });
