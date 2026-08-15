@@ -48,6 +48,32 @@ function triggerSaveStatusLight() {
     setTimeout(() => { light.classList.remove('show'); }, 1200);
 }
 
+function showWatermark(name) {
+    removeWatermark();
+    if (!name) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = 220;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(180, 110);
+    ctx.rotate(-20 * Math.PI / 180);
+    ctx.font = 'bold 22px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, 0, 0);
+    const layer = document.createElement('div');
+    layer.id = 'exam-watermark-layer';
+    layer.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;pointer-events:none;' +
+        'background-image:url("' + canvas.toDataURL('image/png') + '");background-repeat:repeat;';
+    document.body.appendChild(layer);
+}
+
+function removeWatermark() {
+    const oldLayer = document.getElementById('exam-watermark-layer');
+    if (oldLayer) oldLayer.remove();
+}
+
 function triggerLiveAntiDisasterBackup() {
     if (!examPaperData || !studentNameVerified) return;
     const backupPayload = {
@@ -244,6 +270,7 @@ function startReviewPackageWorkspace() {
         MathJax.typesetPromise([wrapper]).catch(() => {});
     }
     document.getElementById('btn-prev').style.visibility = 'hidden';
+    showWatermark(activeReviewPackageData.studentName);
     updateBtnState();
 }
 
@@ -308,6 +335,7 @@ function initExamEngine(isRestoreFromBackup) {
 
     startCountUpTimer();
     document.getElementById('btn-prev').style.visibility = 'hidden';
+    showWatermark(studentNameVerified);
     updateBtnState();
 }
 
@@ -487,6 +515,7 @@ function triggerManualSubmit(isForceSystemTimeout) {
         examPaperData = null; studentNameVerified = "";
         currentQuestionIndex = 0; studentAnswers = {}; totalElapsedSeconds = 0;
         currentTargetQuestionId = null;
+        removeWatermark();
 
         document.getElementById('questions-wrapper').innerHTML = "";
         document.getElementById('input-paper-json').value = "";
