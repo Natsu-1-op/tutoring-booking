@@ -4,10 +4,11 @@
 
 ## 功能概览
 
-- **学生端** (`index.html`)：查看公告、约课、查看历史预约记录
-- **管理后台** (`admin.html`)：排班管理、预约审批、白名单管理、数据导出
-- **模拟考试** (`exam_student.html`)：学生导入试卷并作答交卷
-- **命题评卷** (`exam_teacher.html`)：教师出题、评卷打分、成绩排名
+- **学生端** (`index.html`)：查看公告、约课、预约凭证、历史预约记录
+- **管理后台** (`admin.html`)：今日工作台、排班管理、预约审批、白名单管理、数据导出
+- **课时费管家** (`money.html`)：课时记录、统计报表、已完成预约批量入账
+- **模拟考试** (`exam_student.html`)：学生导入试卷、作答、交卷凭证和复查
+- **命题评卷** (`exam_teacher.html`)：教师出题、评卷打分、批改草稿、成绩排名
 
 ## 技术栈
 
@@ -19,12 +20,19 @@
 ## 快速开始
 
 1. 在 [Firebase Console](https://console.firebase.google.com/) 创建一个 Realtime Database 项目
-2. 复制 `config/firebase-env.example.js` 为 `config/firebase-env.js`，填入你的 Firebase 配置
-3. 将所有 HTML 文件部署到任意静态托管服务（如 GitHub Pages、Vercel、Netlify）
-4. 在 Firebase Database 中手动设置管理员密码：
+2. 在 `config/firebase-env.js` 中填入 Firebase Web 配置（Web API Key 本身不是服务端密钥，真正的数据权限由 Database Rules 决定）
+3. 在 Realtime Database 控制台发布仓库中的 `database.rules.json`
+4. 在 Firebase Database 中手动设置管理员口令：
    ```
    admin_auth/你的密码: true
    ```
+5. 将所有 HTML 文件部署到支持 HTTPS 的静态托管服务（如 GitHub Pages、Vercel、Netlify）
+
+## 上线前安全说明
+
+当前版本没有接入 Firebase Auth。管理员口令页只能减少误入和口令枚举，不能把公开前端变成可信后端；知道数据库地址的人仍可绕过页面直接请求允许匿名写入的预约、学年和成绩路径。若要防止恶意改排班、改成绩或删除数据，需要把教师写操作迁入受保护的服务端 API（例如 Cloudflare Worker / Firebase Functions，并使用 HttpOnly 会话），或后续接入可靠的身份认证。
+
+上线前至少确认：已发布最新 Database Rules、使用 HTTPS、管理员和财务加密口令互不复用、已导出一份全量备份，并在无痕窗口验证学生预约与考试流程。
 
 ## 项目结构
 

@@ -183,6 +183,12 @@
                 <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。时间填错可修改后导入或忽略（可恢复）；与已入账课时时间重合会标红提示并默认跳过（防重复计费）。课时数据加密同步到云端，按学年独立存放。</p>
                 <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
+                <div id="pendingFeeSummary" class="pending-fee-summary mb-3">
+                    <div><span>待入账</span><strong id="pending-count">0</strong></div>
+                    <div><span>已选择</span><strong id="pending-selected-count">0</strong></div>
+                    <div><span>选中课时</span><strong id="pending-selected-hours">0.00h</strong></div>
+                    <div><span>预计金额</span><strong id="pending-selected-total">¥0.00</strong></div>
+                </div>
                 <div id="pendingFeeList" class="space-y-2"></div>
                 <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
                 <div id="dismissedFeeList" class="mt-3 border-t border-gray-100 pt-2 hidden"></div>
@@ -274,16 +280,49 @@
         records: []
     };
 
+    function htmlEscape(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function inlineArg(value) {
+        return htmlEscape(JSON.stringify(String(value ?? '')));
+    }
+
+    function normalizeStudent(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const name = String(raw.name ?? '').trim();
+        const rate = Number(raw.rate);
+        if (!name || !Number.isFinite(rate) || rate < 0) return null;
+        return { id: String(raw.id ?? ('student_' + Date.now() + Math.random().toString(36).slice(2, 7))), name, group: String(raw.group ?? ''), rate };
+    }
+
+    function normalizeRecord(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const studentName = String(raw.studentName ?? '').trim();
+        const date = String(raw.date ?? '');
+        const hours = Number(raw.hours);
+        const rate = Number(raw.rate);
+        const total = Number(raw.total);
+        if (!studentName || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(hours) || hours <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(total)) return null;
+        return { ...raw, id: String(raw.id ?? ('record_' + Date.now() + Math.random().toString(36).slice(2, 7))), studentName, date, hours, rate, total };
+    }
+
     function init() {
         try {
             const stored = localStorage.getItem(DB_KEY);
             if (stored) {
                 const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed.students)) data.students = parsed.students;
-                if (Array.isArray(parsed.records)) data.records = parsed.records;
+                if (Array.isArray(parsed.students)) data.students = parsed.students.map(normalizeStudent).filter(Boolean);
+                if (Array.isArray(parsed.records)) data.records = parsed.records.map(normalizeRecord).filter(Boolean);
+                if (Number.isFinite(Number(parsed.updatedAt))) data.updatedAt = Number(parsed.updatedAt);
                 // 时间修改记录与已忽略时间段也要从本地恢复，否则刷新即丢（云端只兜底）
                 if (parsed.lessonOverrides && typeof parsed.lessonOverrides === 'object') data.lessonOverrides = parsed.lessonOverrides;
                 if (Array.isArray(parsed.dismissedLessons)) data.dismissedLessons = parsed.dismissedLessons;
+                if (parsed.yearUpdatedAt && typeof parsed.yearUpdatedAt === 'object') data.yearUpdatedAt = parsed.yearUpdatedAt;
+                if (parsed.lessonOverridesByYear && typeof parsed.lessonOverridesByYear === 'object') data.lessonOverridesByYear = parsed.lessonOverridesByYear;
+                if (parsed.dismissedLessonsByYear && typeof parsed.dismissedLessonsByYear === 'object') data.dismissedLessonsByYear = parsed.dismissedLessonsByYear;
             }
         } catch (e) {
             console.error("Data corruption detected, resetting data to prevent crash.", e);
@@ -437,8 +476,14 @@
         const group = groupInput.value.trim();
         const rate = parseFloat(rateInput.value);
 
-        if (!name || isNaN(rate)) {
+        if (!name || !Number.isFinite(rate) || rate < 0) {
             showToast('请填写姓名和课时费');
+            return;
+        }
+
+        const duplicate = data.students.some(s => s.name === name && s.id !== editingStudentId);
+        if (duplicate) {
+            showToast('已有同名学生，请使用分组或备注区分');
             return;
         }
 
@@ -481,7 +526,7 @@
             return;
         }
 
-        const groups = {};
+        const groups = Object.create(null);
         const noGroupKey = '默认分组';
         
         data.students.forEach(s => {
@@ -500,9 +545,10 @@
             const header = document.createElement('div');
             header.className = 'group-header';
             header.innerHTML = `
-                <span>${groupName}</span>
+                <span></span>
                 <i class="fas fa-chevron-down group-chevron text-gray-400"></i>
             `;
+            header.querySelector('span').textContent = groupName;
             
             const listContainer = document.createElement('div');
             listContainer.className = 'pl-1 transition-all overflow-hidden';
@@ -522,12 +568,12 @@
                 div.className = 'flex justify-between items-center bg-white border border-gray-100 p-3 rounded-lg shadow-sm mb-2';
                 div.innerHTML = `
                     <div>
-                        <div class="font-bold text-sm text-gray-800">${s.name}</div>
-                        <div class="text-xs text-gray-500">¥${s.rate.toFixed(2)}/小时</div>
+                        <div class="font-bold text-sm text-gray-800">${htmlEscape(s.name)}</div>
+                        <div class="text-xs text-gray-500">¥${Number(s.rate).toFixed(2)}/小时</div>
                     </div>
                     <div class="flex space-x-1">
-                        <button onclick="editStudent('${s.id}')" class="p-2 text-blue-500 hover:bg-blue-50 rounded transition"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteStudent('${s.id}')" class="p-2 text-red-400 hover:bg-red-50 rounded transition"><i class="fas fa-trash-alt"></i></button>
+                        <button onclick="editStudent(${inlineArg(s.id)})" class="p-2 text-blue-500 hover:bg-blue-50 rounded transition"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteStudent(${inlineArg(s.id)})" class="p-2 text-red-400 hover:bg-red-50 rounded transition"><i class="fas fa-trash-alt"></i></button>
                     </div>
                 `;
                 listContainer.appendChild(div);
@@ -549,30 +595,42 @@
     function handleFileImport(input) {
         const file = input.files[0];
         if (!file) return;
+        if (file.size > 16 * 1024 * 1024) {
+            input.value = '';
+            return alert('导入文件过大，最多允许 16 MB。');
+        }
 
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
                 const importedData = JSON.parse(e.target.result);
                 
-                if (importedData.source === "class_optic_booking_system" && Array.isArray(importedData.records)) {
+                if (importedData.source === "class_optic_booking_system" && Array.isArray(importedData.records) && importedData.records.length <= 10000) {
                     let insertCount = 0;
                     let skipCount = 0;
                     const noProfileStudents = new Set();
                     
                     importedData.records.forEach(impRec => {
-                        const targetStudent = data.students.find(s => s.name === impRec.studentName);
-                        if (!targetStudent) noProfileStudents.add(impRec.studentName);
+                        const studentName = String(impRec?.studentName ?? '').trim();
+                        const date = String(impRec?.date ?? '');
+                        const hours = Number(impRec?.hours);
+                        const sourceId = typeof impRec?.id === 'string' ? impRec.id : '';
+                        if (!studentName || studentName.length > 50 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(hours) || hours <= 0 || hours > 24 || sourceId.length > 200) {
+                            skipCount++;
+                            return;
+                        }
+                        const targetStudent = data.students.find(s => s.name === studentName);
+                        if (!targetStudent) noProfileStudents.add(studentName);
                         
                         // 去重：优先按来源唯一ID（预约ID，形如 imported_<预约ID>）精确判断，
                         // 同一学生同一天两节相同课时的课不会再被误判为重复丢掉；
                         // 兼容旧版本已导入（无 sourceId 字段）的记录时，退回 日期+姓名+课时 三元组
                         const isDuplicate = (() => {
-                            if (impRec.id) {
-                                if (data.records.some(r => r.sourceId && r.sourceId === impRec.id)) return true;
-                                return data.records.some(r => !r.sourceId && r.date === impRec.date && r.studentName === impRec.studentName && Math.abs(Number(r.hours) - Number(impRec.hours)) < 0.01);
+                            if (sourceId) {
+                                if (data.records.some(r => r.sourceId && r.sourceId === sourceId)) return true;
+                                return data.records.some(r => !r.sourceId && r.date === date && r.studentName === studentName && Math.abs(Number(r.hours) - hours) < 0.01);
                             }
-                            return data.records.some(r => r.date === impRec.date && r.studentName === impRec.studentName && Math.abs(Number(r.hours) - Number(impRec.hours)) < 0.01);
+                            return data.records.some(r => r.date === date && r.studentName === studentName && Math.abs(Number(r.hours) - hours) < 0.01);
                         })();
                         
                         if (isDuplicate) {
@@ -580,15 +638,15 @@
                         } else {
                             insertCount++;
                             const rate = targetStudent ? targetStudent.rate : 0; 
-                            const total = Number((rate * Number(impRec.hours)).toFixed(2));
+                            const total = Number((rate * hours).toFixed(2));
                             
                             data.records.push({
                                 id: "booking_" + Date.now() + Math.random().toString(36).substring(2, 5),
-                                sourceId: impRec.id || null,
+                                sourceId: sourceId || null,
                                 studentId: targetStudent ? targetStudent.id : "",
-                                studentName: impRec.studentName,
-                                date: impRec.date,
-                                hours: Number(Number(impRec.hours).toFixed(2)),
+                                studentName: studentName,
+                                date: date,
+                                hours: Number(hours.toFixed(2)),
                                 rate: rate,
                                 total: total
                             });
@@ -608,22 +666,29 @@
                     let skipRecCount = 0;
                     
                     if (Array.isArray(importedData.students)) {
-                        importedData.students.forEach(impStu => {
+                        importedData.students.forEach(rawStudent => {
+                            const impStu = normalizeStudent(rawStudent);
+                            if (!impStu) return;
                             const isStuExist = data.students.some(s => s.name === impStu.name);
                             if (!isStuExist) {
                                 newStuCount++;
                                 data.students.push({
-                                    id: impStu.id || Date.now().toString() + Math.random().toString(36).substring(2, 5),
+                                    id: impStu.id,
                                     name: impStu.name,
-                                    group: impStu.group || "",
-                                    rate: impStu.rate || 0
+                                    group: impStu.group,
+                                    rate: impStu.rate
                                 });
                             }
                         });
                     }
                     
                     if (Array.isArray(importedData.records)) {
-                        importedData.records.forEach(impRec => {
+                        importedData.records.forEach(rawRecord => {
+                            const impRec = normalizeRecord(rawRecord);
+                            if (!impRec) {
+                                skipRecCount++;
+                                return;
+                            }
                             // 备份恢复：优先按记录 id 去重（备份里每条记录 id 唯一，同天同课时的多节课不会互相误删），
                             // 无 id 的旧记录退回 日期+姓名+课时 三元组
                             const isRecExist = impRec.id
@@ -669,13 +734,13 @@
     }
 
     function clearImportedBookingRecords() {
-        const importedCount = data.records.filter(r => r.id.startsWith('booking_') || r.id.startsWith('imported_')).length;
+        const importedCount = data.records.filter(r => String(r.id || '').startsWith('booking_') || String(r.id || '').startsWith('imported_')).length;
         if (importedCount === 0) {
             return alert('当前本地账册中没有发现任何外部导入的约课流水，无需清除。');
         }
 
         if (confirm(`安全提示：\n当前将为您从本地清除 ${importedCount} 条由约课系统导入的记账流。\n该操作不会删除您通过 [记一笔] 手动建立的账目。是否确认清除？`)) {
-            data.records = data.records.filter(r => !r.id.startsWith('booking_') && !r.id.startsWith('imported_'));
+            data.records = data.records.filter(r => !String(r.id || '').startsWith('booking_') && !String(r.id || '').startsWith('imported_'));
             saveData();
             // 🌟 正式版清空冗余确认告知弹窗，改由 Toast 轻量级提示
             showToast('外部导入流水已清空');
@@ -707,7 +772,7 @@
         if(!select) return;
         select.innerHTML = '<option value="">请选择学生...</option>';
         
-        const groups = {};
+        const groups = Object.create(null);
         const noGroupKey = '默认分组';
         
         data.students.forEach(s => {
@@ -762,7 +827,7 @@
         
         if(!studentSelect) return;
         const studentId = studentSelect.value;
-        if (!date || !studentId || isNaN(hours) || hours <= 0) {
+        if (!date || !studentId || !Number.isFinite(hours) || hours <= 0) {
             showToast('请填写完整信息');
             return;
         }
@@ -893,17 +958,17 @@
             div.innerHTML = `
                 <div class="flex items-center">
                     <div class="bg-blue-100 text-blue-600 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mr-3">
-                        ${r.studentName.charAt(0)}
+                        ${htmlEscape(String(r.studentName).charAt(0))}
                     </div>
                     <div>
-                        <div class="font-bold text-gray-700 text-sm">${r.studentName}</div>
+                        <div class="font-bold text-gray-700 text-sm">${htmlEscape(r.studentName)}</div>
                         <div class="text-xs text-gray-500">${r.hours.toFixed(2)} 小时 × ¥${r.rate.toFixed(2)}</div>
                     </div>
                 </div>
                 <div class="flex items-center space-x-1">
                     <span class="font-bold text-gray-800 mr-2">¥${r.total.toFixed(2)}</span>
-                    <button onclick="editRecord('${r.id}')" class="text-blue-400 hover:text-blue-600 p-2 transition"><i class="fas fa-edit"></i></button>
-                    <button onclick="deleteRecord('${r.id}')" class="text-gray-300 hover:text-red-500 p-2 transition"><i class="fas fa-trash-alt"></i></button>
+                    <button onclick="editRecord(${inlineArg(r.id)})" class="text-blue-400 hover:text-blue-600 p-2 transition"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteRecord(${inlineArg(r.id)})" class="text-gray-300 hover:text-red-500 p-2 transition"><i class="fas fa-trash-alt"></i></button>
                 </div>
             `;
             fragment.appendChild(div);
@@ -955,7 +1020,7 @@
 
         let totalIncome = 0;
         let totalHours = 0;
-        let studentStats = {};
+        let studentStats = Object.create(null);
 
         filteredRecords.forEach(r => {
             totalIncome += r.total;
@@ -991,7 +1056,7 @@
                     <div class="flex items-center w-1/2">
                         <div class="w-2 h-8 bg-blue-500 rounded mr-3 opacity-80"></div>
                         <div>
-                            <div class="text-sm font-bold text-gray-700">${name}</div>
+                            <div class="text-sm font-bold text-gray-700">${htmlEscape(name)}</div>
                             <div class="text-xs text-gray-400">占比 ${percent}%</div>
                         </div>
                     </div>
@@ -1087,7 +1152,11 @@ let db = null;
 let activeYear = null;
 let pendingLessons = [];
 let _applyingCloud = false;
-const FEE_SALT = 'class-optic-fee-vault-v1';
+const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
+const FEE_KDF_ITERATIONS = 250000;
+const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
+let cloudVersionsByYear = {};
+let feePassphraseChanging = false;
 
 async function ensureCloudReady() {
     if (db) return true;
@@ -1097,26 +1166,42 @@ async function ensureCloudReady() {
         db = firebase.database();
         const sysSnap = await db.ref('system').once('value');
         const sys = sysSnap.val();
-        activeYear = (sys && sys.activeYear) || String(new Date().getFullYear());
+        activeYear = (sys && /^\d{4}$/.test(String(sys.activeYear || '')))
+            ? String(sys.activeYear)
+            : String(new Date().getFullYear());
         return true;
     } catch (e) { console.error('云端初始化失败', e); return false; }
 }
 
 // ---- 加密（AES-GCM + PBKDF2，口令仅存本机）----
 function ensureFeePassphrase() {
-    let pass = localStorage.getItem('fee_vault_pass');
+    let pass = sessionStorage.getItem(FEE_PASSPHRASE_KEY);
     if (pass) return pass;
-    pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n请牢记！换设备同步时需输入同一口令。');
+    // 首次升级时把旧口令迁入当前标签页，再清除永久副本，避免用户突然无法解密旧账本。
+    try {
+        const legacyPass = localStorage.getItem('fee_vault_pass');
+        localStorage.removeItem('fee_vault_pass');
+        if (legacyPass) {
+            sessionStorage.setItem(FEE_PASSPHRASE_KEY, legacyPass);
+            return legacyPass;
+        }
+    } catch (e) {}
+    try {
+        pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n请牢记！换设备同步时需输入同一口令。');
+    } catch (e) {
+        showToast('当前环境无法弹出口令框，请点击“云端口令”后重试。');
+        return null;
+    }
     if (pass === null || !pass.trim()) return null;
-    localStorage.setItem('fee_vault_pass', pass.trim());
+    sessionStorage.setItem(FEE_PASSPHRASE_KEY, pass.trim());
     return pass.trim();
 }
 
-async function deriveFeeKey(pass) {
+async function deriveFeeKey(pass, saltBytes, iterations) {
     const enc = new TextEncoder();
     const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
     return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: enc.encode(FEE_SALT), iterations: 100000, hash: 'SHA-256' },
+        { name: 'PBKDF2', salt: saltBytes, iterations, hash: 'SHA-256' },
         km,
         { name: 'AES-GCM', length: 256 },
         false,
@@ -1132,19 +1217,26 @@ function bufToB64(buf) {
 async function encryptFeeData(obj) {
     const pass = ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
-    const key = await deriveFeeKey(pass);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const key = await deriveFeeKey(pass, salt, FEE_KDF_ITERATIONS);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const plain = new TextEncoder().encode(JSON.stringify(obj));
     const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
     const combined = new Uint8Array(12 + cipher.byteLength);
     combined.set(iv, 0);
     combined.set(new Uint8Array(cipher), 12);
-    return bufToB64(combined);
+    return { cipher: bufToB64(combined), salt: bufToB64(salt), kdfIterations: FEE_KDF_ITERATIONS };
 }
-async function decryptFeeData(b64) {
+async function decryptFeeData(b64, saltB64, iterationValue) {
     const pass = ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
-    const key = await deriveFeeKey(pass);
+    const iterations = saltB64 ? Number(iterationValue) : 100000;
+    if (!Number.isInteger(iterations) || iterations < 100000 || iterations > 1000000) throw new Error('云端加密参数不合法');
+    const salt = saltB64
+        ? Uint8Array.from(atob(saltB64), c => c.charCodeAt(0))
+        : new TextEncoder().encode(LEGACY_FEE_SALT);
+    if (salt.length < 8 || salt.length > 64) throw new Error('云端加密盐值不合法');
+    const key = await deriveFeeKey(pass, salt, iterations);
     const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, key, raw.slice(12));
     return JSON.parse(new TextDecoder().decode(plain));
@@ -1152,6 +1244,21 @@ async function decryptFeeData(b64) {
 
 // ---- 云端同步：每次保存推送，启动时拉取（按 updatedAt 取新）----
 function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
+function vaultRefFor(year) { return db.ref(`years/${year}/feeVault`); }
+
+function cloneForCloud(value) {
+    try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
+}
+
+function hydrateYearScopedFields(year) {
+    data.yearUpdatedAt = data.yearUpdatedAt && typeof data.yearUpdatedAt === 'object' ? data.yearUpdatedAt : {};
+    data.lessonOverridesByYear = data.lessonOverridesByYear && typeof data.lessonOverridesByYear === 'object' ? data.lessonOverridesByYear : {};
+    data.dismissedLessonsByYear = data.dismissedLessonsByYear && typeof data.dismissedLessonsByYear === 'object' ? data.dismissedLessonsByYear : {};
+    if (!Object.prototype.hasOwnProperty.call(data.lessonOverridesByYear, year)) data.lessonOverridesByYear[year] = data.lessonOverrides || {};
+    if (!Object.prototype.hasOwnProperty.call(data.dismissedLessonsByYear, year)) data.dismissedLessonsByYear[year] = data.dismissedLessons || [];
+    data.lessonOverrides = data.lessonOverridesByYear[year] || {};
+    data.dismissedLessons = data.dismissedLessonsByYear[year] || [];
+}
 
 // 取某学年的云端切片：该年记录 + 该年有记录的学生 + 完全无记录的学生（新建档）
 function getYearSlice(year) {
@@ -1160,27 +1267,81 @@ function getYearSlice(year) {
     const yearStudents = (data.students || []).filter(s =>
         yearRecords.some(r => r.studentName === s.name) || noRecordStudents.some(n => n.name === s.name)
     );
-    return { students: yearStudents, records: yearRecords };
+    return {
+        students: cloneForCloud(yearStudents),
+        records: cloneForCloud(yearRecords),
+        lessonOverrides: cloneForCloud((data.lessonOverridesByYear && data.lessonOverridesByYear[year]) || (year === activeYear ? data.lessonOverrides : {}) || {}),
+        dismissedLessons: cloneForCloud((data.dismissedLessonsByYear && data.dismissedLessonsByYear[year]) || (year === activeYear ? data.dismissedLessons : []) || [])
+    };
 }
 
-async function pushCloud() {
+let cloudPushChain = Promise.resolve(true);
+
+async function pushCloudNow(job, options) {
+    options = options || {};
     try {
-        if (!db || !activeYear) return false;
-        // 只上传当前学年的数据（其他年份仅保留在本地）
-        const slice = getYearSlice(activeYear);
-        const cipher = await encryptFeeData({
+        if (!db || !job || !job.year) return false;
+        const year = job.year;
+        const slice = job.slice;
+        const encrypted = await encryptFeeData({
             students: slice.students,
             records: slice.records,
-            lessonOverrides: data.lessonOverrides || {},
-            dismissedLessons: data.dismissedLessons || []
+            lessonOverrides: slice.lessonOverrides || {},
+            dismissedLessons: slice.dismissedLessons || []
         });
-        await vaultRef().set({ updatedAt: Date.now(), cipher });
+        const ref = vaultRefFor(year);
+        const known = cloudVersionsByYear[year];
+        const updatedAt = Date.now();
+        let conflictReason = '';
+        const result = await ref.transaction(existing => {
+            conflictReason = '';
+            if (!options.force && existing && known && Number(existing.revision || 0) !== Number(known.revision || 0)) {
+                conflictReason = 'remote-changed';
+                return;
+            }
+            if (!options.force && existing && !known) {
+                conflictReason = 'unknown-version';
+                return;
+            }
+            if (!options.force && known && !existing) {
+                conflictReason = 'remote-deleted';
+                return;
+            }
+            return {
+                schemaVersion: 3,
+                revision: Number(existing && existing.revision || 0) + 1,
+                updatedAt,
+                cipher: encrypted.cipher,
+                salt: encrypted.salt,
+                kdfIterations: encrypted.kdfIterations
+            };
+        });
+        if (!result.committed) {
+            const messages = {
+                'remote-changed': `${year} 年云端账本已被其他设备修改，已停止自动覆盖，请先拉取并确认冲突。`,
+                'unknown-version': `${year} 年云端账本版本未知，已停止自动覆盖，请先执行拉取。`,
+                'remote-deleted': `${year} 年云端账本刚被删除，已停止自动重建，请确认后手动上传。`
+            };
+            showToast(messages[conflictReason] || `${year} 年云端账本写入冲突，请先拉取后重试。`);
+            return false;
+        }
+        const committedVault = result.snapshot.val() || {};
+        cloudVersionsByYear[year] = { revision: Number(committedVault.revision || 0), updatedAt: Number(committedVault.updatedAt || updatedAt) };
         return true;
     } catch (e) {
         console.error('云端同步失败', e);
         showToast('云端同步失败：' + (e.message || e));
         return false;
     }
+}
+
+function pushCloud() {
+    if (feePassphraseChanging) return cloudPushChain;
+    const year = activeYear;
+    const slice = getYearSlice(year);
+    const job = { year, slice: cloneForCloud(slice), localUpdatedAt: data.yearUpdatedAt && data.yearUpdatedAt[year] || data.updatedAt || 0 };
+    cloudPushChain = cloudPushChain.then(() => pushCloudNow(job), () => pushCloudNow(job));
+    return cloudPushChain;
 }
 
 // 一键上传本机当年账本到云端（强制以本机当年数据覆盖云端；仅上传当前学年）
@@ -1191,7 +1352,9 @@ async function forceUploadCloud() {
         return;
     }
     if (!confirm(`确定将本机 ${activeYear} 年的账本一键上传到云端吗？\n（仅上传 ${activeYear} 年数据，会以本机数据覆盖该年云端，包含 ${slice.students.length} 名学生、${slice.records.length} 条记录；其他年份只留本地）`)) return;
-    const ok = await pushCloud();
+    const forceJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
+    cloudPushChain = cloudPushChain.then(() => pushCloudNow(forceJob, { force: true }), () => pushCloudNow(forceJob, { force: true }));
+    const ok = await cloudPushChain;
     if (ok) alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
 }
 
@@ -1230,6 +1393,7 @@ async function pullCloud() {
     try {
         const ok = await ensureCloudReady();
         if (!ok) return;
+        hydrateYearScopedFields(activeYear);
         const snap = await vaultRef().once('value');
         const vault = snap.val();
         if (!vault || !vault.cipher) {
@@ -1242,40 +1406,49 @@ async function pullCloud() {
             renderYearSummary();
             return;
         }
+        cloudVersionsByYear[activeYear] = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
         if (!ensureFeePassphrase()) return;
-        const cloudData = await decryptFeeData(vault.cipher);
+        const cloudData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
         // 本地比云端新：整体覆盖云端（本地已删的流水、改过的时间得以传播），
         // 不做并集合并——否则云端残留的旧记录会被合并回来，删除被撤销。
-        if ((data.updatedAt || 0) > (vault.updatedAt || 0)) {
-            pushCloud();
+        const localUpdatedAt = Number((data.yearUpdatedAt && data.yearUpdatedAt[activeYear]) || 0);
+        if (localUpdatedAt > Number(vault.updatedAt || 0)) {
+            await pushCloud();
             renderYearSummary();
             return;
         }
-        // 云端较新或相同：并集合并（去重，不覆盖本地独有数据）
+        // 云端较新或相同：以云端当前学年切片为准，传播同 ID 修改和删除；其他年份仍保留在本机。
         let changed = false;
-        if (cloudData && Array.isArray(cloudData.records)) {
-            (cloudData.records || []).forEach(rc => {
-                if (rc && !isRecordExisting(rc)) { data.records.push(rc); changed = true; }
-            });
+        const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : []).map(normalizeRecord).filter(Boolean);
+        const localOtherYearRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) !== String(activeYear));
+        const localActiveRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === String(activeYear));
+        const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
+        if (recordsChanged) {
+            data.records = localOtherYearRecords.concat(cloudRecords);
+            changed = true;
         }
-        if (cloudData && Array.isArray(cloudData.students)) {
-            (cloudData.students || []).forEach(sc => {
-                if (sc && sc.name && !data.students.some(s => s.name === sc.name)) { data.students.push(sc); changed = true; }
-            });
+
+        const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : []).map(normalizeStudent).filter(Boolean);
+        const otherYearStudentNames = new Set(localOtherYearRecords.map(r => r.studentName));
+        const preservedStudents = data.students.filter(s => otherYearStudentNames.has(s.name));
+        const mergedStudents = [];
+        [...cloudStudents, ...preservedStudents].forEach(s => {
+            if (!mergedStudents.some(existing => existing.name === s.name)) mergedStudents.push(s);
+        });
+        if (JSON.stringify(data.students) !== JSON.stringify(mergedStudents)) {
+            data.students = mergedStudents;
+            changed = true;
         }
-        // 时间修改记录与已忽略时间段同样合并（云推送含这两项，拉取时不能丢）
+
         data.lessonOverrides = data.lessonOverrides || {};
         data.dismissedLessons = data.dismissedLessons || [];
-        if (cloudData && typeof cloudData.lessonOverrides === 'object') {
-            Object.keys(cloudData.lessonOverrides).forEach(k => {
-                if (k && !data.lessonOverrides[k]) { data.lessonOverrides[k] = cloudData.lessonOverrides[k]; changed = true; }
-            });
-        }
-        if (cloudData && Array.isArray(cloudData.dismissedLessons)) {
-            (cloudData.dismissedLessons || []).forEach(d => {
-                if (d && d.resKey && !data.dismissedLessons.some(x => x.resKey === d.resKey)) { data.dismissedLessons.push(d); changed = true; }
-            });
-        }
+        const cloudOverrides = cloudData && cloudData.lessonOverrides && typeof cloudData.lessonOverrides === 'object' ? cloudData.lessonOverrides : {};
+        const cloudDismissed = cloudData && Array.isArray(cloudData.dismissedLessons) ? cloudData.dismissedLessons : [];
+        if (JSON.stringify(data.lessonOverrides) !== JSON.stringify(cloudOverrides)) { data.lessonOverrides = cloudOverrides; changed = true; }
+        if (JSON.stringify(data.dismissedLessons) !== JSON.stringify(cloudDismissed)) { data.dismissedLessons = cloudDismissed; changed = true; }
+        data.lessonOverridesByYear[activeYear] = data.lessonOverrides;
+        data.dismissedLessonsByYear[activeYear] = data.dismissedLessons;
+        data.yearUpdatedAt[activeYear] = Number(vault.updatedAt || 0);
         if (changed) {
             _applyingCloud = true;
             saveData();
@@ -1292,7 +1465,17 @@ async function pullCloud() {
 // 每次保存自动推云端（云端口令未设置时静默跳过，本地照常可用）
 const _origSaveData = saveData;
 saveData = function() {
-    if (!_applyingCloud) data.updatedAt = Date.now();
+    if (!_applyingCloud) {
+        data.updatedAt = Date.now();
+        data.yearUpdatedAt = data.yearUpdatedAt && typeof data.yearUpdatedAt === 'object' ? data.yearUpdatedAt : {};
+        data.yearUpdatedAt[activeYear || 'local'] = data.updatedAt;
+        data.lessonOverridesByYear = data.lessonOverridesByYear && typeof data.lessonOverridesByYear === 'object' ? data.lessonOverridesByYear : {};
+        data.dismissedLessonsByYear = data.dismissedLessonsByYear && typeof data.dismissedLessonsByYear === 'object' ? data.dismissedLessonsByYear : {};
+        if (activeYear) {
+            data.lessonOverridesByYear[activeYear] = data.lessonOverrides || {};
+            data.dismissedLessonsByYear[activeYear] = data.dismissedLessons || [];
+        }
+    }
     _origSaveData();
     if (!_applyingCloud) pushCloud();
 };
@@ -1300,10 +1483,12 @@ saveData = function() {
 // ---- 约课对接：拉取已完成预约 → 待入账 ----
 function parseLessonTime(rawText, year) {
     if (!rawText) return null;
-    const m = String(rawText).trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):?(\d{2})-(\d{2}):?(\d{2})/);
+    const m = String(rawText).trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):?(\d{2})-(\d{2}):?(\d{2})$/);
     if (!m) return null;
+    const sh = +m[3], sm = +m[4], eh = +m[5], em = +m[6];
+    if (sh > 23 || eh > 23 || sm > 59 || em > 59) return null;
     const date = `${year}-${String(+m[1]).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
-    const diff = ((+m[5] * 60 + +m[6]) - (+m[3] * 60 + +m[4])) / 60;
+    const diff = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
     return { date, hours: diff > 0 ? diff : 0 };
 }
 
@@ -1360,6 +1545,8 @@ async function refreshPendingList() {
     const listEl = document.getElementById('pendingFeeList');
     if (!listEl) return;
     listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
+    pendingLessons = [];
+    updateImportBtn();
     try {
         const ok = await ensureCloudReady();
         if (!ok) { statusEl.textContent = '无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
@@ -1370,11 +1557,13 @@ async function refreshPendingList() {
         Object.keys(res).forEach(key => {
             const r = res[key];
             if (!r || r.status !== 'completed') return;
+            if (r.feeStatus === 'posted') return;
             if (dismissedKeys.includes(key)) return; // 教师已忽略的时间段
             const lesson = parseLessonFromReservation(r);
             if (!lesson) return;
             lesson.resKey = key;
             lesson.sourceId = 'imported_' + key;
+            lesson.feeStatus = r.feeStatus || 'pending';
             // 应用教师修改过的时间（覆盖约课系统里填错的时间）
             const ov = (data.lessonOverrides || {})[key];
             if (ov) {
@@ -1406,8 +1595,7 @@ function renderPendingList() {
     listEl.innerHTML = '';
     if (pendingLessons.length === 0) {
         listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">没有待入账的已完成预约</div>';
-        btn.textContent = '导入选中 (0)';
-        btn.disabled = true;
+        updateImportBtn();
         renderDismissed();
         return;
     }
@@ -1421,10 +1609,10 @@ function renderPendingList() {
             <label class="flex items-center gap-3 cursor-pointer flex-1">
                 <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 ? 'checked' : ''} style="width:auto;">
                 <div>
-                    <div class="font-bold text-gray-700 text-sm">${p.date} ${p.studentName}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
+                    <div class="font-bold text-gray-700 text-sm">${htmlEscape(p.date)} ${htmlEscape(p.studentName)}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
                     <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
-                    ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">重复：' + exact.map(c => c.label).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
-                    ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">相近：' + near.map(c => c.label).join('；') + '</div>' : ''}
+                    ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">重复：' + exact.map(c => htmlEscape(c.label)).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
+                    ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">相近：' + near.map(c => htmlEscape(c.label)).join('；') + '</div>' : ''}
                 </div>
             </label>
             <div class="flex space-x-1">
@@ -1442,12 +1630,26 @@ function renderPendingList() {
 function updateImportBtn() {
     const btn = document.getElementById('btnImportSelected');
     if (!btn) return;
-    const n = document.querySelectorAll('.pending-check:checked').length;
+    const selected = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]).filter(Boolean);
+    const n = selected.length;
     btn.textContent = `导入选中 (${n})`;
     btn.disabled = n === 0;
+    const totalHours = selected.reduce((sum, lesson) => sum + Number(lesson.hours || 0), 0);
+    const totalAmount = selected.reduce((sum, lesson) => {
+        const student = data.students.find(s => s.name === lesson.studentName);
+        return sum + Number((student ? Number(student.rate) : 0) * Number(lesson.hours || 0));
+    }, 0);
+    const countEl = document.getElementById('pending-count');
+    const selectedEl = document.getElementById('pending-selected-count');
+    const hoursEl = document.getElementById('pending-selected-hours');
+    const amountEl = document.getElementById('pending-selected-total');
+    if (countEl) countEl.textContent = pendingLessons.length;
+    if (selectedEl) selectedEl.textContent = n;
+    if (hoursEl) hoursEl.textContent = `${totalHours.toFixed(2)}h`;
+    if (amountEl) amountEl.textContent = `¥${totalAmount.toFixed(2)}`;
 }
 
-function importSelectedPending() {
+async function importSelectedPending() {
     const checked = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]);
     if (checked.length === 0) return;
     if (!confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return;
@@ -1462,13 +1664,15 @@ function importSelectedPending() {
         if (!confirm(`以下 ${conflictLines.length} 条与已入账记录时间重合或相近，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用「修改时间」或「忽略」处理。确定仍要导入这 ${checked.length} 条吗？`)) return;
     }
     const noProfile = new Set();
+    const importedRecords = [];
     checked.forEach(p => {
         const targetStudent = data.students.find(s => s.name === p.studentName);
         if (!targetStudent) noProfile.add(p.studentName);
         const rate = targetStudent ? targetStudent.rate : 0;
         const total = Number((rate * p.hours).toFixed(2));
+        const recordId = `booking_${p.sourceId || p.resKey}`;
         data.records.push({
-            id: "booking_" + Date.now() + Math.random().toString(36).substring(2, 5),
+            id: recordId,
             sourceId: p.sourceId,
             studentId: targetStudent ? targetStudent.id : "",
             studentName: p.studentName,
@@ -1477,11 +1681,30 @@ function importSelectedPending() {
             rate: rate,
             total: total
         });
+        importedRecords.push({ lesson: p, recordId });
     });
     saveData();
+    const cloudSaved = await cloudPushChain.catch(() => false);
+    let statusSynced = false;
+    if (cloudSaved && db && activeYear) {
+        const postedAt = Date.now();
+        const updates = {};
+        importedRecords.forEach(({ lesson, recordId }) => {
+            updates[`years/${activeYear}/reservations/${lesson.resKey}/feeStatus`] = 'posted';
+            updates[`years/${activeYear}/reservations/${lesson.resKey}/feePostedAt`] = postedAt;
+            updates[`years/${activeYear}/reservations/${lesson.resKey}/feeRecordId`] = recordId;
+        });
+        try {
+            await db.ref().update(updates);
+            statusSynced = true;
+        } catch (error) {
+            console.error('预约入账状态同步失败:', error);
+        }
+    }
     let warn = "";
     if (noProfile.size > 0) warn = `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
-    alert(`约课入账成功！已导入 ${checked.length} 条。${warn}`);
+    const syncMessage = statusSynced ? '' : '\n\n本机账本已保存，但云端入账状态尚未确认，请稍后检查同步。';
+    alert(`约课入账成功！已导入 ${checked.length} 条。${warn}${syncMessage}`);
     refreshPendingList();
 }
 
@@ -1493,7 +1716,7 @@ function editPendingLesson(i) {
     row.innerHTML = `
         <div class="flex-1 space-y-2">
             <div class="flex items-center gap-2">
-                <input type="date" id="edit-date-${i}" value="${p.date}" class="border border-gray-300 rounded-lg px-2 py-1 text-xs flex-1">
+                <input type="date" id="edit-date-${i}" value="${htmlEscape(p.date)}" class="border border-gray-300 rounded-lg px-2 py-1 text-xs flex-1">
                 <input type="number" id="edit-hours-${i}" value="${p.hours}" step="0.5" min="0.5" class="border border-gray-300 rounded-lg px-2 py-1 text-xs w-20">
                 <span class="text-xs text-gray-500">小时</span>
             </div>
@@ -1556,11 +1779,20 @@ async function syncReservationTime(p) {
         updates[`years/${activeYear}/reservations/${p.resKey}/slotSnapshot/date`] = p.date;
         updates[`years/${activeYear}/reservations/${p.resKey}/slotSnapshot/startTime`] = startTime;
         updates[`years/${activeYear}/reservations/${p.resKey}/slotSnapshot/endTime`] = endTime;
+        let slotOwnershipConflict = false;
         if (r.slotId) {
-            updates[`years/${activeYear}/slots/${r.slotId}/time`] = newTime;
+            const slotSnap = await db.ref(`years/${activeYear}/slots/${r.slotId}`).once('value');
+            const slot = slotSnap.val();
+            if (slot && slot.reservationId === p.resKey) {
+                updates[`years/${activeYear}/slots/${r.slotId}/time`] = newTime;
+            } else {
+                slotOwnershipConflict = true;
+            }
         }
         await db.ref().update(updates);
-        showToast('已修改，后台预约时间与排班已同步更新');
+        showToast(slotOwnershipConflict
+            ? '预约时间已同步；排班所有权冲突，未修改排班，请到管理端检查'
+            : '已修改，后台预约时间与排班已同步更新');
     } catch (e) {
         console.error('同步后台预约时间失败', e);
         showToast('后台预约时间同步失败：' + (e.message || e) + '（本地修改仍生效）');
@@ -1594,7 +1826,7 @@ function renderDismissed() {
     d.forEach((item, idx) => {
         const row = document.createElement('div');
         row.className = 'flex justify-between items-center text-xs text-gray-500 py-1';
-        row.innerHTML = `<span>${item.date} ${item.studentName} ${Number(item.hours || 0).toFixed(2)}h</span>
+        row.innerHTML = `<span>${htmlEscape(item.date)} ${htmlEscape(item.studentName)} ${Number(item.hours || 0).toFixed(2)}h</span>
             <button type="button" onclick="restoreDismissed(${idx})" class="text-blue-500 font-medium hover:underline">恢复</button>`;
         box.appendChild(row);
     });
@@ -1607,13 +1839,29 @@ function restoreDismissed(idx) {
     refreshPendingList();
 }
 
-function changeFeePassphrase() {
+async function changeFeePassphrase() {
     const pass = prompt('输入新的云端加密口令（留空 = 取消）：');
     if (pass === null) return;
     if (!pass.trim()) { showToast('已取消'); return; }
-    localStorage.setItem('fee_vault_pass', pass.trim());
-    showToast('口令已更新，正在重新加密上传…');
-    pushCloud();
+    const oldPass = sessionStorage.getItem(FEE_PASSPHRASE_KEY);
+    const newPass = pass.trim();
+    feePassphraseChanging = true;
+    try {
+        // 先等待旧口令的排队上传完成，避免旧任务在新口令下重新加密。
+        await cloudPushChain.catch(() => false);
+        sessionStorage.setItem(FEE_PASSPHRASE_KEY, newPass);
+        showToast('口令已更新，正在重新加密上传…');
+        const rotationJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
+        cloudPushChain = cloudPushChain.then(() => pushCloudNow(rotationJob, { force: true }), () => pushCloudNow(rotationJob, { force: true }));
+        const ok = await cloudPushChain;
+        if (!ok) throw new Error('云端重新加密失败');
+    } catch (e) {
+        if (oldPass === null) sessionStorage.removeItem(FEE_PASSPHRASE_KEY);
+        else sessionStorage.setItem(FEE_PASSPHRASE_KEY, oldPass);
+        showToast('新口令上传失败，已恢复原口令');
+    } finally {
+        feePassphraseChanging = false;
+    }
 }
 
 // ---- 覆盖 Tab 切换以支持「约课对接」视图 ----

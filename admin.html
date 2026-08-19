@@ -54,6 +54,42 @@
         .data-btn-row .danger { color: #fff; }
         #stats-panel { display: none; background: #fff; border: 1px solid #e4e7ed; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
 
+        .admin-page-nav { display: flex; gap: 6px; flex-wrap: wrap; margin: -6px 0 18px; }
+        .admin-page-nav a { color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: 6px 11px; font-size: 12px; text-decoration: none; }
+        .admin-page-nav a:hover { color: #2563eb; border-color: #93c5fd; background: #eff6ff; }
+        .today-dashboard { background: #fff; border: 1px solid #dbeafe; border-radius: 12px; padding: 18px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(37,99,235,.05); }
+        .today-dashboard-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+        .today-kicker { color: #2563eb; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+        .today-dashboard h3 { margin: 4px 0 2px; color: #1e293b; font-size: 21px; }
+        .today-dashboard-header p { margin: 0; color: #94a3b8; font-size: 12px; }
+        .today-refresh-btn { width: auto; padding: 7px 12px; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 12px; }
+        .today-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
+        .today-summary-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; }
+        .today-summary-item span { display: block; color: #64748b; font-size: 12px; }
+        .today-summary-item strong { display: block; margin-top: 4px; color: #1e293b; font-size: 22px; }
+        .today-dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .today-panel { border: 1px solid #e2e8f0; border-radius: 9px; overflow: hidden; background: #fff; }
+        .today-panel-title { padding: 10px 12px; color: #475569; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 13px; font-weight: 700; }
+        .today-course-list { padding: 4px 10px; }
+        .today-course-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid #f1f5f9; }
+        .today-course-item:last-child { border-bottom: 0; }
+        .today-course-info { min-width: 0; }
+        .today-course-time { color: #2563eb; font-size: 12px; font-weight: 700; }
+        .today-course-name { margin-top: 2px; color: #334155; font-size: 13px; font-weight: 600; }
+        .today-course-meta { margin-top: 3px; color: #94a3b8; font-size: 11px; }
+        .today-course-actions { display: flex; gap: 5px; flex-shrink: 0; }
+        .today-course-actions button { width: auto; padding: 5px 7px; font-size: 11px; }
+        .today-status { display: inline-block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+        .today-status-booked { color: #b45309; background: #fffbeb; }
+        .today-status-confirmed { color: #1d4ed8; background: #eff6ff; }
+        .today-status-completed { color: #15803d; background: #f0fdf4; }
+        .today-status-canceled { color: #64748b; background: #f1f5f9; }
+        .today-warning-panel { margin-top: 12px; }
+        .today-warning-list { padding: 8px 12px; }
+        .today-warning-item { padding: 7px 0; color: #92400e; border-bottom: 1px solid #fef3c7; font-size: 12px; line-height: 1.5; }
+        .today-warning-item:last-child { border-bottom: 0; }
+        .today-empty { margin: 0; padding: 14px 2px; color: #94a3b8; font-size: 12px; }
+
         /* 预约记录区域 */
         #batch-action-bar { display: none; position: sticky; bottom: 0; background: #fff; border-top: 2px solid #409eff; padding: 10px 14px; margin-top: 10px; z-index: 50; gap: 10px; align-items: center; box-shadow: 0 -2px 8px rgba(0,0,0,0.08); }
         #batch-action-bar.show { display: flex; }
@@ -73,6 +109,13 @@
         #year-status-bar { margin: 10px 0 0 0; font-size: 13px; color: #666; background: #fff; padding: 8px 10px; border-radius: 4px; border: 1px solid #e4e7ed; }
         textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; font-family: inherit; }
         table { width: 100%; border-collapse: collapse; }
+        @media screen and (max-width: 640px) {
+            .today-dashboard { padding: 14px 12px; }
+            .today-summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .today-dashboard-columns { grid-template-columns: 1fr; }
+            .today-course-item { align-items: flex-start; }
+            .today-course-actions { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
@@ -97,6 +140,46 @@
             </div>
         </div>
 
+        <nav class="admin-page-nav" aria-label="管理端导航">
+            <a href="#today-dashboard">今日</a>
+            <a href="#schedule-card">排班</a>
+            <a href="#access-card">学生</a>
+            <a href="#reservations-title">预约</a>
+            <a href="money.html" target="_blank">财务</a>
+            <a href="exam_teacher.html" target="_blank">考试</a>
+        </nav>
+
+        <section id="today-dashboard" class="today-dashboard">
+            <div class="today-dashboard-header">
+                <div>
+                    <div class="today-kicker">当前工作台</div>
+                    <h3>今日安排</h3>
+                    <p id="today-dashboard-date">正在读取当前学年…</p>
+                </div>
+                <button type="button" id="today-refresh-btn" class="today-refresh-btn">刷新</button>
+            </div>
+            <div class="today-summary-grid">
+                <div class="today-summary-item"><span>今日课程</span><strong id="today-count">0</strong></div>
+                <div class="today-summary-item"><span>待确认</span><strong id="today-pending-count">0</strong></div>
+                <div class="today-summary-item"><span>待入账</span><strong id="today-fee-count">0</strong></div>
+                <div class="today-summary-item"><span>异常</span><strong id="today-warning-count">0</strong></div>
+            </div>
+            <div class="today-dashboard-columns">
+                <div class="today-panel">
+                    <div class="today-panel-title">今天</div>
+                    <div id="today-course-list" class="today-course-list"><p class="today-empty">正在读取…</p></div>
+                </div>
+                <div class="today-panel">
+                    <div class="today-panel-title">接下来7天</div>
+                    <div id="upcoming-course-list" class="today-course-list"><p class="today-empty">正在读取…</p></div>
+                </div>
+            </div>
+            <div class="today-panel today-warning-panel">
+                <div class="today-panel-title">需要处理</div>
+                <div id="today-warning-list" class="today-warning-list"><p class="today-empty">暂无异常</p></div>
+            </div>
+        </section>
+
         <div id="migration-wizard-panel" style="display: none; background: #fffbe6; border: 1px dashed #e6a23c; padding: 12px 14px; border-radius: 8px; margin-bottom: 16px;">
             <h4 style="margin: 0 0 6px 0; color: #d46b08;">旧版数据迁移</h4>
             <p style="font-size: 12px; margin: 0 0 8px 0; color: #777;">检测到旧版扁平排班数据，执行一次性迁移以适配多学年架构。</p>
@@ -108,7 +191,7 @@
         </div>
 
         <!-- 学年管理 -->
-        <div class="admin-card">
+        <div class="admin-card" id="year-card">
             <div class="admin-card-h"><span>学年管理</span><span class="hint">切换查看的学年，所有数据按学年隔离</span></div>
             <div class="admin-card-b">
                 <div class="year-row">
@@ -122,7 +205,7 @@
         </div>
 
         <!-- 排班管理 -->
-        <div class="admin-card">
+        <div class="admin-card" id="schedule-card">
             <div class="admin-card-h"><span>排班管理</span></div>
             <div class="admin-card-b">
                 <div class="template-panel">
@@ -152,7 +235,7 @@
         </div>
 
         <!-- 公告与准入 -->
-        <div class="admin-card">
+        <div class="admin-card" id="access-card">
             <div class="admin-card-h"><span>公告与准入名单</span></div>
             <div class="admin-card-b">
                 <div class="form-group">
@@ -195,7 +278,7 @@
         </div>
 
         <!-- 预约记录 -->
-        <h2 style="font-size:15px; margin-top: 24px;">预约记录</h2>
+        <h2 id="reservations-title" style="font-size:15px; margin-top: 24px;">预约记录</h2>
         <div id="batch-action-bar" class="batch-action-bar">
             <span class="text-bold" style="font-size:13px;">已选 <b id="batch-count" class="text-red">0</b> 条</span>
             <select id="batch-target-status" style="padding:6px 10px; border-radius:4px; font-weight:bold; font-size:13px;">

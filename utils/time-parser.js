@@ -4,13 +4,16 @@ const TimeParser = {
     // 现在会校验日期合法性（拒绝 2/30、4/31 等无效日期）
     parseRawText: (rawText, targetYear) => {
         if (!rawText) return null;
-        const match = rawText.trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):?(\d{2})-(\d{2}):?(\d{2})/);
+        const match = rawText.trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):?(\d{2})-(\d{2}):?(\d{2})$/);
         if (!match) return null;
 
         const month = parseInt(match[1], 10);
         const day = parseInt(match[2], 10);
-        const sh = match[3]; const sm = match[4];
-        const eh = match[5]; const em = match[6];
+        const sh = parseInt(match[3], 10); const sm = parseInt(match[4], 10);
+        const eh = parseInt(match[5], 10); const em = parseInt(match[6], 10);
+
+        if (sh > 23 || eh > 23 || sm > 59 || em > 59) return null;
+        if ((eh * 60 + em) <= (sh * 60 + sm)) return null;
 
         // 校验日期合法性
         if (!TimeParser.isValidCalendarDate(month, day, targetYear)) return null;
@@ -19,11 +22,11 @@ const TimeParser = {
         const d = match[2].padStart(2, '0');
 
         return {
-            rawTime: `${month}/${day} ${sh}:${sm}-${eh}:${em}`,
+            rawTime: `${month}/${day} ${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}-${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`,
             date: `${targetYear}-${m}-${d}`,
-            startTime: `${sh}:${sm}`,
-            endTime: `${eh}:${em}`,
-            formattedSlotText: `${month}/${day} ${sh}:${sm}-${eh}:${em}`
+            startTime: `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`,
+            endTime: `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`,
+            formattedSlotText: `${month}/${day} ${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}-${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`
         };
     },
 
@@ -44,9 +47,12 @@ const TimeParser = {
     // 从排班时间字符串计算课时长（小时）
     calcHours: (timeStr) => {
         if (!timeStr) return 0;
-        const m = timeStr.match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
+        const m = String(timeStr).trim().match(/^(?:\d{1,2}\/\d{1,2}\s+)?(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})$/);
         if (!m) return 0;
-        const diff = (parseInt(m[3]) * 60 + parseInt(m[4])) - (parseInt(m[1]) * 60 + parseInt(m[2]));
+        const startHour = parseInt(m[1], 10); const startMinute = parseInt(m[2], 10);
+        const endHour = parseInt(m[3], 10); const endMinute = parseInt(m[4], 10);
+        if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) return 0;
+        const diff = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
         return diff > 0 ? diff / 60 : 0;
     }
 };

@@ -28,7 +28,7 @@ const SystemRouter = {
 
 // 全自动化安全 HTML 实体转义引擎，防止 XSS 注入
 function escapeHtml(unsafe) {
-    return (unsafe || "")
+    return String(unsafe ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")

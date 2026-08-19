@@ -6,9 +6,132 @@
     let resCollapseState = {};
     let reservationsData = [];
     let studentHoursCache = {};
+    let dashboardSlots = {};
+    let dashboardReservations = {};
+    let dashboardStudentHours = {};
     let viewingYear = "2026";
+    const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
+    const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
+    const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]\u0000-\u001F\u007F]/;
+    let adminLoginFailures = 0;
+    let adminLoginBlockedUntil = 0;
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
     const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
+
+    function localDateKey(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    function dashboardStatusText(status) {
+        return { booked: '已预约', confirmed: '已确认', completed: '已完成', canceled: '已取消' }[status] || '未知状态';
+    }
+
+    function renderTodayDashboard() {
+        const dateEl = document.getElementById('today-dashboard-date');
+        const todayEl = document.getElementById('today-course-list');
+        const upcomingEl = document.getElementById('upcoming-course-list');
+        const warningEl = document.getElementById('today-warning-list');
+        if (!dateEl || !todayEl || !upcomingEl || !warningEl) return;
+
+        const now = new Date();
+        const todayKey = localDateKey(now);
+        const activeYear = String(viewingYear || '');
+        const canShowToday = activeYear === String(now.getFullYear());
+        dateEl.textContent = canShowToday ? `${activeYear} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日` : `${activeYear} 学年 · 当前设备日期不在本学年`;
+
+        const slotById = dashboardSlots || {};
+        const reservations = Object.keys(dashboardReservations || {}).map(key => ({
+            key,
+            data: dashboardReservations[key]
+        })).filter(item => item.data && item.data.status !== 'canceled');
+        const parsedItems = reservations.map(item => {
+            const parsed = TimeParser.parseRawText(item.data.time, activeYear);
+            return { ...item, parsed, date: parsed ? parsed.date : '', start: parsed ? parsed.startTime : '' };
+        }).filter(item => item.parsed);
+        const todayItems = canShowToday ? parsedItems.filter(item => item.date === todayKey).sort((a, b) => a.start.localeCompare(b.start)) : [];
+        const futureEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const futureItems = canShowToday ? parsedItems.filter(item => item.date > todayKey && item.date <= localDateKey(futureEnd)).sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).slice(0, 12) : [];
+        const feeItems = parsedItems.filter(item => item.data.status === 'completed' && item.data.feeStatus !== 'posted');
+        const pendingItems = parsedItems.filter(item => item.data.status === 'booked');
+
+        document.getElementById('today-count').textContent = todayItems.length;
+        document.getElementById('today-pending-count').textContent = todayItems.filter(item => item.data.status === 'booked').length;
+        document.getElementById('today-fee-count').textContent = feeItems.length;
+
+        const renderCourseItems = (items, showDate) => {
+            if (!items.length) return '<p class="today-empty">暂无课程</p>';
+            return items.map(item => {
+                const status = item.data.status || 'booked';
+                const hours = TimeParser.calcHours(item.data.time);
+                const datePrefix = showDate ? `${escapeHtml(item.date.slice(5))} ` : '';
+                const action = status === 'booked'
+                    ? `<button type="button" class="today-confirm-btn" data-key="${escapeHtml(item.key)}">确认</button>`
+                    : status === 'confirmed'
+                        ? `<button type="button" class="today-complete-btn" data-key="${escapeHtml(item.key)}">完成</button>`
+                        : '';
+                return `<div class="today-course-item">
+                    <div class="today-course-info">
+                        <div class="today-course-time">${datePrefix}${escapeHtml(item.parsed.startTime)}–${escapeHtml(item.parsed.endTime)}</div>
+                        <div class="today-course-name">${escapeHtml(item.data.nickname || '未填写姓名')}</div>
+                        <div class="today-course-meta">${hours.toFixed(2)} 小时 · ${item.data.feeStatus === 'posted' ? '已入账' : status === 'completed' ? '待入账' : '预约'}</div>
+                        <span class="today-status today-status-${status}">${dashboardStatusText(status)}</span>
+                    </div>
+                    <div class="today-course-actions">${action}</div>
+                </div>`;
+            }).join('');
+        };
+
+        todayEl.innerHTML = renderCourseItems(todayItems, false);
+        upcomingEl.innerHTML = renderCourseItems(futureItems, true);
+        todayEl.querySelectorAll('.today-confirm-btn, .today-complete-btn').forEach(button => {
+            button.onclick = async () => {
+                const targetStatus = button.classList.contains('today-confirm-btn') ? 'confirmed' : 'completed';
+                button.disabled = true;
+                try {
+                    const result = await updateReservationStatusSafe(viewingYear, button.dataset.key, targetStatus);
+                    if (!result.ok) alert('状态更新失败，请刷新后重试。');
+                } catch (error) {
+                    console.error('今日工作台更新失败:', error);
+                    alert('状态更新失败，请检查网络。');
+                } finally {
+                    button.disabled = false;
+                }
+            };
+        });
+        upcomingEl.querySelectorAll('.today-confirm-btn, .today-complete-btn').forEach(button => {
+            button.onclick = async () => {
+                const targetStatus = button.classList.contains('today-confirm-btn') ? 'confirmed' : 'completed';
+                button.disabled = true;
+                try { await updateReservationStatusSafe(viewingYear, button.dataset.key, targetStatus); }
+                catch (error) { alert('状态更新失败，请检查网络。'); }
+                finally { button.disabled = false; }
+            };
+        });
+
+        const warnings = [];
+        Object.keys(slotById).forEach(slotId => {
+            const slot = slotById[slotId];
+            if (slot && slot.reserved && slot.reservationId && !dashboardReservations[slot.reservationId]) {
+                warnings.push(`排班 ${slot.time || slotId} 显示已占用，但找不到对应预约。`);
+            }
+        });
+        feeItems.slice(0, 5).forEach(item => warnings.push(`${item.data.nickname || '未填写姓名'} 的已完成课程尚未入账。`));
+        const usedByStudent = {};
+        parsedItems.forEach(item => {
+            const name = item.data.nickname || '未填写姓名';
+            usedByStudent[name] = (usedByStudent[name] || 0) + TimeParser.calcHours(item.data.time);
+        });
+        Object.keys(usedByStudent).forEach(name => {
+            const total = Number(dashboardStudentHours[name]);
+            if (Number.isFinite(total) && total > 0 && usedByStudent[name] > total + 0.001) warnings.push(`${name} 已预约 ${usedByStudent[name].toFixed(2)} 小时，超过总课时 ${total.toFixed(2)} 小时。`);
+        });
+        if (!canShowToday && !futureItems.length) warnings.push('当前查看学年不是设备当前年份，今日工作台暂不显示日期课程。');
+        document.getElementById('today-warning-count').textContent = warnings.length;
+        warningEl.innerHTML = warnings.length ? warnings.slice(0, 8).map(text => `<div class="today-warning-item">${escapeHtml(text)}</div>`).join('') : '<p class="today-empty">暂无异常</p>';
+    }
 
     let currentActiveSlotsRefMemory = null;
     let currentActiveReservationsRefMemory = null;
@@ -20,22 +143,59 @@
     let currentActiveDeadlineRefMemory = null;
     let currentActiveAccessCodeRefMemory = null;
 
-    //在核验成功的分支链中，追加会话打标共享，打通无感通行管道
+    function isValidStudentName(name) {
+        return typeof name === 'string' && name.length > 0 && name.length <= 50 && !INVALID_FIREBASE_KEY_CHARS.test(name) && !name.includes(',');
+    }
+
+    function generateSecureCode(length) {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        const bytes = new Uint8Array(length);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
+    }
+
+    function inlineArg(value) {
+        return escapeHtml(JSON.stringify(String(value ?? '')));
+    }
+
+    function registerAdminLoginFailure(errorEl) {
+        adminLoginFailures++;
+        if (adminLoginFailures >= 5) {
+            adminLoginFailures = 0;
+            adminLoginBlockedUntil = Date.now() + 30 * 1000;
+            errorEl.textContent = '尝试过多，请 30 秒后重试。';
+        } else {
+            errorEl.textContent = '密码错误！';
+        }
+    }
+
+    // 核验成功后只向当前标签页签发 30 分钟会话标记，供教师端无感通行。
     function verifyAdmin() {
         const inputPass = document.getElementById('admin-password').value.trim();
         const errorEl = document.getElementById('login-error');
+        if (Date.now() < adminLoginBlockedUntil) {
+            errorEl.textContent = `尝试过多，请 ${Math.ceil((adminLoginBlockedUntil - Date.now()) / 1000)} 秒后重试。`;
+            return;
+        }
         if (!inputPass) return alert('请输入密码！');
+        if (inputPass.length > 128 || INVALID_FIREBASE_KEY_CHARS.test(inputPass)) return errorEl.textContent = '密码格式不合法。';
 
         db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
             if (snapshot.exists() && snapshot.val() === true) {
-                //向当前浏览器会话（Tab）中埋下通过鉴权的绿色通行证
-                localStorage.setItem('admin_session_auth', 'true');
+                adminLoginFailures = 0;
+                localStorage.removeItem('admin_session_auth');
+                sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({ expiresAt: Date.now() + ADMIN_SESSION_TTL_MS }));
 
                 isAdminAuthenticated = true; 
                 document.getElementById('admin-login').style.display = 'none';
                 document.getElementById('admin-content').style.display = 'block';
                 initAdminSystem();
-            } else { errorEl.textContent = '密码错误！'; }
+            } else {
+                registerAdminLoginFailure(errorEl);
+            }
+        }).catch(error => {
+            if (String(error && error.code || '').toUpperCase().includes('PERMISSION_DENIED')) registerAdminLoginFailure(errorEl);
+            else errorEl.textContent = '网络错误，请检查连接后重试。';
         });
     }
 
@@ -55,7 +215,7 @@
             const savedVal = selectEl.value || viewingYear || SystemRouter.activeYear || "2026";
             selectEl.innerHTML = '';
 
-            const yearKeys = data ? Object.keys(data).sort().reverse() : [];
+            const yearKeys = data ? Object.keys(data).filter(y => /^\d{4}$/.test(y)).sort().reverse() : [];
             if (yearKeys.length > 0) {
                 yearKeys.forEach(y => {
                     const opt = document.createElement('option'); opt.value = y;
@@ -74,7 +234,7 @@
         SystemRouter.system().on('value', (snap) => {
             if (!isAdminAuthenticated) return;
             const sys = snap.val();
-            if (sys && sys.activeYear) {
+            if (sys && /^\d{4}$/.test(String(sys.activeYear || ''))) {
                 SystemRouter.activeYear = sys.activeYear; SystemRouter.activeName = sys.activeName;
                 updateStatusTextInfo();
                 // 刷新下拉框标签（[当前开放学年] vs [历史归档]）
@@ -131,6 +291,10 @@
         currentActiveStudentHoursRefMemory = db.ref(`years/${viewingYear}/studentHours`);
         currentActiveDeadlineRefMemory = SystemRouter.getSettingsRef(viewingYear).child('deadline');
         currentActiveAccessCodeRefMemory = SystemRouter.getSettingsRef(viewingYear).child('accessCode');
+        dashboardSlots = {};
+        dashboardReservations = {};
+        dashboardStudentHours = {};
+        renderTodayDashboard();
 
         currentActiveNoticeTextRefMemory.on('value', snap => {
             const noticeInput = document.getElementById('notice-input');
@@ -143,8 +307,9 @@
             const previewContainer = document.getElementById('notice-img-preview-container');
             const previewImg = document.getElementById('notice-img-preview');
             
-            if (imgData) {
-                if(previewImg) previewImg.src = imgData;
+            const safeImgData = typeof imgData === 'string' && /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(imgData) && imgData.length <= 4 * 1024 * 1024 ? imgData : '';
+            if (safeImgData) {
+                if(previewImg) previewImg.src = safeImgData;
                 if(previewContainer) previewContainer.style.display = 'block';
                 if(btnDelImg) btnDelImg.style.display = 'inline-block';
             } else {
@@ -184,7 +349,7 @@
                 const hoursText = `<span class="student-tag-hours ${hasHours ? '' : 'tag-hours-none'}" data-name="${escapeHtml(sName)}" title="点击修改总时长">(${hasHours ? Number(total) + 'h' : '未设'})</span>`;
                 const tag = document.createElement('span');
                 tag.className = 'student-tag';
-                tag.innerHTML = `<span class="student-tag-name" data-name="${escapeHtml(sName)}" title="双击修改总时长">${escapeHtml(sName)}</span>${hoursText}<span class="student-tag-del" data-id="${sId}" data-name="${escapeHtml(sName)}">×</span>`;
+                tag.innerHTML = `<span class="student-tag-name" data-name="${escapeHtml(sName)}" title="双击修改总时长">${escapeHtml(sName)}</span>${hoursText}<span class="student-tag-del" data-id="${escapeHtml(sId)}" data-name="${escapeHtml(sName)}">×</span>`;
                 container.appendChild(tag);
             });
 
@@ -192,10 +357,10 @@
                 btn.onclick = function() {
                     const id = this.dataset.id; const name = this.dataset.name;
                     if(confirm(`确定将 [${name}] 从当前学年准入名单中移除吗？`)) {
-                        Promise.all([
-                            db.ref(`years/${viewingYear}/studentWhitelist/${id}`).remove(),
-                            db.ref(`years/${viewingYear}/studentHours/${name}`).remove()
-                        ]).then(() => {
+                        const updates = {};
+                        updates[`years/${viewingYear}/studentWhitelist/${id}`] = null;
+                        updates[`years/${viewingYear}/studentHours/${name}`] = null;
+                        db.ref().update(updates).then(() => {
                             SystemRouter.getLogsRef(viewingYear).push({
                                 action: `移除了准入学生：[${name}]`, timestamp: firebase.database.ServerValue.TIMESTAMP
                             });
@@ -258,7 +423,9 @@
 
         currentActiveStudentHoursRefMemory.on('value', (snap) => {
             studentHoursCache = snap.val() || {};
+            dashboardStudentHours = studentHoursCache;
             renderWhitelist();
+            renderTodayDashboard();
         });
 
         currentActiveStudentListRefMemory.on('value', (snapshot) => {
@@ -268,6 +435,8 @@
 
         currentActiveSlotsRefMemory.on('value', (snapshot) => {
             const slots = snapshot.val(); const container = document.getElementById('admin-slots-container');
+            dashboardSlots = slots || {};
+            renderTodayDashboard();
             container.innerHTML = ''; if (!slots) { container.innerHTML = '<p class="empty-hint">当前没有排班。</p>'; return; }
 
             const groups = {};
@@ -305,8 +474,8 @@
                     slotDiv.innerHTML = `
                         <span class="slot-text-span">${escapeHtml(displayLabel)} ${item.data.reserved ? '<strong class="text-red">(已约)</strong>' : '<strong class="text-green">(空闲)</strong>'}</span>
                         <div class="btn-group">
-                            <button class="btn-edit slot-edit-btn" data-id="${item.id}" data-time="${escapeHtml(item.data.time)}">修改</button>
-                            <button class="btn-delete danger" data-id="${item.id}">删除</button>
+                            <button class="btn-edit slot-edit-btn" data-id="${escapeHtml(item.id)}" data-time="${escapeHtml(item.data.time)}">修改</button>
+                            <button class="btn-delete danger" data-id="${escapeHtml(item.id)}">删除</button>
                         </div>`;
                     body.appendChild(slotDiv);
                 });
@@ -317,6 +486,8 @@
 
         currentActiveReservationsRefMemory.on('value', (snapshot) => {
             const res = snapshot.val(); const container = document.getElementById('admin-reservations-container');
+            dashboardReservations = res || {};
+            renderTodayDashboard();
 
             container.innerHTML = '';
             reservationsData = [];
@@ -396,7 +567,7 @@
                     const selectedOpt = statusOptions.find(o => o.val === currentStatus);
                     const statusColor = selectedOpt ? selectedOpt.color : '#909399';
 
-                    let selectHtml = `<select class="status-select-admin" data-key="${item.key}" data-oldstatus="${currentStatus}" style="color:${statusColor};">`;
+                    let selectHtml = `<select class="status-select-admin" data-key="${escapeHtml(item.key)}" data-oldstatus="${escapeHtml(currentStatus)}" style="color:${statusColor};">`;
                     statusOptions.forEach(opt => {
                         selectHtml += `<option value="${opt.val}" ${opt.val === currentStatus ? 'selected' : ''} style="color:${opt.color};">${opt.label}</option>`;
                     });
@@ -404,16 +575,16 @@
 
                     let archiveBtnHtml = '';
                     if (isCurrent) {
-                        archiveBtnHtml = `<button class="btn-archive btn-archive-res" data-key="${item.key}">归档</button>`;
+                        archiveBtnHtml = `<button class="btn-archive btn-archive-res" data-key="${escapeHtml(item.key)}">归档</button>`;
                     } else if (r.archived) {
-                        archiveBtnHtml = `<button class="btn-unarchive btn-unarchive-res" data-key="${item.key}">移回当前</button>`;
+                        archiveBtnHtml = `<button class="btn-unarchive btn-unarchive-res" data-key="${escapeHtml(item.key)}">移回当前</button>`;
                     }
 
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td><input type="checkbox" class="batch-check-item" data-key="${item.key}"></td><td>${escapeHtml(r.time)}</td>
-                        <td><span class="editable-name" data-key="${item.key}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
+                    tr.innerHTML = `<td><input type="checkbox" class="batch-check-item" data-key="${escapeHtml(item.key)}"></td><td>${escapeHtml(r.time)}</td>
+                        <td><span class="editable-name" data-key="${escapeHtml(item.key)}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
                         <td>${selectHtml}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
-                        <td>${archiveBtnHtml}<button class="danger btn-force-del" data-key="${item.key}" data-slotid="${r.slotId}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
+                        <td>${archiveBtnHtml}<button class="danger btn-force-del" data-key="${escapeHtml(item.key)}" data-slotid="${escapeHtml(r.slotId || '')}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
                     tbody.appendChild(tr);
                 });
 
@@ -452,7 +623,8 @@
                 const resKey = this.dataset.key; const oldName = this.dataset.oldname;
                 const newName = prompt(`将该同学的名字修改为真实姓名（方便导入课时费）：`, oldName);
                 if (newName && newName.trim() !== "" && newName.trim() !== oldName) {
-                    const cleanName = newName.trim(); if (cleanName.includes(',')) return alert('姓名中不能包含逗号！');
+                    const cleanName = newName.trim();
+                    if (!isValidStudentName(cleanName)) return alert('姓名格式不合法（最多50字，不能包含逗号或路径特殊字符）！');
                     SystemRouter.getReservationsRef(viewingYear).child(resKey).update({ nickname: cleanName }).then(() => {
                         SystemRouter.getLogsRef(viewingYear).push({
                             action: `管理员将预约单据 [${resKey}] 的姓名由 [${oldName}] 修改为 [${cleanName}]`, timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -466,7 +638,8 @@
     function addNewStudentToWhitelist() {
         const input = document.getElementById('new-student-name'); const name = input.value.trim();
         const hoursInput = document.getElementById('new-student-hours');
-        if(!name) return alert('请输入名字！'); if(name.includes(',')) return alert('名字里不能带逗号！');
+        if(!name) return alert('请输入名字！');
+        if (!isValidStudentName(name)) return alert('姓名格式不合法（最多50字，不能包含逗号或路径特殊字符）！');
         const hoursRaw = hoursInput ? hoursInput.value.trim() : '';
         const parsedHours = hoursRaw === '' ? null : parseFloat(hoursRaw);
         const validHours = parsedHours !== null && !isNaN(parsedHours) && parsedHours > 0;
@@ -475,16 +648,17 @@
             const exist = snap.val() || {}; const isDup = Object.values(exist).some(v => v === name);
             if(isDup) return alert('该同学已经在名单中了！');
 
-            db.ref(`years/${viewingYear}/studentWhitelist`).push(name).then(() => {
-                if (validHours) {
-                    db.ref(`years/${viewingYear}/studentHours/${name}`).set(parsedHours);
-                }
+            const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
+            const updates = {};
+            updates[`years/${viewingYear}/studentWhitelist/${studentKey}`] = name;
+            if (validHours) updates[`years/${viewingYear}/studentHours/${name}`] = parsedHours;
+            db.ref().update(updates).then(() => {
                 SystemRouter.getLogsRef(viewingYear).push({
                     action: `新增准入白名单学生：[${name}]${validHours ? `，总时长 ${parsedHours} 小时` : ''}`, timestamp: firebase.database.ServerValue.TIMESTAMP
                 });
                 input.value = '';
                 if (hoursInput) hoursInput.value = '';
-            });
+            }).catch(() => alert('新增学生失败，请重试。'));
         });
     }
 
@@ -583,8 +757,8 @@
 
             row.innerHTML = `<span class="slot-text-span">${escapeHtml(displayLabel)} ${slot.reserved ? '<strong class="text-red">(已约)</strong>' : '<strong class="text-green">(空闲)</strong>'}</span>
                 <div class="btn-group">
-                    <button class="btn-edit slot-edit-btn" data-id="${slotId}" data-time="${escapeHtml(slot.time)}">修改</button>
-                    <button class="btn-delete danger" data-id="${slotId}">删除</button>
+                    <button class="btn-edit slot-edit-btn" data-id="${escapeHtml(slotId)}" data-time="${escapeHtml(slot.time)}">修改</button>
+                    <button class="btn-delete danger" data-id="${escapeHtml(slotId)}">删除</button>
                 </div>`;
             bindDynamicGridButtons();
         });
@@ -594,8 +768,8 @@
         const row = document.getElementById(`slot-row-${slotId}`);
         row.innerHTML = `<input type="text" class="edit-input" id="edit-input-${slotId}" value="${escapeHtml(currentTime)}">
             <div class="btn-group">
-                <button class="slot-save-btn" onclick="saveEditedSlot('${slotId}')">保存</button>
-                <button class="slot-cancel-btn" onclick="cancelEditSlot('${slotId}')">取消</button>
+                <button class="slot-save-btn" onclick="saveEditedSlot(${inlineArg(slotId)})">保存</button>
+                <button class="slot-cancel-btn" onclick="cancelEditSlot(${inlineArg(slotId)})">取消</button>
             </div>`;
     }
 
@@ -609,25 +783,21 @@
             const isDup = Object.keys(data).some(id => id !== slotId && data[id].time === validationParser.formattedSlotText && data[id].status !== "hidden");
             if (isDup) return alert('该时间段已存在排班！');
 
-            SystemRouter.getSlotsRef(viewingYear).child(slotId).update({ time: validationParser.formattedSlotText }).then(() => {
-                
-                SystemRouter.getReservationsRef(viewingYear).once('value').then((resSnap) => {
-                    const reservations = resSnap.val();
-                    if (reservations) {
-                        const batchUpdates = {};
-                        Object.keys(reservations).forEach(resKey => {
-                            if (reservations[resKey].slotId === slotId) {
-                                batchUpdates[`years/${viewingYear}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
-                                batchUpdates[`years/${viewingYear}/reservations/${resKey}/slotSnapshot`] = validationParser;
-                            }
-                        });
-                        db.ref().update(batchUpdates);
+            return SystemRouter.getReservationsRef(viewingYear).once('value').then((resSnap) => {
+                const reservations = resSnap.val() || {};
+                const batchUpdates = {};
+                batchUpdates[`years/${viewingYear}/slots/${slotId}/time`] = validationParser.formattedSlotText;
+                Object.keys(reservations).forEach(resKey => {
+                    if (reservations[resKey] && reservations[resKey].slotId === slotId) {
+                        batchUpdates[`years/${viewingYear}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
+                        batchUpdates[`years/${viewingYear}/reservations/${resKey}/slotSnapshot`] = validationParser;
                     }
                 });
-
+                return db.ref().update(batchUpdates);
+            }).then(() => {
                 SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-            });
-        });
+            }).catch(() => alert('修改排班失败，请重试。'));
+        }).catch(() => alert('读取排班失败，请重试。'));
     };
 
     function setNotice() {
@@ -636,15 +806,14 @@
         const targetRef = SystemRouter.getSettingsRef(viewingYear);
 
         if (file) {
+            if (file.size > 8 * 1024 * 1024) return alert('公告图片过大，最多允许 8 MB。');
             const reader = new FileReader(); reader.onload = function(e) {
                 const img = new Image(); img.onload = function() {
                     const canvas = document.createElement('canvas'); let width = img.width; let height = img.height;
                     const MAX_WIDTH = 600; if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
                     canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
                     const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
-                    targetRef.child('notice').set(noticeText).then(() => {
-                        targetRef.child('noticeImage').set(compressedBase64).then(() => { fileInput.value = ''; }).catch(() => { alert('图片上传失败，请重试。'); });
-                    }).catch(() => { alert('公告保存失败，请重试。'); });
+                    targetRef.update({ notice: noticeText, noticeImage: compressedBase64 }).then(() => { fileInput.value = ''; }).catch(() => { alert('公告保存失败，请重试。'); });
                 }; img.src = e.target.result;
             }; reader.readAsDataURL(file);
         } else { targetRef.child('notice').set(noticeText).catch(() => { alert('公告保存失败，请重试。'); }); }
@@ -697,14 +866,16 @@
         const templates = []; for (let i = 1; i <= 5; i++) { const val = document.getElementById(`tpl-time-${i}`).value.trim(); if (val) templates.push(val); }
 
         SystemRouter.getSlotsRef(viewingYear).once('value').then(snap => {
-            const existData = snap.val() || {}; const atomicUpdates = {}; let okCount = 0; let failCount = 0;
+            const existData = snap.val() || {}; const atomicUpdates = {}; const plannedTimes = new Set(); let okCount = 0; let failCount = 0;
             templates.forEach(t => {
                 const rawCheck = `${prefix} ${t}`;
                 const normalizedParser = TimeParser.parseRawText(rawCheck, viewingYear);
                 if (!normalizedParser) return;
 
-                const isDup = Object.values(existData).some(s => s.time === normalizedParser.formattedSlotText && s.status !== "hidden");
+                const normalizedTime = normalizedParser.formattedSlotText;
+                const isDup = plannedTimes.has(normalizedTime) || Object.values(existData).some(s => s.time === normalizedTime && s.status !== "hidden");
                 if (isDup) { failCount++; } else {
+                    plannedTimes.add(normalizedTime);
                     okCount++; 
                     const newKey = SystemRouter.getSlotsRef(viewingYear).push().key; 
                     atomicUpdates[`years/${viewingYear}/slots/${newKey}`] = { time: normalizedParser.formattedSlotText, reserved: false, status: "active" };
@@ -726,40 +897,123 @@
 
     function deleteSlot(slotId) {
         if (confirm('确定要删除这个排班吗？')) {
-            SystemRouter.getSlotsRef(viewingYear).child(slotId).once('value').then(snapshot => {
-                const slot = snapshot.val();
-                if (slot && slot.reserved) {
-                    SystemRouter.getSlotsRef(viewingYear).child(slotId).update({ status: "hidden" }).then(() => {
+            const slotRef = SystemRouter.getSlotsRef(viewingYear).child(slotId);
+            // 先以事务写入 hidden，阻止学生端在“读取后删除”窗口内抢到该时段。
+            slotRef.transaction(slot => {
+                if (!slot) return slot;
+                slot.status = "hidden";
+                return slot;
+            }, (err, committed) => {
+                if (err || !committed) return alert(err ? '操作失败，请重试。' : '该排班已不存在。');
+                slotRef.once('value').then(snapshot => {
+                    const slot = snapshot.val();
+                    if (slot && slot.reserved) {
                         SystemRouter.getLogsRef(viewingYear).push({ action: `隐藏已预约的排班: [${slot.time}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
                         alert('由于已有学生预约，该时段已在学生端隐藏。');
-                    }).catch(() => { alert('操作失败，请重试。'); });
-                } else {
-                    SystemRouter.getSlotsRef(viewingYear).child(slotId).remove().catch(() => { alert('删除失败，请重试。'); });
-                }
-            }).catch(() => { alert('读取排班信息失败，请重试。'); });
+                    } else {
+                        slotRef.remove().then(() => {
+                            SystemRouter.getLogsRef(viewingYear).push({ action: `删除排班: [${slot && slot.time ? slot.time : slotId}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                        }).catch(() => alert('删除失败，请重试。'));
+                    }
+                }).catch(() => alert('读取排班信息失败，请重试。'));
+            });
         }
     }
 
-    function deleteSingleReservation(resKey, slotId, nickname) {
-        if (confirm(`确定要删除 ${nickname} 的预约记录吗？`)) {
-            SystemRouter.getSlotsRef(viewingYear).child(slotId).once('value').then(slotSnap => {
-                const slot = slotSnap.val();
-                const finalAbsoluteUpdates = {};
-                finalAbsoluteUpdates[`years/${viewingYear}/reservations/${resKey}`] = null;
+    function releaseSlotIfOwned(year, slotId, reservationId) {
+        if (!slotId) return Promise.resolve({ committed: true, legacy: false });
+        return SystemRouter.getSlotsRef(year).child(slotId).transaction(slot => {
+            // 旧排班没有所有权标记时不自动释放，避免把别人的预约重新开放。
+            if (!slot || !slot.reserved || slot.reservationId !== reservationId) return;
+            slot.reserved = false;
+            delete slot.reservationId;
+            return slot;
+        });
+    }
 
-                if (slot) {
-                    if (slot.status === "hidden") finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}`] = null;
-                    else finalAbsoluteUpdates[`years/${viewingYear}/slots/${slotId}/reserved`] = false;
-                }
+    function reserveSlotForReservation(year, slotId, reservationId) {
+        if (!slotId) return Promise.resolve({ committed: false, reason: 'missing-slot' });
+        return SystemRouter.getSlotsRef(year).child(slotId).transaction(slot => {
+            if (!slot || slot.status === 'hidden') return;
+            if (slot.reserved && slot.reservationId !== reservationId) return;
+            slot.reserved = true;
+            slot.reservationId = reservationId;
+            return slot;
+        });
+    }
 
-                db.ref().update(finalAbsoluteUpdates).then(() => {
-                    SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                }).catch((err) => {
-                    console.error('删除预约记录失败:', err);
-                    alert('删除失败，请重试。');
-                });
-            });
+    // 所有状态变化都经过所有权校验，避免取消一条旧记录时释放后来者的时段。
+    async function updateReservationStatusSafe(year, resKey, newStatus) {
+        const reservationRef = SystemRouter.getReservationsRef(year).child(resKey);
+        const snapshot = await reservationRef.once('value');
+        const reservation = snapshot.val();
+        if (!reservation) return { ok: false, reason: 'missing' };
+        const oldStatus = reservation.status || 'booked';
+        if (oldStatus === newStatus) {
+            if (newStatus !== 'canceled') return { ok: true, changed: false };
+            const released = await releaseSlotIfOwned(year, reservation.slotId, resKey);
+            return { ok: true, changed: false, slotConflict: !!reservation.slotId && !released.committed };
         }
+
+        if (newStatus === 'canceled') {
+            const result = await reservationRef.transaction(current => {
+                if (!current || current.status === 'canceled') return;
+                current.status = 'canceled';
+                return current;
+            });
+            if (!result.committed) return { ok: false, reason: 'stale' };
+            const released = await releaseSlotIfOwned(year, reservation.slotId, resKey);
+            return { ok: true, changed: true, slotConflict: !!reservation.slotId && !released.committed };
+        }
+
+        if (oldStatus === 'canceled') {
+            const reserved = await reserveSlotForReservation(year, reservation.slotId, resKey);
+            if (!reserved.committed) return { ok: false, reason: reserved.reason || 'slot-conflict' };
+            try {
+                const result = await reservationRef.transaction(current => {
+                    if (!current || current.status !== 'canceled') return;
+                    current.status = newStatus;
+                    return current;
+                });
+                if (!result.committed) {
+                    await releaseSlotIfOwned(year, reservation.slotId, resKey);
+                    return { ok: false, reason: 'stale' };
+                }
+            } catch (e) {
+                await releaseSlotIfOwned(year, reservation.slotId, resKey).catch(() => {});
+                throw e;
+            }
+            return { ok: true, changed: true };
+        }
+
+        const result = await reservationRef.transaction(current => {
+            // 快照读取后学生可能刚好取消；此分支不能绕过“重新占用排班”的流程复活预约。
+            if (!current || current.status === 'canceled' || current.status === newStatus) return;
+            current.status = newStatus;
+            return current;
+        });
+        return { ok: result.committed, changed: result.committed };
+    }
+
+    function deleteSingleReservation(resKey, slotId, nickname) {
+        if (!confirm(`确定要删除 ${nickname} 的预约记录吗？`)) return;
+        updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
+            if (!result.ok) {
+                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
+                throw { silent: true };
+            }
+            if (result.slotConflict) {
+                alert('预约已标记为取消，但排班所有权异常，记录暂不删除，请先修复排班。');
+                throw { silent: true };
+            }
+            return SystemRouter.getReservationsRef(viewingYear).child(resKey).remove();
+        }).then(() => {
+            SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+        }).catch((err) => {
+            if (err && err.silent) return;
+            console.error('删除预约记录失败:', err);
+            alert('删除失败，请重试。');
+        });
     }
 
     function setAsActiveYear() {
@@ -781,7 +1035,7 @@
         SystemRouter.yearsRoot().child(newY).once('value').then(snap => {
             if (snap.exists()) return alert('该学年已经存在！');
             
-            const secureRandomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const secureRandomCode = generateSecureCode(6);
             const initTitleName = `${newY}级硕士专业课辅导`;
             const initialPack = {};
             
@@ -801,6 +1055,7 @@
     }
     function setCode() {
         const c = document.getElementById('code-input').value.trim(); if (!c) return alert('口令不能为空');
+        if (c.length > 128) return alert('口令不能超过128个字符');
         SystemRouter.getSettingsRef(viewingYear).update({ accessCode: c }).catch(() => alert('保存失败，请重试。'));
     }
 
@@ -823,6 +1078,11 @@
     function exportCSV() {
         if (reservationsData.length === 0) return alert('没有数据可导出');
         const sorted = [...reservationsData].sort((a,b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+        const csvCell = value => {
+            let text = String(value ?? '');
+            if (/^[=+\-@]/.test(text)) text = `'${text}`;
+            return `"${text.replace(/"/g, '""')}"`;
+        };
 
         let csvContent = "\"预约时段\",\"学生姓名\",\"状态\",\"取消凭证\",\"提交时间\"\n";
         sorted.forEach(r => {
@@ -836,16 +1096,17 @@
             const p = TimeParser.parseRawText(r.time, viewingYear);
             if (p) timeDisplay = `${p.date} ${p.startTime}-${p.endTime}`;
             const readableSubmitTime = r.timestamp ? new Date(r.timestamp).toLocaleString() : "未知";
-            csvContent += `"${timeDisplay.replace(/"/g, '""')}","${(r.nickname || '不详').replace(/"/g, '""')}","${textS}","${(r.cancelCode || '-').replace(/"/g, '""')}","${readableSubmitTime}"\n`;
+            csvContent += [timeDisplay, r.nickname || '不详', textS, r.cancelCode || '-', readableSubmitTime].map(csvCell).join(',') + '\n';
         });
         
         const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
         const blob = new Blob([bom, csvContent], { type: "text/csv;charset=utf-8;" });
         
         const link = document.createElement("a"); 
-        link.href = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(blob);
+        link.href = url;
         link.setAttribute("download", `预约数据_${viewingYear}.csv`);
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
     }
 
     // 导出整个数据库备份（system + 所有学年数据），用于本地留档/迁移
@@ -876,26 +1137,30 @@
     document.getElementById('restore-file-input').onchange = function(e) {
         const file = e.target.files[0];
         if (!file) return;
+        if (file.size > 64 * 1024 * 1024) return alert('备份文件过大，最多允许 64 MB。');
         const reader = new FileReader();
         reader.onload = function(evt) {
             try {
                 const parsed = JSON.parse(evt.target.result);
                 if (parsed.source !== "class_optic_full_backup") return alert('这不是本系统的全量备份文件。');
+                if (parsed.years !== undefined && (!parsed.years || typeof parsed.years !== 'object' || Array.isArray(parsed.years))) return alert('备份中的学年数据格式不合法。');
                 const backupYears = Object.keys(parsed.years || {});
+                if (backupYears.some(y => !/^\d{4}$/.test(y))) return alert('备份包含非法学年键。');
                 const hasSystem = parsed.system !== undefined && parsed.system !== null;
                 if (backupYears.length === 0 && !hasSystem) return alert('备份文件中没有可还原的数据。');
-                if (!confirm(`还原将覆盖数据库中当前的 system 与全部学年数据（备份含 ${backupYears.length} 个学年），不可撤销！\n\n确定还原？`)) return;
+                if (!confirm(`还原将覆盖数据库中当前的 system 与全部学年数据（备份含 ${backupYears.length} 个学年），不可撤销！\n\n请确认你已先导出当前数据备份。继续？`)) return;
 
                 db.ref('years').once('value').then(ySnap => {
-                    const jobs = [];
+                    const restoreUpdates = {};
                     // 删除备份中不存在的学年
                     Object.keys(ySnap.val() || {}).filter(y => !backupYears.includes(y)).forEach(y => {
-                        jobs.push(db.ref('years/' + y).remove());
+                        restoreUpdates[`years/${y}`] = null;
                     });
                     // 写入备份中的学年
-                    backupYears.forEach(y => jobs.push(db.ref('years/' + y).set(parsed.years[y])));
-                    if (hasSystem) jobs.push(db.ref('system').set(parsed.system));
-                    return Promise.all(jobs);
+                    backupYears.forEach(y => { restoreUpdates[`years/${y}`] = parsed.years[y]; });
+                    if (hasSystem) restoreUpdates.system = parsed.system;
+                    // 单次多路径更新，避免 Promise.all 造成“恢复一半”的混合数据库。
+                    return db.ref().update(restoreUpdates);
                 }).then(() => {
                     alert('还原完成。');
                 }).catch(err => alert('还原失败：' + err.message));
@@ -915,7 +1180,7 @@
             clearPacks[`years/${viewingYear}/settings/deadline`] = null;
             clearPacks[`years/${viewingYear}/settings/notice`] = null;
             clearPacks[`years/${viewingYear}/settings/noticeImage`] = null;
-            db.ref().update(clearPacks);
+            db.ref().update(clearPacks).then(() => alert('当前学年数据已清空。')).catch(() => alert('清空失败，请重试。'));
         }
     }
 
@@ -1007,35 +1272,24 @@
         const statusLabels = { booked: '已预约', confirmed: '已确认', completed: '已完成', canceled: '已取消' };
         if (!confirm(`确定将 ${checked.length} 条记录改为「${statusLabels[newStatus]}」吗？`)) return;
 
-        const updates = {};
-        checked.forEach(cb => {
-            const key = cb.dataset.key;
-            updates[`years/${viewingYear}/reservations/${key}/status`] = newStatus;
-        });
-
-        // 批量改为已取消时，同步释放对应排班 slot（与单条取消行为保持一致）
-        const slotReleases = [];
-        if (newStatus === 'canceled') {
-            checked.forEach(cb => {
-                const key = cb.dataset.key;
-                slotReleases.push(
-                    SystemRouter.getReservationsRef(viewingYear).child(key).once('value').then(snap => {
-                        const r = snap.val();
-                        if (r && r.slotId) updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = false;
-                    })
-                );
-            });
-        }
-
-        Promise.all(slotReleases).then(() => {
-            db.ref().update(updates).then(() => {
-                SystemRouter.getLogsRef(viewingYear).push({
-                    action: `批量修改 ${checked.length} 条记录状态为 [${statusLabels[newStatus]}]`,
-                    timestamp: firebase.database.ServerValue.TIMESTAMP
-                });
+        const keys = Array.from(checked).map(cb => cb.dataset.key);
+        Promise.all(keys.map(key => updateReservationStatusSafe(viewingYear, key, newStatus)))
+            .then(results => {
+                const failed = results.filter(r => !r.ok);
+                const conflicts = results.filter(r => r.slotConflict);
+                const succeeded = results.filter(r => r.ok && r.changed).length;
+                if (failed.length || conflicts.length) {
+                    alert(`已处理 ${succeeded} 条；${failed.length} 条因时段冲突或记录变化未处理，${conflicts.length} 条取消记录存在排班所有权异常，请单独检查。`);
+                }
+                if (succeeded > 0) {
+                    SystemRouter.getLogsRef(viewingYear).push({
+                        action: `批量修改 ${succeeded} 条记录状态为 [${statusLabels[newStatus]}]`,
+                        timestamp: firebase.database.ServerValue.TIMESTAMP
+                    });
+                }
                 document.getElementById('batch-target-status').value = '';
-            }).catch(() => { alert('操作失败，请重试。'); });
-        }).catch(() => { alert('读取预约信息失败，请重试。'); });
+                handleViewingYearChange(viewingYear);
+            }).catch(() => { alert('批量操作失败，请重试。'); });
     }
 
     // 绑定 checkbox 变化和批量按钮
@@ -1058,41 +1312,29 @@
         const newLabel = statusLabels[newStatus] || newStatus;
         const oldLabel = statusLabels[oldStatus] || oldStatus;
 
-        const updates = {};
-        updates[`years/${viewingYear}/reservations/${resKey}/status`] = newStatus;
-
-        // 改为已取消：释放排班 slot；从已取消改回其他状态：重新占用 slot
-        if (newStatus === 'canceled' || oldStatus === 'canceled') {
-            SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snap => {
-                const r = snap.val();
-                if (r && r.slotId) {
-                    updates[`years/${viewingYear}/slots/${r.slotId}/reserved`] = newStatus !== 'canceled';
-                }
-                applyStatusUpdate();
-            }).catch(() => { alert('读取预约信息失败，请重试。'); });
-        } else {
-            applyStatusUpdate();
-        }
-
-        function applyStatusUpdate() {
-            db.ref().update(updates).then(() => {
-                SystemRouter.getLogsRef(viewingYear).push({
-                    action: `管理员将预约状态从 [${oldLabel}] 改为 [${newLabel}]`,
-                    timestamp: firebase.database.ServerValue.TIMESTAMP
-                });
-                // 更新下拉框颜色
-                const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
-                if (selectEl) {
-                    selectEl.dataset.oldstatus = newStatus;
-                    const colors = { booked: '#e6a23c', confirmed: '#409eff', completed: '#67c23a', canceled: '#909399' };
-                    selectEl.style.color = colors[newStatus] || '#909399';
-                }
-            }).catch(() => {
-                alert('状态修改失败，请重试。');
+        updateReservationStatusSafe(viewingYear, resKey, newStatus).then(result => {
+            if (!result.ok) {
+                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，无法恢复。' : '状态修改失败，请重试。');
                 const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
                 if (selectEl) selectEl.value = oldStatus;
+                return;
+            }
+            SystemRouter.getLogsRef(viewingYear).push({
+                action: `管理员将预约状态从 [${oldLabel}] 改为 [${newLabel}]${result.slotConflict ? '（排班所有权异常）' : ''}`,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
             });
-        }
+            if (result.slotConflict) alert('状态已取消，但排班所有权异常，未自动释放时段。');
+            const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
+            if (selectEl) {
+                selectEl.dataset.oldstatus = newStatus;
+                const colors = { booked: '#e6a23c', confirmed: '#409eff', completed: '#67c23a', canceled: '#909399' };
+                selectEl.style.color = colors[newStatus] || '#909399';
+            }
+        }).catch(() => {
+            alert('状态修改失败，请重试。');
+            const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
+            if (selectEl) selectEl.value = oldStatus;
+        });
     }
 
     document.getElementById('btn-del-notice-img').onclick = function() {
@@ -1185,6 +1427,9 @@
     document.getElementById('btn-export-tutor-json').onclick = exportTutorFeeJSON; 
     document.getElementById('btn-clear-year').onclick = clearCurrentYearData;
     document.getElementById('btn-destroy-year').onclick = destroyCurrentYearData; 
+    document.getElementById('today-refresh-btn').onclick = () => {
+        handleViewingYearChange(viewingYear);
+    };
     document.getElementById('mgr-start-btn').onclick = executeDataMigration;
     document.getElementById('purge-old-btn').onclick = function() { window.purgeOldRootNodes(); }; 
     document.getElementById('btn-toggle-logs').onclick = toggleLogCollapse;

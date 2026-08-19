@@ -26,7 +26,7 @@
 
     <!-- 认证遮罩 -->
     <div id="auth-overlay" class="exam-auth-overlay">
-        <div class="exam-auth-card">
+        <div class="exam-auth-card" id="exam-auth-card">
             <div class="exam-mode-tabs">
                 <button class="exam-mode-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">考试模式</button>
                 <button class="exam-mode-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">复查模式</button>
@@ -44,6 +44,22 @@
             </div>
             <p id="auth-error" class="exam-auth-error"></p>
         </div>
+        <section id="exam-submit-receipt" class="exam-submit-receipt" style="display:none;" aria-live="polite">
+            <div class="exam-receipt-kicker">交卷已确认</div>
+            <h2>本次考试已完成</h2>
+            <div class="exam-receipt-grid">
+                <div><span>试卷</span><strong id="exam-receipt-paper">-</strong></div>
+                <div><span>姓名</span><strong id="exam-receipt-student">-</strong></div>
+                <div><span>交卷时间</span><strong id="exam-receipt-time">-</strong></div>
+                <div><span>流水号</span><strong id="exam-receipt-id" class="exam-receipt-id">-</strong></div>
+            </div>
+            <p>请保存流水号。如需核对交卷状态，可向教师提供此流水号。</p>
+            <div class="exam-receipt-actions">
+                <button type="button" onclick="copyExamReceiptId()">复制流水号</button>
+                <button type="button" onclick="downloadExamReceipt()">下载凭证</button>
+                <button type="button" class="exam-receipt-secondary" onclick="closeExamSubmitReceipt()">返回</button>
+            </div>
+        </section>
     </div>
 
     <!-- 考试主界面 -->

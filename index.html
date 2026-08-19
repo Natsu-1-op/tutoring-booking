@@ -43,6 +43,22 @@
                 </div>
                 <button id="submit-btn" onclick="submitBooking()">提交预约申请</button>
             </div>
+
+            <section id="booking-receipt" class="booking-receipt" style="display:none;" aria-live="polite">
+                <div class="booking-receipt-kicker">预约已完成</div>
+                <h2>请保存这张预约凭证</h2>
+                <div class="booking-receipt-main">
+                    <div><span>姓名</span><strong id="receipt-student-name">-</strong></div>
+                    <div><span>上课时间</span><strong id="receipt-lesson-time">-</strong></div>
+                    <div><span>取消凭证</span><strong id="receipt-cancel-code" class="receipt-code">-</strong></div>
+                </div>
+                <p class="booking-receipt-note">查询或取消预约时，需要输入姓名和取消凭证。凭证不会永久保存在本设备。</p>
+                <div class="booking-receipt-actions">
+                    <button type="button" onclick="copyBookingReceiptCode()">复制凭证</button>
+                    <button type="button" onclick="downloadBookingReceipt()">下载凭证</button>
+                    <button type="button" onclick="closeBookingReceipt()" class="receipt-secondary-btn">继续约课</button>
+                </div>
+            </section>
         </div>
 
         <div id="history-section" style="display: none;">

@@ -136,6 +136,14 @@
                         <div><b>耗时：</b><span id="g-duration" class="text-blue text-bold">-</span></div>
                         <div><b>交卷：</b><span id="g-submit" class="text-gray" style="font-size:12px;">-</span></div>
                     </div>
+                    <div id="grading-draft-status" class="grading-draft-status" style="display:none;">
+                        <div id="grading-draft-message"></div>
+                        <div class="grading-draft-actions">
+                            <button type="button" class="teacher-btn teacher-btn-sm teacher-btn-green" onclick="restoreCurrentGradingDraft()">恢复草稿</button>
+                            <button type="button" class="teacher-btn teacher-btn-sm teacher-btn-gray" onclick="discardCurrentGradingDraft()">放弃</button>
+                        </div>
+                    </div>
+                    <div id="grading-draft-save-status" class="grading-draft-save-status" style="display:none;"></div>
                     <label class="grading-side-label">浏览模式</label>
                     <div class="teacher-view-toggle">
                         <button class="teacher-view-btn active" id="mode-btn-full" onclick="switchViewMode('full')">整卷浏览</button>
