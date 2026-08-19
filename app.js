@@ -3,7 +3,7 @@ let isDeadlined = false;
 let isSubmitting = false;
 let currentBookingReceipt = null;
 
-const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]\u0000-\u001F\u007F]/;
+const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
 
 function isValidStudentName(name) {
     return typeof name === 'string' && name.length > 0 && name.length <= 50 && !INVALID_FIREBASE_KEY_CHARS.test(name) && !name.includes(',');

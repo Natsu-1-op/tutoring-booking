@@ -1017,8 +1017,8 @@ function showAIFeedback(qIndex, result) {
         // AI 结果只作为建议展示，不自动改变最终分数。
         const scoreInput = document.getElementById(`score-input-id-${qIndex}`);
         if (scoreInput) scoreInput.title = `AI 建议 ${result.score} 分，点击“采纳分数与评语”后才会写入`;
-        const fbInput = document.getElementById(`feedback-input-${qIndex}`);
-        if (fbInput && !feedbackMap[mq.id]) fbInput.value = pendingAIFeedback[mq.id];
+        // 注意：不要把 AI 评语直接写进可编辑框——程序赋值不触发 oninput，
+        // 会造成"框里有字但 feedbackMap 为空、导出时评语丢失"的假象。点「采纳」后才写入。
     } else {
         fbDiv.innerHTML = `<div class="ai-feedback-card ai-feedback-error">${escapeHtml(result.feedback)}</div>`;
     }
@@ -1038,6 +1038,9 @@ function acceptAIScore(qIndex, score) {
     const scoreInput = document.getElementById(`score-input-id-${qIndex}`);
     if (scoreInput) scoreInput.value = acceptedScore;
     if (!feedbackMap[mq.id]) feedbackMap[mq.id] = pendingAIFeedback[mq.id] || '';
+    // 采纳时才把评语写入可编辑框（与 feedbackMap 保持一致，避免"看着填了实际没存"）
+    const fbInput = document.getElementById(`feedback-input-${qIndex}`);
+    if (fbInput) fbInput.value = feedbackMap[mq.id];
     updateLiveScoreUI(qIndex, acceptedScore, mq.score);
     document.getElementById(`ai-feedback-${qIndex}`).querySelector('.ai-accept-btn').textContent = '已采纳';
     document.getElementById(`ai-feedback-${qIndex}`).querySelector('.ai-accept-btn').disabled = true;

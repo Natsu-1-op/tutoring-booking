@@ -30,7 +30,7 @@ const MAX_REVIEW_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_QUESTIONS = 200;
 const MAX_TEXT_LENGTH = 20000;
 const ALLOWED_QUESTION_TYPES = new Set(['choice', 'judge', 'blank-auto', 'blank-hand', 'calculation']);
-const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]\u0000-\u001F\u007F]/;
+const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
 const activeYearReady = SystemRouter.system().once('value').then(snapshot => {
     const sys = snapshot.val();
     if (sys && /^\d{4}$/.test(String(sys.activeYear || ''))) SystemRouter.activeYear = String(sys.activeYear);
@@ -685,7 +685,12 @@ async function triggerManualSubmit(isForceSystemTimeout) {
         const pending = await runTransaction(lockRef, currentValue => {
             // 旧版数字锁和新版 submitted 都不可重复提交。
             if (typeof currentValue === 'number' || (currentValue && currentValue.status === 'submitted')) return;
-            if (currentValue && currentValue.status === 'pending' && currentValue.clientToken !== submitToken) return;
+            if (currentValue && currentValue.status === 'pending' && currentValue.clientToken !== submitToken) {
+                // 30 分钟内的 pending 视为本人仍在进行的流程，不允许覆盖；
+                // 超过 30 分钟的陈旧 pending（如换设备/断网遗留）允许放弃重来（规则也已放开超时覆盖）。
+                const staleMs = Date.now() - Number(currentValue.createdAt || 0);
+                if (!Number.isFinite(staleMs) || staleMs < 30 * 60 * 1000) return;
+            }
             return { status: 'pending', clientToken: submitToken, createdAt: firebase.database.ServerValue.TIMESTAMP };
         });
         if (!pending.committed) {

@@ -12,7 +12,7 @@
     let viewingYear = "2026";
     const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
     const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
-    const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]\u0000-\u001F\u007F]/;
+    const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
     let adminLoginFailures = 0;
     let adminLoginBlockedUntil = 0;
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前

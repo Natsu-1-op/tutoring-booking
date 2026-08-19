@@ -1401,7 +1401,10 @@ async function forceUploadCloud() {
     const forceJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(forceJob, { force: true }), () => pushCloudNow(forceJob, { force: true }));
     const ok = await cloudPushChain;
-    if (ok) alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
+    if (ok) {
+        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
+        alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
+    }
 }
 
 // 判断某条云端记录是否本地已存在（按 sourceId / id / 日期+姓名+课时 三元组）
@@ -1411,13 +1414,31 @@ function isRecordExisting(rc) {
     return data.records.some(r => r.date === rc.date && r.studentName === rc.studentName && Math.abs(Number(r.hours) - Number(rc.hours)) < 0.01);
 }
 
-// 删除当前学年的云端数据（本地数据不受影响）
+// 判断两条课时记录是否为同一条（id / sourceId / 日期+姓名+课时 三元组）
+function sameRecordIdentity(a, b) {
+    if (!a || !b) return false;
+    if (a.id && b.id && a.id === b.id) return true;
+    if (a.sourceId && b.sourceId && a.sourceId === b.sourceId) return true;
+    return a.date === b.date && a.studentName === b.studentName && Math.abs(Number(a.hours) - Number(b.hours)) < 0.01;
+}
+
+// 并集合并两条记录列表（按身份去重），用于"本机独有记录保留"
+function mergeRecordLists(primary, extras) {
+    const out = primary.slice();
+    extras.forEach(e => { if (!out.some(o => sameRecordIdentity(o, e))) out.push(e); });
+    return out;
+}
+
+// 删除当前学年的云端数据（本地数据不受影响；写入墓碑，防止其他设备自动重建）
 async function deleteCloudData() {
     const ok = await ensureCloudReady();
     if (!ok) return;
-    if (!confirm(`确定删除云端 ${activeYear} 年的课时费数据吗？\n\n本机数据不会受影响（所有数据仍保留在本地）。`)) return;
+    if (!confirm(`确定删除云端 ${activeYear} 年的课时费数据吗？\n\n本机数据不会受影响（所有数据仍保留在本地）。\n删除后其他设备不会自动重新上传；如需重新上传请点「上传本机到云端」。`)) return;
     try {
         await vaultRef().remove();
+        // 墓碑：标记"云端已主动删除"，避免换设备打开时自动重建
+        await db.ref(`years/${activeYear}/feeVaultDeletedAt`).set({ deletedAt: Date.now() });
+        delete cloudVersionsByYear[activeYear];
         showToast(`已删除云端 ${activeYear} 年数据，本地保留`);
         renderYearSummary();
     } catch (e) {
@@ -1443,7 +1464,15 @@ async function pullCloud() {
         const snap = await vaultRef().once('value');
         const vault = snap.val();
         if (!vault || !vault.cipher) {
-            // 云端还没有该学年账本：本机有该年数据则自动一键上传（本地 → 云端迁移）
+            // 云端还没有该学年账本：先检查是否被手动删除（墓碑），避免其他设备打开时自动重建
+            let tombstone = null;
+            try { tombstone = (await db.ref(`years/${activeYear}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
+            if (tombstone && tombstone.deletedAt) {
+                showToast(`云端 ${activeYear} 年课时费数据已于 ${new Date(tombstone.deletedAt).toLocaleString()} 删除，本机保留。如需重新上传请点「上传本机到云端」。`);
+                renderYearSummary();
+                return;
+            }
+            // 本机有该年数据则自动一键上传（本地 → 云端迁移）
             const slice = getYearSlice(activeYear);
             if (slice.records.length || slice.students.length) {
                 const up = await pushCloud();
@@ -1465,18 +1494,29 @@ async function pullCloud() {
         }
         // 云端较新或相同：以云端当前学年切片为准，传播同 ID 修改和删除；其他年份仍保留在本机。
         let changed = false;
+        let mergedLocalOnlyCount = 0;
+        let localOnlyNames = new Set();
         const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : []).map(normalizeRecord).filter(Boolean);
         const localOtherYearRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) !== String(activeYear));
         const localActiveRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === String(activeYear));
         const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
         if (recordsChanged) {
-            data.records = localOtherYearRecords.concat(cloudRecords);
+            // 本机独有（云端没有）的记录：并集保留，防止覆盖丢数据；云端独有的记录与删除照常传播。
+            const localOnlyRecords = localActiveRecords.filter(lr => !cloudRecords.some(cr => sameRecordIdentity(lr, cr)));
+            if (localOnlyRecords.length > 0) {
+                localOnlyNames = new Set(localOnlyRecords.map(r => r.studentName));
+                data.records = localOtherYearRecords.concat(mergeRecordLists(cloudRecords, localOnlyRecords));
+                mergedLocalOnlyCount = localOnlyRecords.length;
+            } else {
+                data.records = localOtherYearRecords.concat(cloudRecords);
+            }
             changed = true;
         }
 
         const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : []).map(normalizeStudent).filter(Boolean);
         const otherYearStudentNames = new Set(localOtherYearRecords.map(r => r.studentName));
-        const preservedStudents = data.students.filter(s => otherYearStudentNames.has(s.name));
+        // 本机独有记录的姓名也保留学生档案，避免覆盖后档案丢失
+        const preservedStudents = data.students.filter(s => otherYearStudentNames.has(s.name) || localOnlyNames.has(s.name));
         const mergedStudents = [];
         [...cloudStudents, ...preservedStudents].forEach(s => {
             if (!mergedStudents.some(existing => existing.name === s.name)) mergedStudents.push(s);
@@ -1499,7 +1539,7 @@ async function pullCloud() {
             _applyingCloud = true;
             saveData();
             _applyingCloud = false;
-            showToast(`已合并云端 ${activeYear} 年账本到本地`);
+            showToast(`已合并云端 ${activeYear} 年账本到本地${mergedLocalOnlyCount ? `，并保留本机 ${mergedLocalOnlyCount} 条云端没有的记录` : ''}`);
         }
         renderYearSummary();
     } catch (e) {
@@ -1597,7 +1637,7 @@ function getReservationComparisonData(reservation) {
     const rawTime = String(r.time || '').trim();
     const timeMatch = rawTime.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):?(\d{2})-(\d{1,2}):?(\d{2})$/);
     if (timeMatch) {
-        if (!date && /^\d{4}-\d{2}-\d{2}$/.test(String(activeYear) + '-01-01')) {
+        if (!date && /^\d{4}$/.test(String(activeYear))) {
             date = `${activeYear}-${String(Number(timeMatch[1])).padStart(2, '0')}-${String(Number(timeMatch[2])).padStart(2, '0')}`;
         }
         if (!startTime) startTime = normalizeClockValue(`${timeMatch[3]}:${timeMatch[4]}`);
@@ -2311,12 +2351,16 @@ async function importSelectedPending() {
     }
     const noProfile = new Set();
     const importedRecords = [];
+    let alreadyImportedCount = 0;
     checked.forEach(p => {
+        const recordId = `booking_${p.sourceId || p.resKey}`;
+        // 防重复：手动删过账本记录后再次出现的预约，不能重复导入产生同 id 记录
+        const probe = { id: recordId, sourceId: p.sourceId, studentName: p.studentName, date: p.date, hours: p.hours };
+        if (isRecordExisting(probe)) { alreadyImportedCount++; return; }
         const targetStudent = data.students.find(s => s.name === p.studentName);
         if (!targetStudent) noProfile.add(p.studentName);
         const rate = targetStudent ? targetStudent.rate : 0;
         const total = Number((rate * p.hours).toFixed(2));
-        const recordId = `booking_${p.sourceId || p.resKey}`;
         data.records.push({
             id: recordId,
             sourceId: p.sourceId,
@@ -2350,7 +2394,7 @@ async function importSelectedPending() {
     let warn = "";
     if (noProfile.size > 0) warn = `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
     const syncMessage = statusSynced ? '' : '\n\n本机账本已保存，但云端入账状态尚未确认，请稍后检查同步。';
-    alert(`约课入账成功！已导入 ${checked.length} 条。${warn}${syncMessage}`);
+    alert(`约课入账成功！已导入 ${checked.length - alreadyImportedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
     refreshPendingList();
 }
 
@@ -2409,10 +2453,14 @@ async function syncReservationTime(p) {
             if (m) startTime = `${String(+m[1]).padStart(2, '0')}:${m[2]}`;
         }
         if (!startTime) return;
-        // 结束时间 = 开始时间 + 修正后的课时长
+        // 结束时间 = 开始时间 + 修正后的课时长；不允许跨午夜（否则生成"结束早于开始"的非法时间）
         const [sh, sm] = startTime.split(':').map(Number);
         const totalMin = sh * 60 + sm + Math.round(Number(p.hours) * 60);
-        const eh = Math.floor((totalMin % (24 * 60)) / 60);
+        if (totalMin >= 24 * 60) {
+            showToast('修改后课时超过当天剩余时间（跨午夜），后台时间未同步（本机账本仍生效），请调小课时或调整日期');
+            return;
+        }
+        const eh = Math.floor(totalMin / 60);
         const em = totalMin % 60;
         const endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
         const md = String(p.date).split('-'); // YYYY-MM-DD

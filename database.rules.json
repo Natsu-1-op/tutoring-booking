@@ -23,7 +23,7 @@
         },
         "reservations": {
           "$resId": {
-            "nickname": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]]{1,50}$/)" },
+            "nickname": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
             "slotId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
             "reservationId": { ".validate": "newData.isString() && newData.val() === $resId" },
             "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
@@ -46,7 +46,7 @@
         },
         "studentWhitelist": {
           "$id": {
-            ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]]{1,50}$/)"
+            ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)"
           }
         },
         "operationLog": {},
@@ -59,7 +59,7 @@
       ".write": true,
       "$paper": {
         "$student": {
-          "name": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]]{1,50}$/)" },
+          "name": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
           "paperTitle": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
           "time": { ".validate": "newData.isString() && newData.val().length <= 100" },
           "score": { ".validate": "newData.isNumber() && newData.val() >= 0 && (!newData.parent().child('maxScore').exists() || newData.val() <= newData.parent().child('maxScore').val())" },
@@ -72,7 +72,7 @@
       "$paper": {
         "$student": {
           ".read": true,
-          ".write": "!data.exists() || (data.hasChildren(['status', 'clientToken']) && data.child('status').val() === 'pending' && newData.child('clientToken').val() === data.child('clientToken').val() && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'submitted'))",
+          ".write": "!data.exists() || (data.hasChildren(['status', 'clientToken']) && data.child('status').val() === 'pending' && (newData.child('clientToken').val() === data.child('clientToken').val() || now - data.child('createdAt').val() > 1800000) && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'submitted'))",
           ".validate": "newData.hasChildren(['status', 'clientToken', 'createdAt']) && newData.child('clientToken').isString() && newData.child('clientToken').val().length > 0 && newData.child('clientToken').val().length <= 200 && (newData.child('status').val() === 'pending' || (newData.child('status').val() === 'submitted' && newData.child('submittedAt').isNumber() && newData.child('receiptId').isString() && newData.child('receiptId').val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)))",
           "status": { ".validate": "newData.isString()" },
           "clientToken": { ".validate": "newData.isString()" },
