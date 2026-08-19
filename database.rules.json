@@ -31,9 +31,10 @@
             "cancelCode": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{5}$/)" },
             "timestamp": { ".validate": "newData.isNumber()" },
             "archived": { ".validate": "newData.isBoolean() || newData.val() === null" },
-            "feeStatus": { ".validate": "newData.isString() && (newData.val() === 'posted' || newData.val() === 'pending')" },
+            "feeStatus": { ".validate": "newData.isString() && (newData.val() === 'posted' || newData.val() === 'pending' || newData.val() === 'dismissed')" },
             "feePostedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
-            "feeRecordId": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "feeDismissedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
+            "feeRecordId": { ".validate": "(newData.isString() && newData.val().length <= 200) || newData.val() === null" },
             "slotSnapshot": { ".validate": "newData.hasChildren()" },
             "$other": { ".validate": false }
           }

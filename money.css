@@ -1,0 +1,246 @@
+/* 课时费端专用视觉层，保留 Tailwind 的功能类和原有交互。 */
+
+.money-page {
+    background: #f5f7fb !important;
+}
+
+.money-header {
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: none !important;
+}
+
+.money-header > div,
+.money-header > nav,
+.money-main {
+    max-width: 1080px !important;
+}
+
+.money-header h1 {
+    color: #1d4ed8 !important;
+    letter-spacing: -.02em;
+}
+
+.money-top-actions {
+    max-width: 62%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.money-top-actions::-webkit-scrollbar {
+    display: none;
+}
+
+.money-top-actions button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.money-header > nav {
+    border-color: #edf1f6 !important;
+}
+
+.money-main {
+    background: transparent;
+}
+
+.money-view {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
+.money-view > .bg-white,
+.money-view > .grid > .bg-white,
+.money-view > .bg-gradient-to-br {
+    border: 1px solid #e2e8f0;
+    box-shadow: none !important;
+}
+
+#view-calendar .bg-white,
+#view-stats .bg-white,
+#view-stats .bg-gradient-to-br {
+    border-radius: 10px;
+}
+
+#view-calendar #calendarGrid > div {
+    min-height: 34px;
+}
+
+#view-calendar #dailyRecordsList {
+    max-height: 360px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.money-fee-view {
+    max-width: 980px;
+}
+
+.fee-page-heading {
+    gap: 12px;
+}
+
+.fee-page-heading h2 {
+    margin: 2px 0 0;
+    color: #0f172a;
+    letter-spacing: -.02em;
+}
+
+.fee-kicker {
+    margin: 0;
+    color: #2563eb;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.fee-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.fee-actions button {
+    min-height: 34px;
+    color: #475569 !important;
+    background: #fff !important;
+    border: 1px solid #dbe3ee !important;
+    box-shadow: none !important;
+}
+
+.fee-actions button:hover {
+    color: #1d4ed8 !important;
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+}
+
+.fee-actions button[onclick="deleteCloudData()"] {
+    color: #b91c1c !important;
+    background: #fef2f2 !important;
+    border-color: #fecaca !important;
+}
+
+.fee-card {
+    border: 1px solid #e2e8f0;
+    box-shadow: none !important;
+}
+
+#feeYearSummary,
+#feeSyncStatus {
+    color: #64748b !important;
+}
+
+#pendingFeeSummary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 10px;
+    background: #f8fafc;
+    border-color: #edf1f6;
+}
+
+#pendingFeeSummary strong {
+    color: #0f172a;
+}
+
+.fee-reconciliation-notice {
+    margin: 8px 0 10px;
+    padding: 9px 10px;
+    color: #92400e;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 7px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.fee-pending-list {
+    max-height: min(50vh, 520px);
+    padding: 2px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+.fee-pending-row {
+    min-height: 58px;
+    box-sizing: border-box;
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+}
+
+.fee-pending-row:has(input:disabled) {
+    background: #fff7ed !important;
+    border-color: #fed7aa !important;
+}
+
+.fee-import-button {
+    min-height: 42px;
+    background: #2563eb !important;
+}
+
+.fee-import-button:disabled {
+    background: #cbd5e1 !important;
+}
+
+.fee-dismissed-list {
+    max-height: 180px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+@media (max-width: 760px) {
+    .money-header > div,
+    .money-header > nav {
+        width: 100%;
+    }
+
+    .money-header > div:first-child {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .money-top-actions {
+        width: 100%;
+        max-width: none;
+        padding-bottom: 2px;
+        justify-content: flex-start;
+    }
+
+    .money-view,
+    .money-fee-view {
+        max-width: none;
+    }
+
+    .fee-page-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .fee-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .fee-actions button {
+        flex: 1 1 calc(50% - 6px);
+        min-width: 0;
+    }
+
+    #pendingFeeSummary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .fee-pending-list {
+        max-height: 48vh;
+    }
+}
+
+@media (max-width: 360px) {
+    .money-top-actions button {
+        padding-right: 8px !important;
+        padding-left: 8px !important;
+    }
+
+    .fee-actions button {
+        flex-basis: 100%;
+    }
+}

@@ -53,13 +53,16 @@
         }).filter(item => item.parsed);
         const todayItems = canShowToday ? parsedItems.filter(item => item.date === todayKey).sort((a, b) => a.start.localeCompare(b.start)) : [];
         const futureEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const futureItems = canShowToday ? parsedItems.filter(item => item.date > todayKey && item.date <= localDateKey(futureEnd)).sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).slice(0, 12) : [];
-        const feeItems = parsedItems.filter(item => item.data.status === 'completed' && item.data.feeStatus !== 'posted');
-        const pendingItems = parsedItems.filter(item => item.data.status === 'booked');
+        const futureItems = canShowToday ? parsedItems.filter(item => item.date > todayKey && item.date <= localDateKey(futureEnd)).sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)) : [];
+        const feeItems = parsedItems.filter(item => item.data.status === 'completed' && !['posted', 'dismissed'].includes(item.data.feeStatus));
 
         document.getElementById('today-count').textContent = todayItems.length;
         document.getElementById('today-pending-count').textContent = todayItems.filter(item => item.data.status === 'booked').length;
         document.getElementById('today-fee-count').textContent = feeItems.length;
+        const todayPanelCount = document.getElementById('today-panel-count');
+        const upcomingPanelCount = document.getElementById('upcoming-panel-count');
+        if (todayPanelCount) todayPanelCount.textContent = `${todayItems.length} 节`;
+        if (upcomingPanelCount) upcomingPanelCount.textContent = `${futureItems.length} 节`;
 
         const renderCourseItems = (items, showDate) => {
             if (!items.length) return '<p class="today-empty">暂无课程</p>';
@@ -76,7 +79,7 @@
                     <div class="today-course-info">
                         <div class="today-course-time">${datePrefix}${escapeHtml(item.parsed.startTime)}–${escapeHtml(item.parsed.endTime)}</div>
                         <div class="today-course-name">${escapeHtml(item.data.nickname || '未填写姓名')}</div>
-                        <div class="today-course-meta">${hours.toFixed(2)} 小时 · ${item.data.feeStatus === 'posted' ? '已入账' : status === 'completed' ? '待入账' : '预约'}</div>
+                        <div class="today-course-meta">${hours.toFixed(2)} 小时 · ${item.data.feeStatus === 'posted' ? '已入账' : item.data.feeStatus === 'dismissed' ? '已忽略' : status === 'completed' ? '待入账' : '预约'}</div>
                         <span class="today-status today-status-${status}">${dashboardStatusText(status)}</span>
                     </div>
                     <div class="today-course-actions">${action}</div>
@@ -131,6 +134,25 @@
         if (!canShowToday && !futureItems.length) warnings.push('当前查看学年不是设备当前年份，今日工作台暂不显示日期课程。');
         document.getElementById('today-warning-count').textContent = warnings.length;
         warningEl.innerHTML = warnings.length ? warnings.slice(0, 8).map(text => `<div class="today-warning-item">${escapeHtml(text)}</div>`).join('') : '<p class="today-empty">暂无异常</p>';
+    }
+
+    function renderTodayDashboardError(message) {
+        const dateEl = document.getElementById('today-dashboard-date');
+        const todayEl = document.getElementById('today-course-list');
+        const upcomingEl = document.getElementById('upcoming-course-list');
+        const warningEl = document.getElementById('today-warning-list');
+        if (dateEl) dateEl.textContent = '工作台暂时无法读取';
+        if (todayEl) todayEl.innerHTML = `<p class="today-empty">${escapeHtml(message)}</p>`;
+        if (upcomingEl) upcomingEl.innerHTML = '<p class="today-empty">请稍后刷新重试</p>';
+        if (warningEl) warningEl.innerHTML = '<p class="today-empty">未能完成数据检查</p>';
+        ['today-count', 'today-pending-count', 'today-fee-count', 'today-warning-count'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '—';
+        });
+        ['today-panel-count', 'upcoming-panel-count'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '';
+        });
     }
 
     let currentActiveSlotsRefMemory = null;
@@ -188,7 +210,11 @@
 
                 isAdminAuthenticated = true; 
                 document.getElementById('admin-login').style.display = 'none';
-                document.getElementById('admin-content').style.display = 'block';
+                const contentEl = document.getElementById('admin-content');
+                contentEl.classList.add('is-visible');
+                contentEl.style.display = '';
+                // 先结束页面中的静态“正在读取”占位，避免 Firebase 初始化异常时界面一直假加载。
+                renderTodayDashboard();
                 initAdminSystem();
             } else {
                 registerAdminLoginFailure(errorEl);
@@ -203,10 +229,19 @@
         if (!isAdminAuthenticated) return; 
         if (initialized) return; initialized = true;
 
-        db.ref('slots').once('value').then((s) => {
-            db.ref('reservations').once('value').then((r) => {
-                if (s.exists() || r.exists()) document.getElementById('migration-wizard-panel').style.display = 'block';
-            });
+        // 新规则已禁止访问旧版扁平根节点；迁移检查失败时不能留下未处理 Promise，
+        // 更不能影响学年数据和今日工作台的监听。
+        Promise.all([
+            db.ref('slots').once('value'),
+            db.ref('reservations').once('value')
+        ]).then(([slotsSnapshot, reservationsSnapshot]) => {
+            if (slotsSnapshot.exists() || reservationsSnapshot.exists()) {
+                document.getElementById('migration-wizard-panel').style.display = 'flex';
+            }
+        }).catch(error => {
+            if (!error || error.code !== 'PERMISSION_DENIED') {
+                console.warn('旧版数据迁移检查跳过:', error);
+            }
         });
 
         SystemRouter.yearsRoot().on('value', (snapshot) => {
@@ -482,6 +517,10 @@
                 dateGroupDiv.appendChild(header); dateGroupDiv.appendChild(body); container.appendChild(dateGroupDiv);
             });
             bindDynamicGridButtons();
+        }, (error) => {
+            dashboardSlots = {};
+            console.error('排班读取失败:', error);
+            renderTodayDashboardError('排班数据读取失败，请检查网络或 Firebase 数据库规则。');
         });
 
         currentActiveReservationsRefMemory.on('value', (snapshot) => {
@@ -535,10 +574,11 @@
             ['当前排课', '历史归档'].forEach(groupKey => {
                 if (!resGroups[groupKey]) return;
                 const groupRecords = resGroups[groupKey].sort(sortByLessonTime);
-                const resGroupDiv = document.createElement('div'); resGroupDiv.className = 'date-group res-group';
-                if (resCollapseState[groupKey] === undefined) resCollapseState[groupKey] = true;
-
                 const isCurrent = groupKey === '当前排课';
+                const resGroupDiv = document.createElement('div');
+                resGroupDiv.className = `date-group res-group ${isCurrent ? 'res-current-group' : 'res-history-group'}`;
+                if (resCollapseState[groupKey] === undefined) resCollapseState[groupKey] = !isCurrent;
+
                 const header = document.createElement('div'); header.className = 'date-header';
                 header.style.background = isCurrent ? '#ecf5ff' : '#f4f4f5';
                 header.style.color = isCurrent ? '#409eff' : '#909399';
@@ -581,10 +621,10 @@
                     }
 
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td><input type="checkbox" class="batch-check-item" data-key="${escapeHtml(item.key)}"></td><td>${escapeHtml(r.time)}</td>
-                        <td><span class="editable-name" data-key="${escapeHtml(item.key)}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
-                        <td>${selectHtml}</td><td>${escapeHtml(r.cancelCode || '-')}</td>
-                        <td>${archiveBtnHtml}<button class="danger btn-force-del" data-key="${escapeHtml(item.key)}" data-slotid="${escapeHtml(r.slotId || '')}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
+                    tr.innerHTML = `<td><input type="checkbox" class="batch-check-item" data-key="${escapeHtml(item.key)}"></td><td data-label="时间">${escapeHtml(r.time)}</td>
+                        <td data-label="姓名"><span class="editable-name" data-key="${escapeHtml(item.key)}" data-oldname="${escapeHtml(r.nickname)}"><b>${escapeHtml(r.nickname || '不详')}</b></span></td>
+                        <td data-label="状态">${selectHtml}</td><td data-label="取消码">${escapeHtml(r.cancelCode || '-')}</td>
+                        <td data-label="操作">${archiveBtnHtml}<button class="danger btn-force-del" data-key="${escapeHtml(item.key)}" data-slotid="${escapeHtml(r.slotId || '')}" data-name="${escapeHtml(r.nickname || '未定')}">删除</button></td>`;
                     tbody.appendChild(tr);
                 });
 
@@ -603,6 +643,10 @@
             bindArchiveButtons();
             bindBatchCheckEvents();
             bindNameEditEvents();
+        }, (error) => {
+            dashboardReservations = {};
+            console.error('预约读取失败:', error);
+            renderTodayDashboardError('预约数据读取失败，请检查网络或 Firebase 数据库规则。');
         });
 
         currentActiveLogsRefMemory.on('value', (snapshot) => {

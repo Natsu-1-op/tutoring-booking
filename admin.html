@@ -117,22 +117,27 @@
             .today-course-actions { flex-direction: column; }
         }
     </style>
+    <link rel="stylesheet" href="admin.css">
 </head>
-<body>
+<body class="admin-page">
     <div id="admin-login">
-        <div class="container" style="max-width: 400px; text-align: center;">
+        <div class="admin-login-card">
             <h1>系统后台认证</h1>
-            <div class="form-group" style="margin-top: 20px;">
-                <input type="password" id="admin-password" placeholder="请输入管理员密码" style="width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box;">
+            <p class="admin-login-subtitle">教师管理工作台</p>
+            <div class="form-group">
+                <input type="password" id="admin-password" placeholder="请输入管理员密码">
             </div>
             <button id="admin-login-submit">登录</button>
             <p id="login-error" style="color: red; margin-top: 10px; font-weight: bold;"></p>
         </div>
     </div>
 
-    <div id="admin-content" class="container" style="max-width: 1000px;">
+    <main id="admin-content" class="admin-shell">
         <div class="admin-header">
-            <h2>专业课辅导 · 管理后台</h2>
+            <div class="admin-title-block">
+                <p class="admin-eyebrow">教师管理工作台</p>
+                <h1>专业课辅导</h1>
+            </div>
             <div class="admin-toolbar">
                 <a class="tool-btn tool-exam" href="exam_teacher.html" target="_blank">出卷评卷</a>
                 <a class="tool-btn tool-student" href="exam_student.html" target="_blank">模拟考试</a>
@@ -152,8 +157,8 @@
         <section id="today-dashboard" class="today-dashboard">
             <div class="today-dashboard-header">
                 <div>
-                    <div class="today-kicker">当前工作台</div>
-                    <h3>今日安排</h3>
+                    <div class="today-kicker">工作台</div>
+                    <h2>今日安排</h2>
                     <p id="today-dashboard-date">正在读取当前学年…</p>
                 </div>
                 <button type="button" id="today-refresh-btn" class="today-refresh-btn">刷新</button>
@@ -166,11 +171,11 @@
             </div>
             <div class="today-dashboard-columns">
                 <div class="today-panel">
-                    <div class="today-panel-title">今天</div>
+                    <div class="today-panel-title"><span>今天</span><span id="today-panel-count" class="panel-count"></span></div>
                     <div id="today-course-list" class="today-course-list"><p class="today-empty">正在读取…</p></div>
                 </div>
                 <div class="today-panel">
-                    <div class="today-panel-title">接下来7天</div>
+                    <div class="today-panel-title"><span>接下来 7 天</span><span id="upcoming-panel-count" class="panel-count"></span></div>
                     <div id="upcoming-course-list" class="today-course-list"><p class="today-empty">正在读取…</p></div>
                 </div>
             </div>
@@ -180,14 +185,16 @@
             </div>
         </section>
 
-        <div id="migration-wizard-panel" style="display: none; background: #fffbe6; border: 1px dashed #e6a23c; padding: 12px 14px; border-radius: 8px; margin-bottom: 16px;">
-            <h4 style="margin: 0 0 6px 0; color: #d46b08;">旧版数据迁移</h4>
-            <p style="font-size: 12px; margin: 0 0 8px 0; color: #777;">检测到旧版扁平排班数据，执行一次性迁移以适配多学年架构。</p>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <button id="mgr-start-btn" style="background: #e6a23c; width: auto; font-size: 12px; padding: 6px 12px;">启动迁移</button>
-                <button id="purge-old-btn" disabled style="background: #909399; width: auto; font-size: 12px; padding: 6px 12px;">等待校验</button>
+        <div id="migration-wizard-panel" class="migration-panel">
+            <div>
+                <h2>旧版数据迁移</h2>
+                <p>检测到旧版扁平排班数据，完成一次性迁移后再清理旧节点。</p>
             </div>
-            <p id="migration-log" style="margin: 6px 0 0 0; font-size: 12px; font-weight: bold; color: #666;"></p>
+            <div class="migration-actions">
+                <button id="mgr-start-btn">启动迁移</button>
+                <button id="purge-old-btn" disabled>等待校验</button>
+            </div>
+            <p id="migration-log"></p>
         </div>
 
         <!-- 学年管理 -->
@@ -263,7 +270,7 @@
         </div>
 
         <!-- 全局设置 -->
-        <div class="admin-card">
+        <div class="admin-card" id="preferences-card">
             <div class="admin-card-h"><span>全局设置</span></div>
             <div class="admin-card-b">
                 <div class="control-panel">
@@ -278,7 +285,8 @@
         </div>
 
         <!-- 预约记录 -->
-        <h2 id="reservations-title" style="font-size:15px; margin-top: 24px;">预约记录</h2>
+        <section id="reservations-section" class="reservations-section">
+        <h2 id="reservations-title">预约记录</h2>
         <div id="batch-action-bar" class="batch-action-bar">
             <span class="text-bold" style="font-size:13px;">已选 <b id="batch-count" class="text-red">0</b> 条</span>
             <select id="batch-target-status" style="padding:6px 10px; border-radius:4px; font-weight:bold; font-size:13px;">
@@ -289,9 +297,10 @@
             <button id="btn-batch-apply" class="admin-mini-btn" style="background:#409eff; color:#fff;">应用</button>
         </div>
         <div id="admin-reservations-container">读取中...</div>
+        </section>
 
         <!-- 数据管理 -->
-        <div class="admin-card">
+        <div class="admin-card" id="data-card">
             <div class="admin-card-h"><span>数据管理</span></div>
             <div class="admin-card-b">
                 <div class="data-btn-row">
@@ -308,7 +317,7 @@
         </div>
 
         <!-- 系统日志 -->
-        <div class="date-group" style="margin-top: 24px; border-color: #909399;">
+        <div id="logs-card" class="date-group admin-log-card">
             <div class="date-header" id="btn-toggle-logs" style="background: #f4f4f5; color: #606266; border-bottom-color: #dcdfe6; cursor: pointer;">
                 <span>系统操作日志</span>
                 <span class="arrow-indicator" id="log-arrow-indicator">展开 +</span>
@@ -320,7 +329,7 @@
                 <div class="logs-box" id="admin-logs-container">加载中...</div>
             </div>
         </div>
-    </div>
+    </main>
 
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>

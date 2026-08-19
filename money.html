@@ -48,17 +48,18 @@
             transform: rotate(-90deg);
         }
     </style>
+    <link rel="stylesheet" href="money.css">
 </head>
-<body class="bg-gray-50 h-screen flex flex-col overflow-hidden text-slate-800">
+<body class="money-page bg-gray-50 h-screen flex flex-col overflow-hidden text-slate-800">
 
-    <header class="bg-white shadow-sm z-10 flex-none">
+    <header class="money-header bg-white shadow-sm z-10 flex-none">
         <div class="max-w-3xl mx-auto px-4 py-3">
             <div class="flex justify-between items-center mb-2">
                 <div class="flex items-baseline">
                     <h1 class="text-xl font-bold text-blue-600 mr-2">课时费管家</h1>
                     <span id="saveStatus" class="text-xs text-green-500 font-medium opacity-0 transition-opacity duration-500">已保存</span>
                 </div>
-                <div class="flex space-x-1">
+                <div class="money-top-actions flex space-x-1">
                     <button type="button" onclick="exportData()" class="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium flex items-center">
                         存到电脑
                     </button>
@@ -94,9 +95,9 @@
         </div>
     </header>
 
-    <main class="flex-1 overflow-y-auto relative max-w-3xl mx-auto w-full">
+    <main class="money-main flex-1 overflow-y-auto relative max-w-3xl mx-auto w-full">
         
-        <div id="view-calendar" class="p-4 fade-in block pb-24">
+        <div id="view-calendar" class="money-view p-4 fade-in block pb-24">
             <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-lg shadow-sm">
                 <button type="button" onclick="changeMonth(-1)" class="p-2 text-gray-500 hover:text-blue-600"><i class="fas fa-chevron-left"></i></button>
                 <h2 id="currentMonthLabel" class="text-lg font-bold text-gray-800">2023年 10月</h2>
@@ -121,7 +122,7 @@
             </div>
         </div>
 
-        <div id="view-stats" class="p-4 fade-in hidden pb-24">
+        <div id="view-stats" class="money-view p-4 fade-in hidden pb-24">
             
             <div class="flex space-x-2 mb-4 bg-white p-2 rounded-lg shadow-sm">
                 <select id="statsPeriodType" onchange="renderStats()" class="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 flex-none w-28">
@@ -169,29 +170,33 @@
             </div>
         </div>
 
-        <div id="view-fee" class="p-4 fade-in hidden pb-24">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-bold text-gray-800">约课对接</h2>
-                <div class="flex space-x-2">
+        <div id="view-fee" class="money-view money-fee-view p-4 fade-in hidden pb-24">
+            <div class="fee-page-heading flex justify-between items-center mb-4">
+                <div>
+                    <p class="fee-kicker">同步中心</p>
+                    <h2 class="text-lg font-bold text-gray-800">约课对接</h2>
+                </div>
+                <div class="fee-actions flex space-x-2">
                     <button type="button" onclick="changeFeePassphrase()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">云端口令</button>
                     <button type="button" onclick="forceUploadCloud()" class="text-white bg-green-600 hover:bg-green-700 px-3 py-1.5 rounded-lg transition text-xs font-medium">上传本机到云端</button>
                     <button type="button" onclick="deleteCloudData()" class="text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition text-xs font-medium">删除云端数据</button>
                     <button type="button" onclick="refreshPendingList()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">刷新</button>
                 </div>
             </div>
-            <div class="bg-white rounded-lg shadow-sm p-4">
+            <div class="fee-card bg-white rounded-lg shadow-sm p-4">
                 <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。时间填错可修改后导入或忽略（可恢复）；与已入账课时时间重合会标红提示并默认跳过（防重复计费）。课时数据加密同步到云端，按学年独立存放。</p>
                 <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
+                <div id="feeReconciliationNotice" class="fee-reconciliation-notice hidden" role="status"></div>
                 <div id="pendingFeeSummary" class="pending-fee-summary mb-3">
                     <div><span>待入账</span><strong id="pending-count">0</strong></div>
                     <div><span>已选择</span><strong id="pending-selected-count">0</strong></div>
                     <div><span>选中课时</span><strong id="pending-selected-hours">0.00h</strong></div>
                     <div><span>预计金额</span><strong id="pending-selected-total">¥0.00</strong></div>
                 </div>
-                <div id="pendingFeeList" class="space-y-2"></div>
-                <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
-                <div id="dismissedFeeList" class="mt-3 border-t border-gray-100 pt-2 hidden"></div>
+                <div id="pendingFeeList" class="fee-pending-list space-y-2"></div>
+                <button type="button" id="btnImportSelected" onclick="importSelectedPending()" disabled class="fee-import-button mt-3 w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition text-sm disabled:opacity-50">导入选中 (0)</button>
+                <div id="dismissedFeeList" class="fee-dismissed-list mt-3 border-t border-gray-100 pt-2 hidden"></div>
             </div>
         </div>
     </main>
@@ -1151,6 +1156,7 @@ const FEE_FIREBASE_CONFIG = {
 let db = null;
 let activeYear = null;
 let pendingLessons = [];
+let reconciliationIssues = [];
 let _applyingCloud = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
@@ -1510,9 +1516,28 @@ function parseLessonFromReservation(r) {
     return { date, hours, studentName: ((r.nickname || '').trim() || '未知') };
 }
 
+function findImportedRecord(lesson, consumedIndexes = new Set()) {
+    const records = Array.isArray(data.records) ? data.records : [];
+    const sourceMatches = records
+        .map((record, index) => ({ record, index }))
+        .filter(item => !consumedIndexes.has(item.index) && item.record.sourceId && item.record.sourceId === lesson.sourceId);
+    if (sourceMatches.length === 1) return { ...sourceMatches[0], matchType: 'sourceId' };
+    if (sourceMatches.length > 1) return { ambiguous: true, candidates: sourceMatches };
+
+    const legacyMatches = records
+        .map((record, index) => ({ record, index }))
+        .filter(item => !consumedIndexes.has(item.index)
+            && !item.record.sourceId
+            && item.record.date === lesson.date
+            && item.record.studentName === lesson.studentName
+            && Math.abs(Number(item.record.hours) - Number(lesson.hours)) < 0.01);
+    if (legacyMatches.length === 1) return { ...legacyMatches[0], matchType: 'legacy' };
+    if (legacyMatches.length > 1) return { ambiguous: true, candidates: legacyMatches };
+    return null;
+}
+
 function isLessonImported(lesson) {
-    if (data.records.some(r => r.sourceId && r.sourceId === lesson.sourceId)) return true;
-    return data.records.some(r => !r.sourceId && r.date === lesson.date && r.studentName === lesson.studentName && Math.abs(Number(r.hours) - Number(lesson.hours)) < 0.01);
+    return !!findImportedRecord(lesson);
 }
 
 // 检查待入账与已入账记录（及待入账列表内其他条目）的时间重合
@@ -1546,6 +1571,8 @@ async function refreshPendingList() {
     if (!listEl) return;
     listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
     pendingLessons = [];
+    reconciliationIssues = [];
+    renderReconciliationNotice({ reset: true });
     updateImportBtn();
     try {
         const ok = await ensureCloudReady();
@@ -1553,12 +1580,16 @@ async function refreshPendingList() {
         const snap = await db.ref(`years/${activeYear}/reservations`).once('value');
         const res = snap.val() || {};
         pendingLessons = [];
-        const dismissedKeys = (data.dismissedLessons || []).map(d => d.resKey);
+        const dismissedKeys = new Set((data.dismissedLessons || []).map(d => d.resKey));
+        const consumedRecordIndexes = new Set();
+        const reconciliationUpdates = {};
+        const reconciledLessons = [];
+        let reconciledImportedCount = 0;
+        let reconciledDismissedCount = 0;
         Object.keys(res).forEach(key => {
             const r = res[key];
             if (!r || r.status !== 'completed') return;
-            if (r.feeStatus === 'posted') return;
-            if (dismissedKeys.includes(key)) return; // 教师已忽略的时间段
+            if (r.feeStatus === 'posted' || r.feeStatus === 'dismissed') return;
             const lesson = parseLessonFromReservation(r);
             if (!lesson) return;
             lesson.resKey = key;
@@ -1571,14 +1602,57 @@ async function refreshPendingList() {
                 if (ov.hours) lesson.hours = ov.hours;
                 lesson.overridden = true;
             }
+            if (dismissedKeys.has(key)) {
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'dismissed';
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = Date.now();
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feePostedAt`] = null;
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = null;
+                reconciledDismissedCount++;
+                return;
+            }
+            const importedMatch = findImportedRecord(lesson, consumedRecordIndexes);
+            if (importedMatch && importedMatch.ambiguous) {
+                lesson.reconciliationNeedsReview = true;
+                reconciliationIssues.push(`${lesson.date} ${lesson.studentName} 存在多条可能的本地账本记录`);
+            } else if (importedMatch && importedMatch.record) {
+                consumedRecordIndexes.add(importedMatch.index);
+                reconciledLessons.push(lesson);
+                const postedAt = Number(importedMatch.record.postedAt || importedMatch.record.createdAt || Date.now());
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'posted';
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feePostedAt`] = Number.isFinite(postedAt) ? postedAt : Date.now();
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = String(importedMatch.record.id || '');
+                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
+                reconciledImportedCount++;
+                return;
+            }
             lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
-            if (!isLessonImported(lesson)) pendingLessons.push(lesson);
+            pendingLessons.push(lesson);
         });
+
+        let reconciliationSyncFailed = false;
+        if (Object.keys(reconciliationUpdates).length > 0) {
+            try {
+                await db.ref().update(reconciliationUpdates);
+            } catch (error) {
+                reconciliationSyncFailed = true;
+                console.error('历史课时费状态同步失败:', error);
+                // 多路径更新是原子的；同步失败时保留本地已匹配条目，但禁止再次导入，
+                // 避免教师看到空列表后误以为云端已经完成入账。
+                reconciledLessons.forEach(lesson => {
+                    lesson.reconciliationNeedsReview = true;
+                    lesson.reconciliationMessage = '本地已有账本记录，但云端入账状态未同步，请刷新重试';
+                    lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
+                    pendingLessons.push(lesson);
+                    reconciliationIssues.push(`${lesson.date} ${lesson.studentName} 的云端入账状态未同步`);
+                });
+            }
+        }
         pendingLessons.sort((a, b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName));
         // 检查与已入账记录 / 待入账列表内其他条目的时间重合（改过时间后可能与已有课时重叠）
         pendingLessons.forEach(p => { p.conflicts = findLessonConflicts(p, true); });
         const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
+        renderReconciliationNotice({ reconciledImportedCount, reconciledDismissedCount, reconciliationSyncFailed });
         statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
         renderYearSummary();
     } catch (e) {
@@ -1586,6 +1660,23 @@ async function refreshPendingList() {
         statusEl.textContent = '读取失败：' + (e.message || e);
         listEl.innerHTML = '';
     }
+}
+
+function renderReconciliationNotice({ reconciledImportedCount = 0, reconciledDismissedCount = 0, reconciliationSyncFailed = false, reset = false } = {}) {
+    const noticeEl = document.getElementById('feeReconciliationNotice');
+    if (!noticeEl) return;
+    if (reset) {
+        noticeEl.classList.add('hidden');
+        noticeEl.textContent = '';
+        return;
+    }
+    const messages = [];
+    if (reconciledImportedCount > 0) messages.push(`已同步 ${reconciledImportedCount} 条历史入账状态`);
+    if (reconciledDismissedCount > 0) messages.push(`已同步 ${reconciledDismissedCount} 条忽略状态`);
+    if (reconciliationIssues.length > 0) messages.push(`${reconciliationIssues.length} 条记录需要人工核对`);
+    if (reconciliationSyncFailed) messages.push('云端状态同步失败，请点击刷新重试');
+    noticeEl.classList.toggle('hidden', messages.length === 0);
+    noticeEl.textContent = messages.join('；');
 }
 
 function renderPendingList() {
@@ -1602,15 +1693,17 @@ function renderPendingList() {
     pendingLessons.forEach((p, i) => {
         const exact = (p.conflicts || []).filter(c => c.kind === 'exact');
         const near = (p.conflicts || []).filter(c => c.kind === 'near');
+        const needsReview = !!p.reconciliationNeedsReview;
         const div = document.createElement('div');
-        div.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100';
+        div.className = 'fee-pending-row flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100';
         div.id = `pending-row-${i}`;
         div.innerHTML = `
             <label class="flex items-center gap-3 cursor-pointer flex-1">
-                <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 ? 'checked' : ''} style="width:auto;">
+                <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 && !needsReview ? 'checked' : ''} ${needsReview ? 'disabled' : ''} style="width:auto;">
                 <div>
                     <div class="font-bold text-gray-700 text-sm">${htmlEscape(p.date)} ${htmlEscape(p.studentName)}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
                     <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
+                    ${needsReview ? `<div class="text-red-500 text-xs mt-0.5">${htmlEscape(p.reconciliationMessage || '本地存在多条可能账本记录，请先人工核对')}</div>` : ''}
                     ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">重复：' + exact.map(c => htmlEscape(c.label)).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
                     ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">相近：' + near.map(c => htmlEscape(c.label)).join('；') + '</div>' : ''}
                 </div>
@@ -1630,7 +1723,7 @@ function renderPendingList() {
 function updateImportBtn() {
     const btn = document.getElementById('btnImportSelected');
     if (!btn) return;
-    const selected = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]).filter(Boolean);
+    const selected = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]).filter(lesson => lesson && !lesson.reconciliationNeedsReview);
     const n = selected.length;
     btn.textContent = `导入选中 (${n})`;
     btn.disabled = n === 0;
@@ -1799,10 +1892,24 @@ async function syncReservationTime(p) {
     }
 }
 
-function dismissPendingLesson(i) {
+async function dismissPendingLesson(i) {
     const p = pendingLessons[i];
     if (!p) return;
     if (!confirm(`确定忽略这条预约吗？\n${p.date} ${p.studentName} ${p.hours.toFixed(2)} 小时\n\n忽略后不会自动导入，可在下方「已忽略的时间段」中恢复。`)) return;
+    const ok = await ensureCloudReady();
+    if (!ok) { showToast('云端未连接，暂时无法忽略'); return; }
+    try {
+        await db.ref().update({
+            [`years/${activeYear}/reservations/${p.resKey}/feeStatus`]: 'dismissed',
+            [`years/${activeYear}/reservations/${p.resKey}/feeDismissedAt`]: Date.now(),
+            [`years/${activeYear}/reservations/${p.resKey}/feePostedAt`]: null,
+            [`years/${activeYear}/reservations/${p.resKey}/feeRecordId`]: null
+        });
+    } catch (error) {
+        console.error('忽略状态同步失败:', error);
+        showToast('云端状态同步失败，未忽略');
+        return;
+    }
     data.dismissedLessons = data.dismissedLessons || [];
     if (!data.dismissedLessons.some(d => d.resKey === p.resKey)) {
         data.dismissedLessons.push({ resKey: p.resKey, date: p.date, studentName: p.studentName, hours: p.hours });
@@ -1832,7 +1939,23 @@ function renderDismissed() {
     });
 }
 
-function restoreDismissed(idx) {
+async function restoreDismissed(idx) {
+    const item = (data.dismissedLessons || [])[idx];
+    if (!item || !activeYear) return;
+    const ok = await ensureCloudReady();
+    if (!ok) { showToast('云端未连接，暂时无法恢复'); return; }
+    try {
+        await db.ref().update({
+            [`years/${activeYear}/reservations/${item.resKey}/feeStatus`]: 'pending',
+            [`years/${activeYear}/reservations/${item.resKey}/feeDismissedAt`]: null,
+            [`years/${activeYear}/reservations/${item.resKey}/feePostedAt`]: null,
+            [`years/${activeYear}/reservations/${item.resKey}/feeRecordId`]: null
+        });
+    } catch (error) {
+        console.error('恢复状态同步失败:', error);
+        showToast('云端状态同步失败，未恢复');
+        return;
+    }
     (data.dismissedLessons || []).splice(idx, 1);
     saveData();
     renderPendingList();
