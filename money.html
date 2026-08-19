@@ -1231,26 +1231,38 @@ async function ensureCloudReady() {
 
 // ---- 加密（AES-GCM + PBKDF2，口令仅存本机）----
 function ensureFeePassphrase() {
+    // 优先本标签页；其次"记住口令"（localStorage，跨标签页/重启仍可用）。
+    // 注意：这是教师私有工具的便利取舍——口令保存在本机浏览器，换设备仍需输入。
     let pass = sessionStorage.getItem(FEE_PASSPHRASE_KEY);
     if (pass) return pass;
-    // 首次升级时把旧口令迁入当前标签页，再清除永久副本，避免用户突然无法解密旧账本。
+    try {
+        const remembered = localStorage.getItem('fee_vault_pass_remembered');
+        if (remembered) {
+            sessionStorage.setItem(FEE_PASSPHRASE_KEY, remembered);
+            return remembered;
+        }
+    } catch (e) {}
+    // 旧版本曾把口令存在 localStorage('fee_vault_pass')，迁入"记住"并清除旧键
     try {
         const legacyPass = localStorage.getItem('fee_vault_pass');
         localStorage.removeItem('fee_vault_pass');
         if (legacyPass) {
             sessionStorage.setItem(FEE_PASSPHRASE_KEY, legacyPass);
+            localStorage.setItem('fee_vault_pass_remembered', legacyPass);
             return legacyPass;
         }
     } catch (e) {}
     try {
-        pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n请牢记！换设备同步时需输入同一口令。');
+        pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n口令会保存在本机浏览器，换设备同步时需输入同一口令。');
     } catch (e) {
         showToast('当前环境无法弹出口令框，请点击“云端口令”后重试。');
         return null;
     }
     if (pass === null || !pass.trim()) return null;
-    sessionStorage.setItem(FEE_PASSPHRASE_KEY, pass.trim());
-    return pass.trim();
+    const clean = pass.trim();
+    sessionStorage.setItem(FEE_PASSPHRASE_KEY, clean);
+    try { localStorage.setItem('fee_vault_pass_remembered', clean); } catch (e) {}
+    return clean;
 }
 
 async function deriveFeeKey(pass, saltBytes, iterations) {
@@ -1332,6 +1344,7 @@ function getYearSlice(year) {
 }
 
 let cloudPushChain = Promise.resolve(true);
+let lastCloudPushError = ''; // 最近一次云端推送失败原因，供对账等流程展示
 
 async function pushCloudNow(job, options) {
     options = options || {};
@@ -1378,15 +1391,18 @@ async function pushCloudNow(job, options) {
                 'unknown-version': `${year} 年云端账本版本未知，已停止自动覆盖，请先执行拉取。`,
                 'remote-deleted': `${year} 年云端账本刚被删除，已停止自动重建，请确认后手动上传。`
             };
-            showToast(messages[conflictReason] || `${year} 年云端账本写入冲突，请先拉取后重试。`);
+            lastCloudPushError = messages[conflictReason] || `${year} 年云端账本写入冲突，请先拉取后重试。`;
+            showToast(lastCloudPushError);
             return false;
         }
         const committedVault = result.snapshot.val() || {};
         cloudVersionsByYear[year] = { revision: Number(committedVault.revision || 0), updatedAt: Number(committedVault.updatedAt || updatedAt) };
+        lastCloudPushError = '';
         return true;
     } catch (e) {
         console.error('云端同步失败', e);
-        showToast('云端同步失败：' + (e.message || e));
+        lastCloudPushError = '云端同步失败：' + (e.message || e);
+        showToast(lastCloudPushError);
         return false;
     }
 }
@@ -1513,6 +1529,8 @@ async function pullCloud() {
             return;
         }
         clearTombstoneNotice();
+        // 云端有账本：清理可能残留的墓碑节点（防御性，避免旧墓碑导致误判）
+        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
         cloudVersionsByYear[activeYear] = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
         if (!ensureFeePassphrase()) return;
         const cloudData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
@@ -1792,6 +1810,7 @@ async function refreshPendingList() {
         const autoReconciledTargets = [];
         let reconciledImportedCount = 0;
         let reconciledDismissedCount = 0;
+        let legacyLinked = false;
         const queuePostedStatus = (key, lesson, candidate) => {
             const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
             const postedAt = candidate && candidate.record
@@ -1867,7 +1886,10 @@ async function refreshPendingList() {
                     });
                 } else {
                     const diffs = getReconciliationDiffs(lesson, postedCandidate.record);
-                    if (postedCandidate.matchType !== 'sourceId' || diffs.length > 0) {
+                    // 强匹配（sourceId / feeRecordId 精确命中）且字段一致 → 已入账状态成立，无需人工核对；
+                    // 只有字段不一致或只是模糊匹配时才需要确认，避免大量重复弹核对
+                    const strongMatch = postedCandidate.matchType === 'sourceId' || postedCandidate.matchType === 'feeRecordId';
+                    if (!strongMatch || diffs.length > 0) {
                         addReconciliationCase({
                             type: 'postedMismatch',
                             resKey: key,
@@ -1910,15 +1932,26 @@ async function refreshPendingList() {
                 return;
             }
 
-            if (legacyCandidates.length > 0) {
+            if (legacyCandidates.length === 1 && !consumedRecordIndexes.has(legacyCandidates[0].index)) {
+                // 只有一条 姓名+日期+课时 完全一致的旧记录 → 自动关联为已入账（补齐 sourceId，避免反复人工核对）
+                const legacy = legacyCandidates[0];
+                consumedRecordIndexes.add(legacy.index);
+                if (legacy.record && typeof legacy.record === 'object' && !legacy.record.sourceId) {
+                    legacy.record.sourceId = sourceId; // 直接改 data.records 中的对象，随后 saveData 持久化
+                    legacyLinked = true;
+                }
+                queuePostedStatus(key, lesson, legacy);
+                return;
+            }
+            if (legacyCandidates.length > 1) {
                 addReconciliationCase({
-                    type: legacyCandidates.length > 1 ? 'multipleCandidates' : 'legacyMatch',
+                    type: 'multipleCandidates',
                     resKey: key,
                     sourceId,
                     reservation: r,
                     booking: lesson,
                     candidates,
-                    message: legacyCandidates.length > 1 ? '本地有多条可能对应的账本记录' : '找到一条旧账本记录，但还没有预约 ID 关联'
+                    message: '本地有多条可能对应的账本记录，请人工选择'
                 });
                 return;
             }
@@ -1939,6 +1972,8 @@ async function refreshPendingList() {
             lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
             pendingLessons.push(lesson);
         });
+
+        if (legacyLinked) saveData(); // 持久化自动补上的 sourceId（并推送加密账本），避免下次仍要人工核对
 
         let reconciliationSyncFailed = false;
         if (Object.keys(reconciliationUpdates).length > 0) {
@@ -2250,7 +2285,7 @@ async function commitReconciliation(caseIndex, canonical, candidate, syncBooking
         saveData();
         const localSaved = await cloudPushChain.catch(() => false);
         if (!localSaved) {
-            renderReconciliationFailure(item, '本地账本已更新，但加密账本云端同步失败，请重试。');
+            renderReconciliationFailure(item, `本地账本已更新，但加密账本云端同步失败：${lastCloudPushError || '未知原因'}。请确认「云端口令」已设置后重试。`);
             return;
         }
         try {
@@ -2636,6 +2671,7 @@ async function changeFeePassphrase() {
         // 先等待旧口令的排队上传完成，避免旧任务在新口令下重新加密。
         await cloudPushChain.catch(() => false);
         sessionStorage.setItem(FEE_PASSPHRASE_KEY, newPass);
+        try { localStorage.setItem('fee_vault_pass_remembered', newPass); } catch (e) {}
         showToast('口令已更新，正在重新加密上传…');
         const rotationJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
         cloudPushChain = cloudPushChain.then(() => pushCloudNow(rotationJob, { force: true }), () => pushCloudNow(rotationJob, { force: true }));
