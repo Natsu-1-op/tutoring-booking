@@ -188,6 +188,17 @@
                 <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
                 <div id="feeReconciliationNotice" class="fee-reconciliation-notice hidden" role="status"></div>
+                <section id="feeMismatchSection" class="fee-mismatch-section hidden" aria-labelledby="feeMismatchTitle">
+                    <div class="fee-mismatch-heading">
+                        <div>
+                            <p class="fee-kicker">需要处理</p>
+                            <h3 id="feeMismatchTitle">两端数据不一致</h3>
+                        </div>
+                        <span id="feeMismatchCount" class="fee-mismatch-count"></span>
+                    </div>
+                    <p class="fee-mismatch-help">先查看两端数据，再选择采用哪一端，或手动填写一份统一数据。未确认的记录不会自动入账。</p>
+                    <div id="feeMismatchList" class="fee-mismatch-list"></div>
+                </section>
                 <div id="pendingFeeSummary" class="pending-fee-summary mb-3">
                     <div><span>待入账</span><strong id="pending-count">0</strong></div>
                     <div><span>已选择</span><strong id="pending-selected-count">0</strong></div>
@@ -200,6 +211,32 @@
             </div>
         </div>
     </main>
+
+    <div id="feeReconcileModal" class="fee-reconcile-modal hidden" role="dialog" aria-modal="true" aria-labelledby="feeReconcileModalTitle">
+        <div class="fee-reconcile-modal-card">
+            <div class="fee-reconcile-modal-header">
+                <div>
+                    <p class="fee-kicker">手动核对</p>
+                    <h3 id="feeReconcileModalTitle">统一两端数据</h3>
+                </div>
+                <button type="button" onclick="closeReconcileModal()" class="fee-modal-close" aria-label="关闭">关闭</button>
+            </div>
+            <p id="feeManualReconcileHint" class="fee-reconcile-modal-hint"></p>
+            <div class="fee-manual-grid">
+                <label>学生姓名<input id="feeManualStudent" type="text" maxlength="50" autocomplete="off"></label>
+                <label>上课日期<input id="feeManualDate" type="date"></label>
+                <label>开始时间<input id="feeManualStart" type="time" step="300" oninput="updateManualReconcileHours()"></label>
+                <label>结束时间<input id="feeManualEnd" type="time" step="300" oninput="updateManualReconcileHours()"></label>
+                <label>课时数<input id="feeManualHours" type="number" min="0.01" step="0.01" oninput="updateManualReconcileTotal()"></label>
+                <label>课时费（元/小时）<input id="feeManualRate" type="number" min="0" step="0.01" oninput="updateManualReconcileTotal()"></label>
+            </div>
+            <div class="fee-manual-total">统一后金额：<strong id="feeManualTotal">¥0.00</strong></div>
+            <div class="fee-reconcile-modal-actions">
+                <button type="button" onclick="closeReconcileModal()" class="fee-secondary-button">取消</button>
+                <button type="button" onclick="saveManualReconciliation()" class="fee-primary-button">保存并同步两端</button>
+            </div>
+        </div>
+    </div>
 
     <button type="button" onclick="openRecordModal()" title="记一笔" class="fab fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full flex items-center justify-center text-2xl transition transform hover:scale-105 active:scale-95 z-50">
         <i class="fas fa-plus"></i>
@@ -1157,6 +1194,9 @@ let db = null;
 let activeYear = null;
 let pendingLessons = [];
 let reconciliationIssues = [];
+let reconciliationCases = [];
+let activeReconciliationCaseIndex = null;
+let reconciliationBusy = false;
 let _applyingCloud = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
@@ -1516,28 +1556,119 @@ function parseLessonFromReservation(r) {
     return { date, hours, studentName: ((r.nickname || '').trim() || '未知') };
 }
 
-function findImportedRecord(lesson, consumedIndexes = new Set()) {
-    const records = Array.isArray(data.records) ? data.records : [];
-    const sourceMatches = records
-        .map((record, index) => ({ record, index }))
-        .filter(item => !consumedIndexes.has(item.index) && item.record.sourceId && item.record.sourceId === lesson.sourceId);
-    if (sourceMatches.length === 1) return { ...sourceMatches[0], matchType: 'sourceId' };
-    if (sourceMatches.length > 1) return { ambiguous: true, candidates: sourceMatches };
-
-    const legacyMatches = records
-        .map((record, index) => ({ record, index }))
-        .filter(item => !consumedIndexes.has(item.index)
-            && !item.record.sourceId
-            && item.record.date === lesson.date
-            && item.record.studentName === lesson.studentName
-            && Math.abs(Number(item.record.hours) - Number(lesson.hours)) < 0.01);
-    if (legacyMatches.length === 1) return { ...legacyMatches[0], matchType: 'legacy' };
-    if (legacyMatches.length > 1) return { ambiguous: true, candidates: legacyMatches };
-    return null;
+function normalizeClockValue(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return '';
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour > 23 || minute > 59) return '';
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-function isLessonImported(lesson) {
-    return !!findImportedRecord(lesson);
+function calculateClockHours(startTime, endTime) {
+    const start = normalizeClockValue(startTime);
+    const end = normalizeClockValue(endTime);
+    if (!start || !end) return 0;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const minutes = (eh * 60 + em) - (sh * 60 + sm);
+    return minutes > 0 ? minutes / 60 : 0;
+}
+
+function addHoursToClock(startTime, hours) {
+    const start = normalizeClockValue(startTime);
+    const duration = Number(hours);
+    if (!start || !Number.isFinite(duration) || duration <= 0) return '';
+    const [sh, sm] = start.split(':').map(Number);
+    const totalMinutes = sh * 60 + sm + Math.round(duration * 60);
+    if (totalMinutes >= 24 * 60) return '';
+    return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+}
+
+function getReservationComparisonData(reservation) {
+    const r = reservation || {};
+    const snapshot = r.slotSnapshot && typeof r.slotSnapshot === 'object' ? r.slotSnapshot : {};
+    const parsed = parseLessonFromReservation(r);
+    let date = String(snapshot.date || (parsed && parsed.date) || '');
+    let hours = parsed && parsed.hours > 0 ? Number(parsed.hours) : 0;
+    let startTime = normalizeClockValue(snapshot.startTime);
+    let endTime = normalizeClockValue(snapshot.endTime);
+    const rawTime = String(r.time || '').trim();
+    const timeMatch = rawTime.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):?(\d{2})-(\d{1,2}):?(\d{2})$/);
+    if (timeMatch) {
+        if (!date && /^\d{4}-\d{2}-\d{2}$/.test(String(activeYear) + '-01-01')) {
+            date = `${activeYear}-${String(Number(timeMatch[1])).padStart(2, '0')}-${String(Number(timeMatch[2])).padStart(2, '0')}`;
+        }
+        if (!startTime) startTime = normalizeClockValue(`${timeMatch[3]}:${timeMatch[4]}`);
+        if (!endTime) endTime = normalizeClockValue(`${timeMatch[5]}:${timeMatch[6]}`);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : '';
+    if (!hours && startTime && endTime) hours = calculateClockHours(startTime, endTime);
+    return {
+        studentName: String(r.nickname || '').trim(),
+        date,
+        startTime,
+        endTime,
+        hours: Number.isFinite(Number(hours)) ? Number(hours) : 0,
+        rawTime,
+        status: String(r.status || ''),
+        feeStatus: String(r.feeStatus || 'pending')
+    };
+}
+
+function formatReconciliationDate(date) {
+    const match = String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    return match ? `${Number(match[1])}/${Number(match[2])}` : String(date || '未填写');
+}
+
+function formatReservationTime(date, startTime, endTime) {
+    const dateMatch = String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    const start = normalizeClockValue(startTime);
+    const end = normalizeClockValue(endTime);
+    if (!dateMatch || !start || !end) return '';
+    return `${Number(dateMatch[1])}/${Number(dateMatch[2])} ${start}-${end}`;
+}
+
+function getReconciliationCandidates(booking, sourceId, feeRecordId) {
+    const records = Array.isArray(data.records) ? data.records : [];
+    const candidates = [];
+    const seen = new Set();
+    const add = (record, index, score, matchType) => {
+        if (!record || seen.has(index)) return;
+        seen.add(index);
+        candidates.push({ record, index, score, matchType });
+    };
+    records.forEach((record, index) => {
+        const sameSource = !!sourceId && record.sourceId === sourceId;
+        const sameRecordId = !!feeRecordId && record.id === feeRecordId;
+        const sameName = !!booking.studentName && record.studentName === booking.studentName;
+        const sameDate = !!booking.date && record.date === booking.date;
+        const sameHours = booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) < 0.01;
+        if (sameSource) add(record, index, 1000, 'sourceId');
+        else if (sameRecordId) add(record, index, 990, 'feeRecordId');
+        else if (sameName && sameDate && sameHours) add(record, index, 900, 'legacyExact');
+        else if (sameName && sameDate) add(record, index, 600, 'sameNameDate');
+        else if (sameDate && sameHours) add(record, index, 500, 'sameDateHours');
+        else if (sameName && sameHours) add(record, index, 400, 'sameNameHours');
+    });
+    return candidates.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 8);
+}
+
+function getReconciliationDiffs(booking, record) {
+    if (!record) return [];
+    const diffs = [];
+    if (booking.studentName && record.studentName !== booking.studentName) diffs.push(`姓名：约课端“${booking.studentName}” / 账本“${record.studentName || '未填写'}”`);
+    if (booking.date && record.date !== booking.date) diffs.push(`日期：约课端“${booking.date}” / 账本“${record.date || '未填写'}”`);
+    if (booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) >= 0.01) diffs.push(`课时：约课端“${Number(booking.hours).toFixed(2)}” / 账本“${Number(record.hours || 0).toFixed(2)}”`);
+    return diffs;
+}
+
+function addReconciliationCase(caseData) {
+    const item = { ...caseData, index: reconciliationCases.length };
+    reconciliationCases.push(item);
+    reconciliationIssues.push(caseData.message || '存在一条需要人工核对的记录');
+    return item;
 }
 
 // 检查待入账与已入账记录（及待入账列表内其他条目）的时间重合
@@ -1572,7 +1703,9 @@ async function refreshPendingList() {
     listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
     pendingLessons = [];
     reconciliationIssues = [];
+    reconciliationCases = [];
     renderReconciliationNotice({ reset: true });
+    renderReconciliationCases();
     updateImportBtn();
     try {
         const ok = await ensureCloudReady();
@@ -1583,18 +1716,32 @@ async function refreshPendingList() {
         const dismissedKeys = new Set((data.dismissedLessons || []).map(d => d.resKey));
         const consumedRecordIndexes = new Set();
         const reconciliationUpdates = {};
-        const reconciledLessons = [];
+        const autoReconciledTargets = [];
         let reconciledImportedCount = 0;
         let reconciledDismissedCount = 0;
+        const queuePostedStatus = (key, lesson, candidate) => {
+            const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
+            const postedAt = candidate && candidate.record
+                ? Number(candidate.record.postedAt || candidate.record.createdAt || Date.now())
+                : Date.now();
+            reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'posted';
+            reconciliationUpdates[`years/${activeYear}/reservations/${key}/feePostedAt`] = Number.isFinite(postedAt) ? postedAt : Date.now();
+            reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = recordId;
+            reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
+            autoReconciledTargets.push({ key, lesson, candidate, recordId });
+            reconciledImportedCount++;
+        };
         Object.keys(res).forEach(key => {
             const r = res[key];
             if (!r || r.status !== 'completed') return;
-            if (r.feeStatus === 'posted' || r.feeStatus === 'dismissed') return;
-            const lesson = parseLessonFromReservation(r);
-            if (!lesson) return;
-            lesson.resKey = key;
-            lesson.sourceId = 'imported_' + key;
-            lesson.feeStatus = r.feeStatus || 'pending';
+            const booking = getReservationComparisonData(r);
+            const sourceId = 'imported_' + key;
+            const candidates = getReconciliationCandidates(booking, sourceId, r.feeRecordId);
+            const sourceCandidate = candidates.find(candidate => candidate.matchType === 'sourceId');
+            const feeRecordCandidate = candidates.find(candidate => candidate.matchType === 'feeRecordId');
+            const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact');
+            const similarCandidates = candidates.filter(candidate => ['sameNameDate', 'sameDateHours', 'sameNameHours'].includes(candidate.matchType));
+            const lesson = { ...booking, resKey: key, sourceId, feeStatus: r.feeStatus || 'pending' };
             // 应用教师修改过的时间（覆盖约课系统里填错的时间）
             const ov = (data.lessonOverrides || {})[key];
             if (ov) {
@@ -1602,6 +1749,66 @@ async function refreshPendingList() {
                 if (ov.hours) lesson.hours = ov.hours;
                 lesson.overridden = true;
             }
+
+            if (!lesson.studentName || !/^\d{4}-\d{2}-\d{2}$/.test(lesson.date) || !(lesson.hours > 0)) {
+                addReconciliationCase({
+                    type: 'invalidReservation',
+                    resKey: key,
+                    sourceId,
+                    reservation: r,
+                    booking: lesson,
+                    candidates,
+                    message: `${lesson.studentName || '未填写姓名'} 的预约时间或课时无法解析`
+                });
+                return;
+            }
+
+            if (r.feeStatus === 'dismissed') {
+                if (dismissedKeys.has(key)) return;
+                const dismissedConflict = sourceCandidate || feeRecordCandidate || legacyCandidates[0];
+                if (dismissedConflict) {
+                    addReconciliationCase({
+                        type: 'stateConflict',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: '约课端已忽略，但本地账本仍存在对应记录'
+                    });
+                }
+                return;
+            }
+
+            if (r.feeStatus === 'posted') {
+                const postedCandidate = sourceCandidate || feeRecordCandidate;
+                if (!postedCandidate) {
+                    addReconciliationCase({
+                        type: 'postedLocalMissing',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: '约课端已标记入账，但本地账本找不到对应记录'
+                    });
+                } else {
+                    const diffs = getReconciliationDiffs(lesson, postedCandidate.record);
+                    if (postedCandidate.matchType !== 'sourceId' || diffs.length > 0) {
+                        addReconciliationCase({
+                            type: 'postedMismatch',
+                            resKey: key,
+                            sourceId,
+                            reservation: r,
+                            booking: lesson,
+                            candidates,
+                            message: diffs.length > 0 ? '约课端已入账，但字段与本地账本不一致' : '约课端已入账，但本地记录还没有建立预约关联'
+                        });
+                    }
+                }
+                return;
+            }
+
             if (dismissedKeys.has(key)) {
                 reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'dismissed';
                 reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = Date.now();
@@ -1610,21 +1817,52 @@ async function refreshPendingList() {
                 reconciledDismissedCount++;
                 return;
             }
-            const importedMatch = findImportedRecord(lesson, consumedRecordIndexes);
-            if (importedMatch && importedMatch.ambiguous) {
-                lesson.reconciliationNeedsReview = true;
-                reconciliationIssues.push(`${lesson.date} ${lesson.studentName} 存在多条可能的本地账本记录`);
-            } else if (importedMatch && importedMatch.record) {
-                consumedRecordIndexes.add(importedMatch.index);
-                reconciledLessons.push(lesson);
-                const postedAt = Number(importedMatch.record.postedAt || importedMatch.record.createdAt || Date.now());
-                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'posted';
-                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feePostedAt`] = Number.isFinite(postedAt) ? postedAt : Date.now();
-                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = String(importedMatch.record.id || '');
-                reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
-                reconciledImportedCount++;
+
+            if (sourceCandidate) {
+                const diffs = getReconciliationDiffs(lesson, sourceCandidate.record);
+                if (diffs.length === 0 && !consumedRecordIndexes.has(sourceCandidate.index)) {
+                    consumedRecordIndexes.add(sourceCandidate.index);
+                    queuePostedStatus(key, lesson, sourceCandidate);
+                } else {
+                    addReconciliationCase({
+                        type: 'fieldMismatch',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: '预约关联相同，但姓名、日期或课时发生变化'
+                    });
+                }
                 return;
             }
+
+            if (legacyCandidates.length > 0) {
+                addReconciliationCase({
+                    type: legacyCandidates.length > 1 ? 'multipleCandidates' : 'legacyMatch',
+                    resKey: key,
+                    sourceId,
+                    reservation: r,
+                    booking: lesson,
+                    candidates,
+                    message: legacyCandidates.length > 1 ? '本地有多条可能对应的账本记录' : '找到一条旧账本记录，但还没有预约 ID 关联'
+                });
+                return;
+            }
+
+            if (similarCandidates.length > 0) {
+                addReconciliationCase({
+                    type: 'similarCandidates',
+                    resKey: key,
+                    sourceId,
+                    reservation: r,
+                    booking: lesson,
+                    candidates,
+                    message: '本地存在姓名、日期或课时相近的记录，需要确认是否为同一节课'
+                });
+                return;
+            }
+
             lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
             pendingLessons.push(lesson);
         });
@@ -1634,16 +1872,19 @@ async function refreshPendingList() {
             try {
                 await db.ref().update(reconciliationUpdates);
             } catch (error) {
-                reconciliationSyncFailed = true;
                 console.error('历史课时费状态同步失败:', error);
-                // 多路径更新是原子的；同步失败时保留本地已匹配条目，但禁止再次导入，
-                // 避免教师看到空列表后误以为云端已经完成入账。
-                reconciledLessons.forEach(lesson => {
-                    lesson.reconciliationNeedsReview = true;
-                    lesson.reconciliationMessage = '本地已有账本记录，但云端入账状态未同步，请刷新重试';
-                    lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
-                    pendingLessons.push(lesson);
-                    reconciliationIssues.push(`${lesson.date} ${lesson.studentName} 的云端入账状态未同步`);
+                reconciliationSyncFailed = true;
+                reconciledImportedCount = 0;
+                autoReconciledTargets.forEach(target => {
+                    addReconciliationCase({
+                        type: 'syncFailed',
+                        resKey: target.key,
+                        sourceId: target.lesson.sourceId,
+                        reservation: res[target.key],
+                        booking: target.lesson,
+                        candidates: getReconciliationCandidates(target.lesson, target.lesson.sourceId, res[target.key] && res[target.key].feeRecordId),
+                        message: '本地记录已找到，但云端入账状态同步失败，请重试'
+                    });
                 });
             }
         }
@@ -1652,8 +1893,9 @@ async function refreshPendingList() {
         pendingLessons.forEach(p => { p.conflicts = findLessonConflicts(p, true); });
         const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
+        renderReconciliationCases();
         renderReconciliationNotice({ reconciledImportedCount, reconciledDismissedCount, reconciliationSyncFailed });
-        statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
+        statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${reconciliationCases.length ? ` · ${reconciliationCases.length} 条需核对` : ''}${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
         renderYearSummary();
     } catch (e) {
         console.error(e);
@@ -1673,10 +1915,83 @@ function renderReconciliationNotice({ reconciledImportedCount = 0, reconciledDis
     const messages = [];
     if (reconciledImportedCount > 0) messages.push(`已同步 ${reconciledImportedCount} 条历史入账状态`);
     if (reconciledDismissedCount > 0) messages.push(`已同步 ${reconciledDismissedCount} 条忽略状态`);
-    if (reconciliationIssues.length > 0) messages.push(`${reconciliationIssues.length} 条记录需要人工核对`);
+    if (reconciliationCases.length > 0) messages.push(`${reconciliationCases.length} 条记录需要人工核对`);
     if (reconciliationSyncFailed) messages.push('云端状态同步失败，请点击刷新重试');
     noticeEl.classList.toggle('hidden', messages.length === 0);
     noticeEl.textContent = messages.join('；');
+}
+
+function reconciliationRows(fields) {
+    return fields.map(([label, value]) => `<div><dt>${htmlEscape(label)}</dt><dd>${htmlEscape(value || '未填写')}</dd></div>`).join('');
+}
+
+function renderReconciliationCases() {
+    const section = document.getElementById('feeMismatchSection');
+    const list = document.getElementById('feeMismatchList');
+    const count = document.getElementById('feeMismatchCount');
+    if (!section || !list || !count) return;
+    list.innerHTML = '';
+    if (reconciliationCases.length === 0) {
+        section.classList.add('hidden');
+        count.textContent = '';
+        return;
+    }
+    section.classList.remove('hidden');
+    count.textContent = `${reconciliationCases.length} 条`;
+    reconciliationCases.forEach((item, index) => {
+        const booking = item.booking || {};
+        const candidates = Array.isArray(item.candidates) ? item.candidates : [];
+        const primaryCandidate = candidates.find(candidate => ['sourceId', 'feeRecordId', 'legacyExact'].includes(candidate.matchType)) || candidates[0];
+        const diffs = primaryCandidate ? getReconciliationDiffs(booking, primaryCandidate.record) : [];
+        const bookingHours = booking.hours > 0 ? `${Number(booking.hours).toFixed(2)} 小时` : '无法解析';
+        const bookingRows = reconciliationRows([
+            ['学生', booking.studentName],
+            ['日期', formatReconciliationDate(booking.date)],
+            ['时间', booking.startTime && booking.endTime ? `${booking.startTime}-${booking.endTime}` : booking.rawTime || '无法解析'],
+            ['课时', bookingHours],
+            ['入账状态', booking.feeStatus]
+        ]);
+        const candidateHtml = candidates.length > 0
+            ? `<div class="fee-reconcile-candidates">${candidates.map((candidate, candidateIndex) => {
+                const record = candidate.record || {};
+                const checked = candidates.length === 1 ? 'checked' : '';
+                return `<label class="fee-reconcile-candidate">
+                    <input type="radio" name="reconcile-candidate-${index}" value="${candidateIndex}" ${checked}>
+                    <span class="fee-reconcile-candidate-content"><strong>${htmlEscape(record.studentName || '未填写')} · ${htmlEscape(record.date || '未填写')}</strong>${Number(record.hours || 0).toFixed(2)} 小时 · ¥${Number(record.rate || 0).toFixed(2)}/小时 · ¥${Number(record.total || 0).toFixed(2)}<br>ID：${htmlEscape(record.id || '无')}</span>
+                </label>`;
+            }).join('')}</div>`
+            : '<div class="text-xs text-gray-400">本地没有可选账本记录，采用约课数据会新建一条。</div>';
+        const actionLabel = item.type === 'syncFailed' ? '重试同步' : '采用约课数据';
+        const hasValidBooking = !!booking.studentName && !!booking.date && booking.hours > 0;
+        const diffHtml = diffs.length > 0
+            ? `<div class="fee-reconcile-diff">${diffs.map(htmlEscape).join('<br>')}</div>`
+            : `<div class="fee-reconcile-diff">${htmlEscape(item.message || '需要确认两端是否为同一条记录')}</div>`;
+        const card = document.createElement('article');
+        card.className = 'fee-reconcile-card';
+        card.innerHTML = `
+            <div class="fee-reconcile-card-header">
+                <div class="fee-reconcile-card-title">${htmlEscape(booking.studentName || '未填写姓名')} · 预约 ${htmlEscape(item.resKey)}</div>
+                <div class="fee-reconcile-card-reason">${htmlEscape(item.message || '需要人工核对')}</div>
+            </div>
+            <div class="fee-reconcile-columns">
+                <div class="fee-reconcile-side">
+                    <h4>约课端数据</h4>
+                    <dl class="fee-reconcile-fields">${bookingRows}</dl>
+                </div>
+                <div class="fee-reconcile-side">
+                    <h4>课时费账本候选</h4>
+                    ${candidateHtml}
+                </div>
+            </div>
+            ${diffHtml}
+            <div class="fee-reconcile-actions">
+                <button type="button" class="fee-primary-button" onclick="resolveReconciliation(${index}, 'booking')" ${hasValidBooking ? '' : 'disabled'}>${actionLabel}</button>
+                <button type="button" class="fee-secondary-button" onclick="resolveReconciliation(${index}, 'ledger')" ${candidates.length > 0 ? '' : 'disabled'}>采用账本数据</button>
+                <button type="button" class="fee-secondary-button" onclick="openManualReconciliation(${index})">手动填写</button>
+            </div>
+        `;
+        list.appendChild(card);
+    });
 }
 
 function renderPendingList() {
@@ -1693,17 +2008,15 @@ function renderPendingList() {
     pendingLessons.forEach((p, i) => {
         const exact = (p.conflicts || []).filter(c => c.kind === 'exact');
         const near = (p.conflicts || []).filter(c => c.kind === 'near');
-        const needsReview = !!p.reconciliationNeedsReview;
         const div = document.createElement('div');
         div.className = 'fee-pending-row flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100';
         div.id = `pending-row-${i}`;
         div.innerHTML = `
             <label class="flex items-center gap-3 cursor-pointer flex-1">
-                <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 && !needsReview ? 'checked' : ''} ${needsReview ? 'disabled' : ''} style="width:auto;">
+                <input type="checkbox" class="pending-check" data-idx="${i}" ${exact.length === 0 ? 'checked' : ''} style="width:auto;">
                 <div>
                     <div class="font-bold text-gray-700 text-sm">${htmlEscape(p.date)} ${htmlEscape(p.studentName)}${p.overridden ? ' <span class="text-blue-500 text-xs">(已改)</span>' : ''}</div>
                     <div class="text-xs text-gray-500">${p.hours.toFixed(2)} 小时${p.hasProfile ? '' : ' <span class="text-amber-600">· 未建档(¥0)</span>'}</div>
-                    ${needsReview ? `<div class="text-red-500 text-xs mt-0.5">${htmlEscape(p.reconciliationMessage || '本地存在多条可能账本记录，请先人工核对')}</div>` : ''}
                     ${exact.length ? '<div class="text-red-500 text-xs mt-0.5">重复：' + exact.map(c => htmlEscape(c.label)).join('；') + '（默认跳过，勾选可强制导入）</div>' : ''}
                     ${near.length ? '<div class="text-amber-500 text-xs mt-0.5">相近：' + near.map(c => htmlEscape(c.label)).join('；') + '</div>' : ''}
                 </div>
@@ -1723,7 +2036,7 @@ function renderPendingList() {
 function updateImportBtn() {
     const btn = document.getElementById('btnImportSelected');
     if (!btn) return;
-    const selected = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]).filter(lesson => lesson && !lesson.reconciliationNeedsReview);
+    const selected = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]).filter(Boolean);
     const n = selected.length;
     btn.textContent = `导入选中 (${n})`;
     btn.disabled = n === 0;
@@ -1740,6 +2053,246 @@ function updateImportBtn() {
     if (selectedEl) selectedEl.textContent = n;
     if (hoursEl) hoursEl.textContent = `${totalHours.toFixed(2)}h`;
     if (amountEl) amountEl.textContent = `¥${totalAmount.toFixed(2)}`;
+}
+
+function getSelectedReconciliationCandidate(caseIndex) {
+    const item = reconciliationCases[caseIndex];
+    if (!item || !Array.isArray(item.candidates) || item.candidates.length === 0) return null;
+    const checked = document.querySelector(`input[name="reconcile-candidate-${caseIndex}"]:checked`);
+    if (checked) return item.candidates[Number(checked.value)] || null;
+    return item.candidates.length === 1 ? item.candidates[0] : null;
+}
+
+function getStudentProfile(studentName) {
+    return (data.students || []).find(student => student.name === studentName) || null;
+}
+
+function getReconciliationCanonicalFromBooking(item, candidate) {
+    const profile = getStudentProfile(item.booking.studentName);
+    return {
+        studentName: item.booking.studentName,
+        date: item.booking.date,
+        startTime: item.booking.startTime,
+        endTime: item.booking.endTime || addHoursToClock(item.booking.startTime, item.booking.hours),
+        hours: Number(item.booking.hours),
+        rate: profile ? Number(profile.rate) : Number(candidate && candidate.record && candidate.record.rate || 0)
+    };
+}
+
+function getReconciliationCanonicalFromLedger(item, candidate) {
+    const record = candidate && candidate.record;
+    if (!record) return null;
+    return {
+        studentName: record.studentName,
+        date: record.date,
+        startTime: item.booking.startTime,
+        endTime: addHoursToClock(item.booking.startTime, record.hours),
+        hours: Number(record.hours),
+        rate: Number(record.rate)
+    };
+}
+
+async function buildReconciliationReservationUpdates(item, canonical, recordId, syncBooking) {
+    const updates = {};
+    const warnings = [];
+    const reservation = item.reservation || {};
+    if (syncBooking) {
+        const startTime = normalizeClockValue(canonical.startTime);
+        const endTime = normalizeClockValue(canonical.endTime || addHoursToClock(startTime, canonical.hours));
+        const formattedTime = formatReservationTime(canonical.date, startTime, endTime);
+        if (!formattedTime) return { ok: false, message: '需要完整的日期、开始时间和结束时间，才能同步约课端。' };
+        updates[`years/${activeYear}/reservations/${item.resKey}/nickname`] = canonical.studentName;
+        updates[`years/${activeYear}/reservations/${item.resKey}/time`] = formattedTime;
+        updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/date`] = canonical.date;
+        updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/startTime`] = startTime;
+        updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/endTime`] = endTime;
+        if (reservation.slotId) {
+            const slotSnapshot = await db.ref(`years/${activeYear}/slots/${reservation.slotId}`).once('value');
+            const slot = slotSnapshot.val();
+            if (slot && slot.reservationId === item.resKey) {
+                updates[`years/${activeYear}/slots/${reservation.slotId}/time`] = formattedTime;
+            } else {
+                warnings.push('排班所有权发生变化，未修改原排班时间');
+            }
+        }
+    }
+    const postedAt = Number(reservation.feePostedAt) || Date.now();
+    updates[`years/${activeYear}/reservations/${item.resKey}/feeStatus`] = 'posted';
+    updates[`years/${activeYear}/reservations/${item.resKey}/feePostedAt`] = postedAt;
+    updates[`years/${activeYear}/reservations/${item.resKey}/feeRecordId`] = String(recordId || '');
+    updates[`years/${activeYear}/reservations/${item.resKey}/feeDismissedAt`] = null;
+    return { ok: true, updates, warnings };
+}
+
+function upsertReconciliationLedgerRecord(item, canonical, candidate) {
+    const records = Array.isArray(data.records) ? data.records : [];
+    const targetIndex = candidate ? candidate.index : -1;
+    if (targetIndex >= records.length) throw new Error('选中的账本记录不存在，请刷新后重试。');
+    const occupiedIndex = records.findIndex((record, index) => index !== targetIndex && record.sourceId === item.sourceId);
+    if (occupiedIndex >= 0) throw new Error('该预约已经关联了另一条账本记录，请刷新后重新选择。');
+    const existing = targetIndex >= 0 ? records[targetIndex] : null;
+    const profile = getStudentProfile(canonical.studentName);
+    const rate = Number.isFinite(Number(canonical.rate)) && Number(canonical.rate) >= 0
+        ? Number(canonical.rate)
+        : Number(existing && existing.rate || profile && profile.rate || 0);
+    const recordId = String(existing && existing.id || `booking_${item.sourceId}`);
+    const nextRecord = {
+        ...(existing || {}),
+        id: recordId,
+        sourceId: item.sourceId,
+        studentId: profile ? profile.id : String(existing && existing.studentId || ''),
+        studentName: canonical.studentName,
+        date: canonical.date,
+        hours: Number(Number(canonical.hours).toFixed(2)),
+        rate,
+        total: Number((rate * Number(canonical.hours)).toFixed(2)),
+        postedAt: Number(existing && existing.postedAt || Date.now())
+    };
+    if (!(nextRecord.hours > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(nextRecord.date) || !nextRecord.studentName) throw new Error('账本数据不完整，请使用手动填写。');
+    if (targetIndex >= 0) records[targetIndex] = nextRecord;
+    else records.push(nextRecord);
+    data.records = records;
+    return { recordId, record: nextRecord };
+}
+
+function renderReconciliationFailure(item, message) {
+    item.type = 'syncFailed';
+    item.message = message;
+    reconciliationIssues.push(message);
+    renderReconciliationCases();
+    renderReconciliationNotice({ reconciliationSyncFailed: true });
+}
+
+async function commitReconciliation(caseIndex, canonical, candidate, syncBooking) {
+    const item = reconciliationCases[caseIndex];
+    if (!item || reconciliationBusy) return;
+    reconciliationBusy = true;
+    try {
+        const ok = await ensureCloudReady();
+        if (!ok) throw new Error('云端未连接，请检查网络后重试。');
+        const reservationPlan = await buildReconciliationReservationUpdates(item, canonical, '', syncBooking);
+        if (!reservationPlan.ok) throw new Error(reservationPlan.message);
+        const ledgerResult = upsertReconciliationLedgerRecord(item, canonical, candidate);
+        reservationPlan.updates[`years/${activeYear}/reservations/${item.resKey}/feeRecordId`] = ledgerResult.recordId;
+        saveData();
+        const localSaved = await cloudPushChain.catch(() => false);
+        if (!localSaved) {
+            renderReconciliationFailure(item, '本地账本已更新，但加密账本云端同步失败，请重试。');
+            return;
+        }
+        try {
+            await db.ref().update(reservationPlan.updates);
+        } catch (error) {
+            console.error('人工核对后的预约同步失败:', error);
+            renderReconciliationFailure(item, '账本已保存，但约课端同步失败，请重试。');
+            return;
+        }
+        closeReconcileModal();
+        showToast(reservationPlan.warnings.length > 0
+            ? `两端数据已统一；${reservationPlan.warnings.join('；')}`
+            : '两端数据已统一并完成入账');
+        await refreshPendingList();
+    } catch (error) {
+        console.error('人工核对失败:', error);
+        renderReconciliationFailure(item, error.message || '处理失败，请重试。');
+    } finally {
+        reconciliationBusy = false;
+    }
+}
+
+async function resolveReconciliation(caseIndex, mode) {
+    const item = reconciliationCases[caseIndex];
+    if (!item) return;
+    const candidate = getSelectedReconciliationCandidate(caseIndex);
+    if (mode === 'ledger' && !candidate) {
+        alert('请先选择一条账本候选记录。');
+        return;
+    }
+    if (mode === 'booking' && item.candidates.length > 1 && !candidate) {
+        alert('本地有多条候选记录，请先选择要更新的账本记录。');
+        return;
+    }
+    const canonical = mode === 'ledger'
+        ? getReconciliationCanonicalFromLedger(item, candidate)
+        : getReconciliationCanonicalFromBooking(item, candidate);
+    if (!canonical) return;
+    const label = mode === 'ledger' ? '账本数据' : '约课数据';
+    if (!confirm(`确定采用${label}处理 ${item.booking.studentName || '这条预约'} 吗？\n保存后会更新两端关联状态。`)) return;
+    await commitReconciliation(caseIndex, canonical, candidate, mode === 'ledger');
+}
+
+function updateManualReconcileHours() {
+    const start = document.getElementById('feeManualStart');
+    const end = document.getElementById('feeManualEnd');
+    const hours = document.getElementById('feeManualHours');
+    if (start && end && hours) {
+        const calculated = calculateClockHours(start.value, end.value);
+        if (calculated > 0) hours.value = calculated.toFixed(2);
+    }
+    updateManualReconcileTotal();
+}
+
+function updateManualReconcileTotal() {
+    const hours = Number(document.getElementById('feeManualHours') && document.getElementById('feeManualHours').value);
+    const rate = Number(document.getElementById('feeManualRate') && document.getElementById('feeManualRate').value);
+    const total = document.getElementById('feeManualTotal');
+    if (total) total.textContent = `¥${Number.isFinite(hours * rate) ? (hours * rate).toFixed(2) : '0.00'}`;
+}
+
+function openManualReconciliation(caseIndex) {
+    const item = reconciliationCases[caseIndex];
+    const modal = document.getElementById('feeReconcileModal');
+    if (!item || !modal) return;
+    activeReconciliationCaseIndex = caseIndex;
+    const candidate = getSelectedReconciliationCandidate(caseIndex);
+    const booking = item.booking || {};
+    const record = candidate && candidate.record;
+    const profile = getStudentProfile(booking.studentName || record && record.studentName);
+    document.getElementById('feeManualStudent').value = booking.studentName || record && record.studentName || '';
+    document.getElementById('feeManualDate').value = booking.date || record && record.date || '';
+    document.getElementById('feeManualStart').value = booking.startTime || '';
+    document.getElementById('feeManualEnd').value = booking.endTime || (booking.startTime && booking.hours ? addHoursToClock(booking.startTime, booking.hours) : '');
+    document.getElementById('feeManualHours').value = Number(booking.hours || record && record.hours || 0).toFixed(2);
+    document.getElementById('feeManualRate').value = Number(profile ? profile.rate : record && record.rate || 0).toFixed(2);
+    document.getElementById('feeManualReconcileHint').textContent = `处理：${booking.studentName || '未填写姓名'} · ${item.message || '两端数据需要核对'}`;
+    updateManualReconcileTotal();
+    modal.classList.remove('hidden');
+    document.getElementById('feeManualStudent').focus();
+}
+
+function closeReconcileModal() {
+    const modal = document.getElementById('feeReconcileModal');
+    if (modal) modal.classList.add('hidden');
+    activeReconciliationCaseIndex = null;
+}
+
+async function saveManualReconciliation() {
+    const caseIndex = activeReconciliationCaseIndex;
+    const item = reconciliationCases[caseIndex];
+    if (!item) return;
+    const candidate = getSelectedReconciliationCandidate(caseIndex);
+    if (item.candidates.length > 1 && !candidate) {
+        alert('本地有多条候选记录，请先在上方选择一条。');
+        closeReconcileModal();
+        return;
+    }
+    const studentName = document.getElementById('feeManualStudent').value.trim();
+    const date = document.getElementById('feeManualDate').value;
+    const startTime = normalizeClockValue(document.getElementById('feeManualStart').value);
+    const endTime = normalizeClockValue(document.getElementById('feeManualEnd').value);
+    const hours = Number(document.getElementById('feeManualHours').value);
+    const rate = Number(document.getElementById('feeManualRate').value);
+    const calculatedHours = calculateClockHours(startTime, endTime);
+    if (!studentName || studentName.length > 50 || /[.#$\/\[\]]/.test(studentName) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !startTime || !endTime || !(calculatedHours > 0) || !(hours > 0) || !(rate >= 0)) {
+        alert('请完整填写姓名、日期、起止时间、课时和课时费。');
+        return;
+    }
+    if (Math.abs(calculatedHours - hours) >= 0.01) {
+        alert(`起止时间计算为 ${calculatedHours.toFixed(2)} 小时，与填写的课时不一致。`);
+        return;
+    }
+    if (!confirm(`确定使用这份手动数据同步两端吗？\n${studentName} · ${date} · ${hours.toFixed(2)} 小时`)) return;
+    await commitReconciliation(caseIndex, { studentName, date, startTime, endTime, hours, rate }, candidate, true);
 }
 
 async function importSelectedPending() {

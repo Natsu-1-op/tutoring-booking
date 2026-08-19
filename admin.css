@@ -196,14 +196,27 @@
     grid-column: 1;
 }
 
-#access-card,
+.admin-side-column {
+    grid-column: 2;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-self: start;
+    gap: 16px;
+}
+
+.admin-side-column .admin-card {
+    grid-column: auto;
+    width: 100%;
+}
+
 #preferences-card,
 #logs-card {
     grid-column: 2;
 }
 
 #preferences-card {
-    align-self: start;
+    order: -1;
 }
 
 #data-card {
@@ -505,11 +518,13 @@
 }
 
 #preferences-card .control-panel {
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
 }
 
 #preferences-card .control-panel + .control-panel {
-    margin-top: 10px;
+    margin-top: 8px;
 }
 
 .reservations-section {
@@ -733,8 +748,7 @@
     }
 
     #schedule-card,
-    #access-card,
-    #preferences-card,
+    #admin-side-column,
     #data-card,
     #logs-card {
         grid-column: 1;
