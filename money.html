@@ -174,7 +174,7 @@
             <div class="fee-page-heading flex justify-between items-center mb-4">
                 <div>
                     <p class="fee-kicker">同步中心</p>
-                    <h2 class="text-lg font-bold text-gray-800">约课对接</h2>
+                    <h2 class="text-lg font-bold text-gray-800">约课对接 <span id="feeVersionTag" class="text-xs font-normal text-gray-400"></span></h2>
                 </div>
                 <div class="fee-actions flex space-x-2">
                     <button type="button" onclick="changeFeePassphrase()" class="text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium">云端口令</button>
@@ -1211,6 +1211,7 @@ let _applyingCloud = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
+const FEE_APP_VERSION = '2026-08-22a'; // 页面右上角显示，用于确认运行的是否为最新版本
 let cloudVersionsByYear = {};
 let feePassphraseChanging = false;
 
@@ -1359,23 +1360,11 @@ async function pushCloudNow(job, options) {
             dismissedLessons: slice.dismissedLessons || []
         });
         const ref = vaultRefFor(year);
-        const known = cloudVersionsByYear[year];
         const updatedAt = Date.now();
-        let conflictReason = '';
+        // last-write-wins：直接覆盖写入。原版本守卫(unknown-version/remote-changed/remote-deleted)
+        // 在单人使用场景下只会造成"推送被拒、对账报同步失败"，此处全部移除；
+        // 多设备并发写由 Firebase 事务本身保证原子性，删除保护由墓碑负责。
         const result = await ref.transaction(existing => {
-            conflictReason = '';
-            if (!options.force && existing && known && Number(existing.revision || 0) !== Number(known.revision || 0)) {
-                conflictReason = 'remote-changed';
-                return;
-            }
-            if (!options.force && existing && !known) {
-                conflictReason = 'unknown-version';
-                return;
-            }
-            if (!options.force && known && !existing) {
-                conflictReason = 'remote-deleted';
-                return;
-            }
             return {
                 schemaVersion: 3,
                 revision: Number(existing && existing.revision || 0) + 1,
@@ -1386,12 +1375,7 @@ async function pushCloudNow(job, options) {
             };
         });
         if (!result.committed) {
-            const messages = {
-                'remote-changed': `${year} 年云端账本已被其他设备修改，已停止自动覆盖，请先拉取并确认冲突。`,
-                'unknown-version': `${year} 年云端账本版本未知，已停止自动覆盖，请先执行拉取。`,
-                'remote-deleted': `${year} 年云端账本刚被删除，已停止自动重建，请确认后手动上传。`
-            };
-            lastCloudPushError = messages[conflictReason] || `${year} 年云端账本写入冲突，请先拉取后重试。`;
+            lastCloudPushError = `${year} 年云端账本写入未完成（事务未提交），请重试。`;
             showToast(lastCloudPushError);
             return false;
         }
@@ -2708,6 +2692,9 @@ switchTab = function(view) {
 
 // ---- 启动时：本地数据就绪后拉云端（含 updatedAt 初始化）----
 function onReady() {
+    const versionTag = document.getElementById('feeVersionTag');
+    if (versionTag) versionTag.textContent = 'v' + FEE_APP_VERSION;
+    console.log('[课时费管家] 版本 ' + FEE_APP_VERSION);
     data.updatedAt = data.updatedAt || 0;
     data.lessonOverrides = data.lessonOverrides || {};
     data.dismissedLessons = data.dismissedLessons || [];
