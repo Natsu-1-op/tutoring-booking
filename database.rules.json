@@ -1,93 +1,256 @@
 {
   "rules": {
+    "teacherAllowlist": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false,
+        ".validate": "newData.val() === true || (newData.hasChildren(['enabled']) && newData.child('enabled').isBoolean())"
+      }
+    },
     "system": {
       ".read": true,
-      ".write": true,
-      "activeYear": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}$/)" },
-      "activeName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
-      "$other": { ".validate": false }
+      ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+      "activeYear": {
+        ".validate": "newData.isString() && newData.val().matches(/^\\d{4}$/)"
+      },
+      "activeName": {
+        ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+      },
+      "$other": {
+        ".validate": false
+      }
     },
     "years": {
-      ".read": true,
+      ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
       "$year": {
         ".validate": "$year.matches(/^\\d{4}$/)",
-        ".write": true,
+        ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+        ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
         "slots": {
+          ".read": true,
+          ".indexOn": ["time", "status"],
           "$slotId": {
-            "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
-            "reserved": { ".validate": "newData.isBoolean()" },
-            "reservationId": { ".validate": "(newData.isString() && newData.val().length <= 100) || newData.val() === null" },
-            "status": { ".validate": "newData.isString() && (newData.val() === 'active' || newData.val() === 'hidden')" },
-            "$other": { ".validate": false }
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            "time": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "reserved": {
+              ".validate": "newData.isBoolean()"
+            },
+            "reservationId": {
+              ".validate": "(newData.isString() && newData.val().length <= 100) || newData.val() === null"
+            },
+            "status": {
+              ".validate": "newData.isString() && (newData.val() === 'active' || newData.val() === 'hidden')"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "reservations": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          ".indexOn": ["nickname", "timestamp", "status"],
           "$resId": {
-            "nickname": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
-            "slotId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
-            "reservationId": { ".validate": "newData.isString() && newData.val() === $resId" },
-            "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
-            "status": { ".validate": "newData.isString() && (newData.val() === 'booked' || newData.val() === 'confirmed' || newData.val() === 'completed' || newData.val() === 'canceled')" },
-            "cancelCode": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{5}$/)" },
-            "timestamp": { ".validate": "newData.isNumber()" },
-            "archived": { ".validate": "newData.isBoolean() || newData.val() === null" },
-            "feeStatus": { ".validate": "newData.isString() && (newData.val() === 'posted' || newData.val() === 'pending' || newData.val() === 'dismissed')" },
-            "feePostedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
-            "feeDismissedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
-            "feeRecordId": { ".validate": "(newData.isString() && newData.val().length <= 200) || newData.val() === null" },
-            "slotSnapshot": { ".validate": "newData.hasChildren()" },
-            "$other": { ".validate": false }
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            "nickname": {
+              ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)"
+            },
+            "slotId": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "reservationId": {
+              ".validate": "newData.isString() && newData.val() === $resId"
+            },
+            "time": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "status": {
+              ".validate": "newData.isString() && (newData.val() === 'booked' || newData.val() === 'confirmed' || newData.val() === 'completed' || newData.val() === 'canceled')"
+            },
+            "cancelCode": {
+              ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{5}$/)"
+            },
+            "timestamp": {
+              ".validate": "newData.isNumber()"
+            },
+            "canceledAt": {
+              ".validate": "newData.isNumber() || newData.val() === null"
+            },
+            "archived": {
+              ".validate": "newData.isBoolean() || newData.val() === null"
+            },
+            "feeStatus": {
+              ".validate": "newData.isString() && (newData.val() === 'posted' || newData.val() === 'pending' || newData.val() === 'dismissed')"
+            },
+            "feePostedAt": {
+              ".validate": "newData.isNumber() || newData.val() === null"
+            },
+            "feeDismissedAt": {
+              ".validate": "newData.isNumber() || newData.val() === null"
+            },
+            "feeRecordId": {
+              ".validate": "(newData.isString() && newData.val().length <= 200) || newData.val() === null"
+            },
+            "slotSnapshot": {
+              ".validate": "newData.hasChildren()"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "settings": {
-          "$key": {
-            ".validate": "newData.isString() || newData.isBoolean() || newData.isNumber() || newData.hasChildren()"
+          "notice": {
+            ".read": true,
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".validate": "newData.isString() && newData.val().length <= 5000"
+          },
+          "noticeImage": {
+            ".read": true,
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".validate": "newData.isString() && newData.val().length <= 2000000"
+          },
+          "deadline": {
+            ".read": true,
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".validate": "newData.isString() || newData.val() === null"
+          },
+          "accessCode": {
+            ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".validate": "newData.isString() && newData.val().length >= 4 && newData.val().length <= 128"
+          },
+          "aiConfig": {
+            ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+            ".validate": "newData.hasChildren()"
+          },
+          "$other": {
+            ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+            ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+            ".validate": "newData.isString() || newData.isBoolean() || newData.isNumber() || newData.hasChildren() || newData.val() === null"
           }
         },
         "studentWhitelist": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
           "$id": {
             ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)"
           }
         },
-        "operationLog": {},
-        "metadata": {},
-        "dailyLocks": {}
+        "studentHours": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          "$student": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+          }
+        },
+        "operationLog": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          "$logId": {
+            ".validate": "newData.hasChildren(['action', 'timestamp']) && newData.child('action').isString() && newData.child('action').val().length <= 500 && newData.child('timestamp').isNumber()"
+          }
+        },
+        "metadata": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          ".validate": "newData.hasChildren()"
+        },
+        "dailyLocks": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true"
+        },
+        "feeVault": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".validate": "newData.hasChildren(['schemaVersion', 'updatedAt', 'cipher', 'salt', 'kdfIterations']) && newData.child('schemaVersion').isNumber() && newData.child('updatedAt').isNumber() && newData.child('cipher').isString() && newData.child('cipher').val().length <= 10000000 && newData.child('salt').isString() && newData.child('salt').val().length <= 1000 && newData.child('kdfIterations').isNumber()"
+        },
+        "feeVaultDeletedAt": {
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)"
+        }
+      }
+    },
+    "examDefinitions": {
+      ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+      "$examId": {
+        ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && (!data.exists() || data.child('createdBy').val() === auth.uid || root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true)",
+        ".validate": "$examId.matches(/^[A-Za-z0-9_-]{20,100}$/) && newData.hasChildren(['paperTitle', 'startTime', 'endTime', 'ticketHash', 'active', 'createdBy', 'createdAt'])",
+        "paperTitle": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+        },
+        "startTime": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+        },
+        "endTime": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+        },
+        "ticketHash": {
+          ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{64}$/)"
+        },
+        "active": {
+          ".validate": "newData.isBoolean()"
+        },
+        "createdBy": {
+          ".validate": "newData.isString() && (newData.val() === auth.uid || (data.exists() && newData.val() === data.val()))"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber() && newData.val() <= now"
+        },
+        "$other": {
+          ".validate": false
+        }
       }
     },
     "examRankings": {
-      ".read": true,
-      ".write": true,
+      ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+      ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
       "$paper": {
         "$student": {
-          "name": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
-          "paperTitle": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
-          "time": { ".validate": "newData.isString() && newData.val().length <= 100" },
-          "score": { ".validate": "newData.isNumber() && newData.val() >= 0 && (!newData.parent().child('maxScore').exists() || newData.val() <= newData.parent().child('maxScore').val())" },
-          "maxScore": { ".validate": "newData.isNumber() && newData.val() >= 0" },
-          "$other": { ".validate": false }
+          "name": {
+            ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)"
+          },
+          "paperTitle": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+          },
+          "examId": {
+            ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{20,100}$/)"
+          },
+          "time": {
+            ".validate": "newData.isString() && newData.val().length <= 100"
+          },
+          "score": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && (!newData.parent().child('maxScore').exists() || newData.val() <= newData.parent().child('maxScore').val())"
+          },
+          "maxScore": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     },
     "submittedExamLocks": {
+      ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+      ".write": false,
       "$paper": {
         "$student": {
-          ".read": true,
-          ".write": "!data.exists() || (data.hasChildren(['status', 'clientToken']) && data.child('status').val() === 'pending' && (newData.child('clientToken').val() === data.child('clientToken').val() || now - data.child('createdAt').val() > 1800000) && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'submitted'))",
-          ".validate": "newData.hasChildren(['status', 'clientToken', 'createdAt']) && newData.child('clientToken').isString() && newData.child('clientToken').val().length > 0 && newData.child('clientToken').val().length <= 200 && (newData.child('status').val() === 'pending' || (newData.child('status').val() === 'submitted' && newData.child('submittedAt').isNumber() && newData.child('receiptId').isString() && newData.child('receiptId').val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)))",
-          "status": { ".validate": "newData.isString()" },
-          "clientToken": { ".validate": "newData.isString()" },
-          "createdAt": { ".validate": "newData.isNumber()" },
-          "submittedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
-          "receiptId": { ".validate": "newData.isString() && newData.val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)" },
-          "$other": { ".validate": false }
+          ".read": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true)",
+          ".write": false
         }
       }
     },
-    "admin_auth": {
+    "privateRuntime": {
       ".read": false,
       ".write": false,
-      "$token": {
-        ".read": "data.val() === true"
+      "historySessions": {
+        ".indexOn": ["expiresAt"]
+      },
+      "examSessions": {
+        ".indexOn": ["expiresAt"]
       }
     }
   }

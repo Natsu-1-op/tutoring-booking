@@ -10,13 +10,7 @@
     let dashboardReservations = {};
     let dashboardStudentHours = {};
     let viewingYear = "2026";
-    const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
-    const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
-    const MONEY_HANDOFF_KEY = 'money_admin_handoff_v1';
-    const MONEY_HANDOFF_TTL_MS = 60 * 1000;
     const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
-    let adminLoginFailures = 0;
-    let adminLoginBlockedUntil = 0;
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
     const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
 
@@ -178,73 +172,24 @@
         return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
     }
 
-    // 课时费页面使用一次性短时通行标记，避免从管理员工作台进入时再次输入密码。
-    // 直接访问 money.html 没有这个标记，仍会显示管理员密码验证。
-    window.openMoneyFromAdmin = function(event) {
-        if (!isAdminAuthenticated) return true;
-        if (event) event.preventDefault();
-        const link = event && event.currentTarget;
-        const targetUrl = new URL(link && link.href ? link.href : 'money.html', window.location.href);
-        let token = '';
-        try {
-            token = generateSecureCode(48);
-            const payload = JSON.stringify({ token, expiresAt: Date.now() + MONEY_HANDOFF_TTL_MS });
-            try { localStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
-            try { sessionStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
-        } catch (e) { token = ''; }
-        if (token) targetUrl.hash = `admin-handoff=${encodeURIComponent(token)}`;
-        const opened = window.open(targetUrl.toString(), '_blank');
-        if (!opened) window.location.assign(targetUrl.toString());
-        return false;
-    };
+    // 课时费页面自行校验 Google 教师身份；这里不再传递前端通行令牌。
+    window.openMoneyFromAdmin = function() { return true; };
 
     function inlineArg(value) {
         return escapeHtml(JSON.stringify(String(value ?? '')));
     }
 
-    function registerAdminLoginFailure(errorEl) {
-        adminLoginFailures++;
-        if (adminLoginFailures >= 5) {
-            adminLoginFailures = 0;
-            adminLoginBlockedUntil = Date.now() + 30 * 1000;
-            errorEl.textContent = '尝试过多，请 30 秒后重试。';
-        } else {
-            errorEl.textContent = '密码错误！';
+    function enterAdminAfterGoogleAuth() {
+        if (isAdminAuthenticated) return;
+        isAdminAuthenticated = true;
+        const contentEl = document.getElementById('admin-content');
+        if (contentEl) {
+            contentEl.classList.add('is-visible');
+            contentEl.style.display = '';
         }
-    }
-
-    // 核验成功后只向当前标签页签发 30 分钟会话标记，供教师端无感通行。
-    function verifyAdmin() {
-        const inputPass = document.getElementById('admin-password').value.trim();
-        const errorEl = document.getElementById('login-error');
-        if (Date.now() < adminLoginBlockedUntil) {
-            errorEl.textContent = `尝试过多，请 ${Math.ceil((adminLoginBlockedUntil - Date.now()) / 1000)} 秒后重试。`;
-            return;
-        }
-        if (!inputPass) return alert('请输入密码！');
-        if (inputPass.length > 128 || INVALID_FIREBASE_KEY_CHARS.test(inputPass)) return errorEl.textContent = '密码格式不合法。';
-
-        db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
-            if (snapshot.exists() && snapshot.val() === true) {
-                adminLoginFailures = 0;
-                localStorage.removeItem('admin_session_auth');
-                sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({ expiresAt: Date.now() + ADMIN_SESSION_TTL_MS }));
-
-                isAdminAuthenticated = true; 
-                document.getElementById('admin-login').style.display = 'none';
-                const contentEl = document.getElementById('admin-content');
-                contentEl.classList.add('is-visible');
-                contentEl.style.display = '';
-                // 先结束页面中的静态“正在读取”占位，避免 Firebase 初始化异常时界面一直假加载。
-                renderTodayDashboard();
-                initAdminSystem();
-            } else {
-                registerAdminLoginFailure(errorEl);
-            }
-        }).catch(error => {
-            if (String(error && error.code || '').toUpperCase().includes('PERMISSION_DENIED')) registerAdminLoginFailure(errorEl);
-            else errorEl.textContent = '网络错误，请检查连接后重试。';
-        });
+        // 先结束页面中的静态“正在读取”占位，避免 Firebase 初始化异常时界面一直假加载。
+        renderTodayDashboard();
+        initAdminSystem();
     }
 
     function initAdminSystem() {
@@ -1109,7 +1054,7 @@
             initialPack[`years/${newY}/settings/accessCode`] = secureRandomCode; 
 
             db.ref().update(initialPack).then(() => {
-                SystemRouter.getLogsRef(newY).push({ action: `新建了学年，初始口令: ${secureRandomCode}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+                SystemRouter.getLogsRef(newY).push({ action: '新建了学年并生成初始预约口令', timestamp: firebase.database.ServerValue.TIMESTAMP });
                 handleViewingYearChange(newY);
             });
         });
@@ -1476,8 +1421,16 @@
 
     // 注意：escapeHtml 由 config/firebase-env.js 全局提供，此处不再重复定义
 
-    document.getElementById('admin-login-submit').onclick = verifyAdmin;
-    document.getElementById('admin-password').onkeypress = (e) => { if (e.key === 'Enter') verifyAdmin(); };
+    TeacherAuth.requireTeacher({
+        config: firebaseConfig,
+        overlay: document.getElementById('admin-login'),
+        signInButton: document.getElementById('admin-login-submit'),
+        signOutButton: document.getElementById('admin-signout'),
+        errorElement: document.getElementById('login-error'),
+        requireManager: true,
+        onSignedOut: () => window.location.reload(),
+        onAuthorized: enterAdminAfterGoogleAuth
+    });
     document.getElementById('admin-year-select').onchange = handleViewingYearChange;
     document.getElementById('btn-set-active').onclick = setAsActiveYear;
     document.getElementById('btn-create-year').onclick = createNewYearNode;

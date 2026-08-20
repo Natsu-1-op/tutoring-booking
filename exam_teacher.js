@@ -36,6 +36,7 @@ let pendingGradingDraft = null;
 
 function gradingDraftFingerprint(paper) {
     const source = JSON.stringify({
+        examId: paper && paper.examId || '',
         title: paper && paper.paperTitle || '',
         questions: (paper && Array.isArray(paper.questions) ? paper.questions : []).map(q => ({
             id: q.id, type: q.type, score: q.score
@@ -51,7 +52,7 @@ function gradingDraftFingerprint(paper) {
 
 function getActiveGradingDraftKey() {
     if (!masterPaper || !studentPaper) return '';
-    return `grading:${gradingDraftFingerprint(masterPaper)}:${encodeURIComponent(masterPaper.paperTitle)}:${encodeURIComponent(studentPaper.studentName)}`;
+    return `grading:${gradingDraftFingerprint(masterPaper)}:${encodeURIComponent(masterPaper.examId || masterPaper.paperTitle)}:${encodeURIComponent(studentPaper.studentName)}`;
 }
 
 function openGradingDraftDb() {
@@ -241,6 +242,7 @@ function validateMasterPaperShape(paper) {
 
 function validateStudentPaperShape(paper) {
     if (!paper || typeof paper !== 'object' || typeof paper.studentName !== 'string' || !paper.studentName.trim() || paper.studentName.length > 100) return '学生答案缺少合法姓名。';
+    if (typeof paper.examId !== 'undefined' && (typeof paper.examId !== 'string' || !/^[A-Za-z0-9_-]{20,100}$/.test(paper.examId))) return '学生答案的试卷登记号不合法。';
     if (!paper.answers || typeof paper.answers !== 'object' || Array.isArray(paper.answers)) return '学生答案格式不合法。';
     const ids = Object.keys(paper.answers);
     if (ids.length > MAX_QUESTIONS) return '学生答案题目数量异常。';
@@ -260,74 +262,23 @@ function rejectOversizedFile(file, maxBytes) {
     return false;
 }
 
-// ================= 准入守卫：仅当前标签页、30 分钟有效 =================
-const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
-const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
-let teacherLoginFailures = 0;
-let teacherLoginBlockedUntil = 0;
-
-function hasValidAdminSession() {
-    try {
-        localStorage.removeItem('admin_session_auth');
-        const session = JSON.parse(sessionStorage.getItem(ADMIN_SESSION_KEY) || 'null');
-        if (session && Number(session.expiresAt) > Date.now()) return true;
-        sessionStorage.removeItem(ADMIN_SESSION_KEY);
-    } catch (e) {}
-    return false;
-}
-
-function grantAdminSession() {
-    sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({ expiresAt: Date.now() + ADMIN_SESSION_TTL_MS }));
-}
-
-function registerTeacherLoginFailure(errLbl) {
-    teacherLoginFailures++;
-    if (teacherLoginFailures >= 5) {
-        teacherLoginFailures = 0;
-        teacherLoginBlockedUntil = Date.now() + 30 * 1000;
-        errLbl.textContent = '尝试过多，请 30 秒后重试。';
-    } else {
-        errLbl.textContent = '口令错误。';
-    }
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-    if (hasValidAdminSession()) {
-        const mask = document.getElementById('teacher-gate-login-mask');
-        if (mask) mask.style.display = 'none';
+// ================= 教师准入：Google 登录 + UID 白名单 =================
+TeacherAuth.requireTeacher({
+    config: firebaseConfig,
+    overlay: document.getElementById('teacher-gate-login-mask'),
+    signInButton: document.getElementById('teacher-google-login'),
+    signOutButton: document.getElementById('teacher-signout'),
+    errorElement: document.getElementById('gate-error-lbl'),
+    onSignedOut: () => window.location.reload(),
+    onAuthorized: () => {
+        // 初始化学年（从 Firebase 同步，否则 AI 配置会写错路径）
+        SystemRouter.system().once('value', snap => {
+            const sys = snap.val();
+            if (sys && /^\d{4}$/.test(String(sys.activeYear || ''))) SystemRouter.activeYear = sys.activeYear;
+            loadAiConfig(); // activeYear 就绪后再读 AI 配置，避免固定读到 2026 学年
+        });
     }
 });
-
-// 初始化学年（从 Firebase 同步，否则 AI 配置会写错路径）
-SystemRouter.system().once('value', snap => {
-    const sys = snap.val();
-    if (sys && /^\d{4}$/.test(String(sys.activeYear || ''))) SystemRouter.activeYear = sys.activeYear;
-    loadAiConfig(); // activeYear 就绪后再读 AI 配置，避免固定读到 2026 学年
-});
-
-function executeManualGateAuth() {
-    const tokenInput = document.getElementById('gate-pass-input').value.trim();
-    const errLbl = document.getElementById('gate-error-lbl');
-    if (Date.now() < teacherLoginBlockedUntil) {
-        errLbl.textContent = `尝试过多，请 ${Math.ceil((teacherLoginBlockedUntil - Date.now()) / 1000)} 秒后重试。`;
-        return;
-    }
-    if (!tokenInput) return alert('请输入口令！');
-    if (tokenInput.length > 128 || /[.#$\/\[\]\u0000-\u001F\u007F]/.test(tokenInput)) return errLbl.textContent = '口令格式不合法。';
-
-    db.ref(`admin_auth/${tokenInput}`).once('value').then((snapshot) => {
-        if (snapshot.exists() && snapshot.val() === true) {
-            teacherLoginFailures = 0;
-            grantAdminSession();
-            document.getElementById('teacher-gate-login-mask').style.display = 'none';
-        } else {
-            registerTeacherLoginFailure(errLbl);
-        }
-    }).catch(error => {
-        if (String(error && error.code || '').toUpperCase().includes('PERMISSION_DENIED')) registerTeacherLoginFailure(errLbl);
-        else errLbl.textContent = '网络错误，请检查连接后重试。';
-    });
-}
 
 function switchPane(el, id) {
     document.querySelectorAll('.teacher-tab').forEach(b => b.classList.remove('active'));
@@ -493,7 +444,18 @@ document.getElementById('reimport-master-to-edit').onchange = function(e) {
     }; r.readAsText(file);
 };
 
-function exportJsonPapers() {
+function randomExamToken() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sha256Hex(value) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function exportJsonPapers() {
     const title = document.getElementById('make-title').value.trim();
     const start = document.getElementById('make-start').value;
     const end = document.getElementById('make-end').value;
@@ -526,10 +488,32 @@ function exportJsonPapers() {
     const paperValidationError = validateMasterPaperShape({ paperTitle: title, startTime: start, endTime: end, questions: tQ });
     if (paperValidationError) return alert(`导出前校验失败：${paperValidationError}`);
 
-    triggerDl({ paperTitle: title, startTime: start, endTime: end, questions: tQ }, 'exam_teacher_master.json');
-    const secureStudentCipher = encryptEngine({ paperTitle: title, startTime: start, endTime: end, questions: sQ }, STEALTH_SECRET_SALT);
-    triggerDl({ isEncrypted: true, cipher: secureStudentCipher }, 'exam_student_release.json');
-    // 导出完成
+    const currentUser = firebase.auth().currentUser;
+    if (!currentUser) return alert('教师登录状态已失效，请重新登录。');
+    const exportButton = document.getElementById('export-paper-btn');
+    if (exportButton) { exportButton.disabled = true; exportButton.textContent = '正在登记试卷...'; }
+    try {
+        const examId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `exam_${randomExamToken().slice(0, 48)}`;
+        const examTicket = randomExamToken();
+        const ticketHash = await sha256Hex(examTicket);
+        await db.ref(`examDefinitions/${examId}`).set({
+            paperTitle: title,
+            startTime: start,
+            endTime: end,
+            ticketHash,
+            active: true,
+            createdBy: currentUser.uid,
+            createdAt: firebase.database.ServerValue.TIMESTAMP
+        });
+        triggerDl({ examId, paperTitle: title, startTime: start, endTime: end, questions: tQ }, 'exam_teacher_master.json');
+        const secureStudentCipher = encryptEngine({ examId, examTicket, paperTitle: title, startTime: start, endTime: end, questions: sQ }, STEALTH_SECRET_SALT);
+        triggerDl({ isEncrypted: true, cipher: secureStudentCipher }, 'exam_student_release.json');
+    } catch (error) {
+        console.error('试卷登记或导出失败:', error);
+        alert('试卷未能登记到云端，因此没有导出。请检查网络和教师权限后重试。');
+    } finally {
+        if (exportButton) { exportButton.disabled = false; exportButton.textContent = '生成导出'; }
+    }
 }
 
 function triggerDl(obj, name) {
@@ -1152,6 +1136,9 @@ function renderGradingInterface() {
     if (studentPaper.paperTitle && masterPaper.paperTitle && studentPaper.paperTitle !== masterPaper.paperTitle) {
         return alert("母卷与学生答卷不是同一套试卷，无法批改。");
     }
+    if (masterPaper.examId && studentPaper.examId !== masterPaper.examId) {
+        return alert("母卷与学生答卷的云端登记号不一致，无法批改。");
+    }
     if (studentPaper && studentPaper.answers) {
         const masterIds = new Set(masterPaper.questions.map(q => q.id));
         const unknownIds = Object.keys(studentPaper.answers).filter(id => !masterIds.has(id));
@@ -1429,6 +1416,7 @@ function saveStudentScoreAndPackage() {
     singleScores = normalizedScores;
     const maxScore = masterPaper.questions.reduce((sum, q) => sum + Number(q.score), 0);
     const scorePackage = {
+        examId: masterPaper.examId || '',
         studentName: studentPaper.studentName,
         elapsedDuration: studentPaper.elapsedDuration || "未知",
         submitTime: studentPaper.submitTime,
@@ -1451,11 +1439,12 @@ function saveStudentScoreAndPackage() {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => { URL.revokeObjectURL(dlUrl); }, 1000);
 
-    const safePaperKey = encodeURIComponent(masterPaper.paperTitle).replace(/\./g, '%2E');
+    const safePaperKey = encodeURIComponent(masterPaper.examId || masterPaper.paperTitle).replace(/\./g, '%2E');
     const safeStudentKey = encodeURIComponent(studentPaper.studentName).replace(/\./g, '%2E');
 
     db.ref(`examRankings/${safePaperKey}/${safeStudentKey}`).set({
         name: studentPaper.studentName,
+        ...(masterPaper.examId ? { examId: masterPaper.examId } : {}),
         paperTitle: masterPaper.paperTitle,
         time: studentPaper.submitTime,
         score: total,
@@ -1463,9 +1452,10 @@ function saveStudentScoreAndPackage() {
     }).then(() => {
         removeGradingDraft();
         setGradingDraftSaveStatus('评卷已保存，已清除本机草稿');
-        classResults = classResults.filter(i => !(i.name === studentPaper.studentName && i.paperTitle === masterPaper.paperTitle));
+        classResults = classResults.filter(i => !(i.name === studentPaper.studentName && (i.examId || i.paperTitle) === (masterPaper.examId || masterPaper.paperTitle)));
         classResults.push({
             name: studentPaper.studentName,
+            examId: masterPaper.examId || '',
             time: studentPaper.submitTime,
             score: total,
             paperTitle: masterPaper.paperTitle,
@@ -1489,7 +1479,7 @@ function renderGlobalScoreSummaryTable() {
 
 // 汇总表记录对应的云端排名节点（与 saveStudentScoreAndPackage 相同的路径编码）
 function rankingRefFor(record) {
-    const safePaperKey = encodeURIComponent(record.paperTitle).replace(/\./g, '%2E');
+    const safePaperKey = encodeURIComponent(record.examId || record.paperTitle).replace(/\./g, '%2E');
     const safeStudentKey = encodeURIComponent(record.name).replace(/\./g, '%2E');
     return db.ref(`examRankings/${safePaperKey}/${safeStudentKey}`);
 }
@@ -1503,7 +1493,7 @@ window.manuallyOverrideTotalScore = function(idx) {
         renderGlobalScoreSummaryTable();
         // 同步云端排名，避免汇总表与排名页分数分叉
         const r = classResults[idx];
-        rankingRefFor(r).update({ name: r.name, paperTitle: r.paperTitle, time: r.time, score: parseFloat(newS), ...(Number.isFinite(maxScore) ? { maxScore } : {}) })
+        rankingRefFor(r).update({ name: r.name, ...(r.examId ? { examId: r.examId } : {}), paperTitle: r.paperTitle, time: r.time, score: parseFloat(newS), ...(Number.isFinite(maxScore) ? { maxScore } : {}) })
             .catch(() => alert('总分已修改，但同步到云端排名失败（请检查网络）。'));
     }
 };
@@ -1547,7 +1537,9 @@ function listenFirebasePaperTitles() {
         Object.keys(snapshot.val()).forEach(encKey => {
             const opt = document.createElement('option');
             opt.value = encKey;
-            opt.textContent = decodeURIComponent(encKey);
+            const group = snapshot.val()[encKey] || {};
+            const firstRecord = Object.values(group).find(record => record && typeof record.paperTitle === 'string');
+            opt.textContent = firstRecord ? firstRecord.paperTitle : decodeURIComponent(encKey);
             selector.appendChild(opt);
         });
         if (cachedSelectedValue && snapshot.val()[cachedSelectedValue]) {

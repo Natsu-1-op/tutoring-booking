@@ -22,7 +22,7 @@ let currentTargetQuestionId = null;
 let timerInterval = null;
 let totalElapsedSeconds = 0;
 let activeReviewPackageData = null;
-let examSubmitToken = '';
+let examServerSessionToken = '';
 let currentExamReceipt = null;
 const STEALTH_SECRET_SALT = "ClassOpticSecurePaperKey2026";
 const MAX_PAPER_FILE_BYTES = 8 * 1024 * 1024;
@@ -83,24 +83,6 @@ function rejectOversizedFile(file, maxBytes) {
     return true;
 }
 
-function getExamSubmitToken(paperTitle, studentName) {
-    const key = `exam_submit_token_${encodeURIComponent(paperTitle)}_${encodeURIComponent(studentName)}`;
-    let token = '';
-    try { token = localStorage.getItem(key) || ''; } catch (e) {}
-    if (!token) {
-        token = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        try { localStorage.setItem(key, token); } catch (e) {}
-    }
-    return token;
-}
-
-function generateExamReceiptId() {
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const bytes = new Uint8Array(10);
-    crypto.getRandomValues(bytes);
-    return `EX-${Array.from(bytes, value => alphabet[value % alphabet.length]).join('').slice(0, 6)}-${Array.from(bytes, value => alphabet[(value + 7) % alphabet.length]).join('').slice(0, 6)}`;
-}
-
 function showExamSubmitReceipt(receipt) {
     currentExamReceipt = { ...receipt };
     const authCard = document.getElementById('exam-auth-card');
@@ -150,15 +132,6 @@ function downloadExamReceipt() {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1200);
-}
-
-function runTransaction(ref, updateFn) {
-    return new Promise((resolve, reject) => {
-        ref.transaction(updateFn, (error, committed, snapshot) => {
-            if (error) reject(error);
-            else resolve({ committed, snapshot });
-        });
-    });
 }
 
 window.openGlobalLightbox = function(imgSrc) {
@@ -219,6 +192,7 @@ function removeWatermark() {
 function triggerLiveAntiDisasterBackup() {
     if (!examPaperData || !studentNameVerified) return false;
     const backupPayload = {
+        examId: examPaperData.examId,
         paperTitle: examPaperData.paperTitle,
         studentName: studentNameVerified,
         examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`,
@@ -267,6 +241,10 @@ document.getElementById('input-paper-json').onchange = function(e) {
                     document.getElementById('auth-error').textContent = `试卷格式错误：${validationError}`;
                     return;
                 }
+                if (typeof decryptedData.examId !== 'string' || !/^[A-Za-z0-9_-]{20,100}$/.test(decryptedData.examId) || typeof decryptedData.examTicket !== 'string' || decryptedData.examTicket.length < 32 || decryptedData.examTicket.length > 200) {
+                    document.getElementById('auth-error').textContent = '这是旧版学生试卷，缺少云端安全登记。请老师使用最新版命题页面重新导出。';
+                    return;
+                }
                 examPaperData = decryptedData;
                 document.getElementById('student-name-zone').style.display = 'block';
                 document.getElementById('auth-error').textContent = "";
@@ -277,51 +255,50 @@ document.getElementById('input-paper-json').onchange = function(e) {
 
 async function verifyAndStartExam() {
     const nameInput = document.getElementById('student-name').value.trim();
+    const accessCode = document.getElementById('exam-access-code').value.trim();
     if (!nameInput) return alert("请输入姓名！");
+    if (!accessCode) return alert("请输入班级预约口令！");
     if (!isValidStudentName(nameInput)) return alert('姓名格式不合法（最多50字，不能包含路径特殊字符）！');
+    if (accessCode.length > 128) return alert('班级预约口令格式不合法！');
     if (!examPaperData || validateMasterPaperShape(examPaperData)) return alert('试卷状态无效，请重新导入。');
     await activeYearReady;
     const targetYear = SystemRouter.activeYear || "2026";
-
-    const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
-    const safeStudentPath = encodeURIComponent(nameInput).replace(/\./g, '%2E');
-
-    db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
-        const existingLock = lockSnapshot.val();
-        // 兼容旧版数字时间戳；新版 pending 只代表一次可恢复的提交流程。
-        if (existingLock !== null && (typeof existingLock !== 'object' || existingLock.status === 'submitted')) {
-            if (existingLock && existingLock.status === 'submitted' && existingLock.receiptId) {
+    const errorElement = document.getElementById('auth-error');
+    errorElement.textContent = '正在验证...';
+    try {
+            const result = await StudentApi.startExam({
+                year: targetYear,
+                studentName: nameInput,
+                accessCode,
+                paperTitle: examPaperData.paperTitle,
+                examId: examPaperData.examId,
+                examTicket: examPaperData.examTicket,
+                startTime: examPaperData.startTime,
+                endTime: examPaperData.endTime
+            });
+            if (result.status === 'submitted') {
                 showExamSubmitReceipt({
                     paperTitle: examPaperData.paperTitle,
                     studentName: nameInput,
-                    submittedAt: existingLock.submittedAt ? new Date(existingLock.submittedAt).toLocaleString() : '已确认',
-                    receiptId: existingLock.receiptId
+                    submittedAt: result.submittedAt ? new Date(result.submittedAt).toLocaleString() : '已确认',
+                    receiptId: result.receiptId || '历史记录'
                 });
+                errorElement.textContent = '';
                 return;
             }
-            document.getElementById('auth-error').textContent = `进入拦截：您(${nameInput})先前已成功提交答卷，不可重复进行考试。`;
-            return;
-        }
-
-        db.ref(`years/${targetYear}/studentWhitelist`).once('value').then((snapshot) => {
-            const isAllowed = snapshot.exists() && Object.values(snapshot.val()).includes(nameInput);
-            if (!isAllowed) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
-
+            examServerSessionToken = result.sessionToken || '';
+            if (!examServerSessionToken) throw new Error('考试会话创建失败，请重试。');
+            examPaperData.startTime = result.startTime || examPaperData.startTime;
+            examPaperData.endTime = result.endTime || examPaperData.endTime;
             studentNameVerified = nameInput;
-            examSubmitToken = getExamSubmitToken(examPaperData.paperTitle, studentNameVerified);
             document.getElementById('meta-paper-title').textContent = examPaperData.paperTitle;
             document.getElementById('meta-student-name').textContent = studentNameVerified;
             document.getElementById('meta-time-window').innerHTML = `开始: ${escapeHtml(String(examPaperData.startTime || '').replace('T', ' '))}<br>截止: ${escapeHtml(String(examPaperData.endTime || '').replace('T', ' '))}`;
-
-            const now = new Date().getTime();
-            if (now < new Date(examPaperData.startTime).getTime()) return alert("考试尚未开始！");
-            if (now > new Date(examPaperData.endTime).getTime()) return alert("考试已经截止！");
-
             const localSavedBackupStr = localStorage.getItem("exam_answer_backup");
             if (localSavedBackupStr) {
                 try {
                     const parsedBackup = JSON.parse(localSavedBackupStr);
-                    if (parsedBackup.studentName === studentNameVerified && parsedBackup.paperTitle === examPaperData.paperTitle) {
+                    if (parsedBackup.studentName === studentNameVerified && parsedBackup.paperTitle === examPaperData.paperTitle && parsedBackup.examId === examPaperData.examId) {
                         if (confirm("系统检测到未完成的考试记录，是否恢复已作答的内容？")) {
                             studentAnswers = parsedBackup.answers || {};
                             totalElapsedSeconds = parsedBackup.totalElapsedSeconds || 0;
@@ -337,8 +314,19 @@ async function verifyAndStartExam() {
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('exam-app').style.display = 'flex';
             initExamEngine(false);
-        });
-    });
+            errorElement.textContent = '';
+    } catch (error) {
+        console.error('考试身份验证失败:', error);
+        const messages = {
+            ACCESS_CODE_INVALID: '验证失败：班级预约口令错误。',
+            STUDENT_NOT_ALLOWED: '验证失败：姓名不在学生白名单内。',
+            EXAM_NOT_STARTED: '考试尚未开始。',
+            EXAM_ENDED: '考试已经截止。',
+            RATE_LIMITED: '验证过于频繁，请稍后重试。',
+            YEAR_CHANGED: '当前开放学年已经变化，请刷新页面。'
+        };
+        errorElement.textContent = messages[error.reason] || error.message || '验证失败，请检查网络后重试。';
+    }
 }
 
 document.getElementById('input-review-package').onchange = function(e) {
@@ -664,12 +652,10 @@ async function triggerManualSubmit(isForceSystemTimeout) {
     if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
     if (!examPaperData || !studentNameVerified) return alert('考试状态已失效，请保留本地答案并联系老师。');
 
-    const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
-    const safeStudentPath = encodeURIComponent(studentNameVerified).replace(/\./g, '%2E');
-    const lockRef = db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`);
-    const submitToken = examSubmitToken || getExamSubmitToken(examPaperData.paperTitle, studentNameVerified);
+    if (!examServerSessionToken) return alert('考试安全会话已失效，请保留本地答案并重新进入考试。');
 
     const payload = {
+        examId: examPaperData.examId,
         paperTitle: examPaperData.paperTitle,
         studentName: studentNameVerified,
         examTimeWindow: `开始: ${examPaperData.startTime} / 结束: ${examPaperData.endTime}`,
@@ -681,23 +667,6 @@ async function triggerManualSubmit(isForceSystemTimeout) {
     try { localStorage.setItem("exam_answer_backup", JSON.stringify(payload)); } catch(e) {}
 
     try {
-        const receiptId = generateExamReceiptId();
-        const pending = await runTransaction(lockRef, currentValue => {
-            // 旧版数字锁和新版 submitted 都不可重复提交。
-            if (typeof currentValue === 'number' || (currentValue && currentValue.status === 'submitted')) return;
-            if (currentValue && currentValue.status === 'pending' && currentValue.clientToken !== submitToken) {
-                // 30 分钟内的 pending 视为本人仍在进行的流程，不允许覆盖；
-                // 超过 30 分钟的陈旧 pending（如换设备/断网遗留）允许放弃重来（规则也已放开超时覆盖）。
-                const staleMs = Date.now() - Number(currentValue.createdAt || 0);
-                if (!Number.isFinite(staleMs) || staleMs < 30 * 60 * 1000) return;
-            }
-            return { status: 'pending', clientToken: submitToken, createdAt: firebase.database.ServerValue.TIMESTAMP };
-        });
-        if (!pending.committed) {
-            alert("提交拦截：云端已有已完成或正在处理的交卷流水。若这是本人刚才的操作，请保留本地答案并稍后重试。");
-            return;
-        }
-
         clearInterval(timerInterval);
         timerInterval = null;
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -716,20 +685,14 @@ async function triggerManualSubmit(isForceSystemTimeout) {
             return;
         }
 
-        const finalized = await runTransaction(lockRef, currentValue => {
-            if (!currentValue || currentValue.status !== 'pending' || currentValue.clientToken !== submitToken) return;
-            return { ...currentValue, status: 'submitted', receiptId, submittedAt: firebase.database.ServerValue.TIMESTAMP };
-        });
-        if (!finalized.committed) {
-            alert('交卷确认失败，答案文件和本地备份均已保留，请稍后重试。');
-            resumeExamTimerIfAllowed(isForceSystemTimeout);
-            return;
-        }
+        const finalized = await StudentApi.submitExam({ sessionToken: examServerSessionToken });
+        const receiptId = finalized.receiptId;
+        const submittedAt = finalized.submittedAt ? new Date(finalized.submittedAt).toLocaleString() : payload.submitTime;
         try { localStorage.removeItem("exam_answer_backup"); } catch(e) {}
 
         // 重置所有状态
         Object.keys(studentAnswers).forEach(k => { studentAnswers[k].image = ""; });
-        examPaperData = null; studentNameVerified = ""; examSubmitToken = '';
+        examPaperData = null; studentNameVerified = ""; examServerSessionToken = '';
         currentQuestionIndex = 0; studentAnswers = {}; totalElapsedSeconds = 0;
         currentTargetQuestionId = null;
         removeWatermark();
@@ -737,18 +700,28 @@ async function triggerManualSubmit(isForceSystemTimeout) {
         document.getElementById('questions-wrapper').innerHTML = "";
         document.getElementById('input-paper-json').value = "";
         document.getElementById('student-name').value = "";
+        document.getElementById('exam-access-code').value = "";
         document.getElementById('student-name-zone').style.display = 'none';
         document.getElementById('exam-app').style.display = 'none';
         document.getElementById('auth-overlay').style.display = 'flex';
         showExamSubmitReceipt({
             paperTitle: payload.paperTitle,
             studentName: payload.studentName,
-            submittedAt: payload.submitTime,
+            submittedAt,
             receiptId
         });
     } catch (submitError) {
         console.error('交卷失败:', submitError);
-        alert("提交失败：网络异常，请保留当前答案并重试。");
+        if (submitError.reason === 'EXAM_ALREADY_SUBMITTED' && submitError.details) {
+            showExamSubmitReceipt({
+                paperTitle: payload.paperTitle,
+                studentName: payload.studentName,
+                submittedAt: submitError.details.submittedAt ? new Date(submitError.details.submittedAt).toLocaleString() : '已确认',
+                receiptId: submitError.details.receiptId || '历史记录'
+            });
+            return;
+        }
+        alert(submitError.message || "提交失败：网络异常，请保留当前答案并重试。");
         resumeExamTimerIfAllowed(isForceSystemTimeout);
     }
 }

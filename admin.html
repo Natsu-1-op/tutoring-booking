@@ -124,10 +124,8 @@
         <div class="admin-login-card">
             <h1>系统后台认证</h1>
             <p class="admin-login-subtitle">教师管理工作台</p>
-            <div class="form-group">
-                <input type="password" id="admin-password" placeholder="请输入管理员密码">
-            </div>
-            <button id="admin-login-submit">登录</button>
+            <p class="admin-login-subtitle">仅限已加入教师名单的 Google 账号</p>
+            <button id="admin-login-submit" type="button">使用 Google 账号登录</button>
             <p id="login-error" style="color: red; margin-top: 10px; font-weight: bold;"></p>
         </div>
     </div>
@@ -141,7 +139,8 @@
             <div class="admin-toolbar">
                 <a class="tool-btn tool-exam" href="exam_teacher.html" target="_blank">出卷评卷</a>
                 <a class="tool-btn tool-student" href="exam_student.html" target="_blank">模拟考试</a>
-                <a class="tool-btn tool-money" href="money.html" target="_blank" rel="opener" onclick="return openMoneyFromAdmin(event)">课时费管家</a>
+                <a class="tool-btn tool-money" href="money.html" target="_blank" rel="noopener" onclick="return openMoneyFromAdmin(event)">课时费管家</a>
+                <button id="admin-signout" type="button" class="tool-btn" style="border:0; background:#eef2f7; color:#475569; cursor:pointer;" hidden>退出账号</button>
             </div>
         </div>
 
@@ -150,7 +149,7 @@
             <a href="#schedule-card">排班</a>
             <a href="#access-card">学生</a>
             <a href="#reservations-title">预约</a>
-            <a href="money.html" target="_blank" rel="opener" onclick="return openMoneyFromAdmin(event)">财务</a>
+            <a href="money.html" target="_blank" rel="noopener" onclick="return openMoneyFromAdmin(event)">财务</a>
             <a href="exam_teacher.html" target="_blank">考试</a>
         </nav>
 
@@ -279,7 +278,7 @@
                     <button id="btn-set-deadline" class="admin-mini-btn">保存截止时间</button>
                 </div>
                 <div class="control-panel">
-                    <input type="text" id="code-input" placeholder="输入新的预约口令">
+                    <input type="password" id="code-input" maxlength="128" autocomplete="new-password" placeholder="输入新的预约口令">
                     <button id="btn-set-code" class="admin-mini-btn">保存口令</button>
                 </div>
             </div>
@@ -333,9 +332,11 @@
         </div>
     </main>
 
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-database-compat.js"></script>
     <script src="config/firebase-env.js"></script>
+    <script src="teacher-auth.js"></script>
     <script src="utils/time-parser.js"></script>
     <script src="admin.js"></script>
 </body>
