@@ -14,7 +14,7 @@ window.__FIREBASE_CONFIG__ = firebaseConfig;
 
 window.__STUDENT_API_CONFIG__ = {
     region: "asia-southeast1",
-    provider: "recaptcha-enterprise",
+    provider: "recaptcha-v3",
     appCheckSiteKey: ""
 };
 
