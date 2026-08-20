@@ -1,0 +1,94 @@
+{
+  "rules": {
+    "system": {
+      ".read": true,
+      ".write": true,
+      "activeYear": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}$/)" },
+      "activeName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+      "$other": { ".validate": false }
+    },
+    "years": {
+      ".read": true,
+      "$year": {
+        ".validate": "$year.matches(/^\\d{4}$/)",
+        ".write": true,
+        "slots": {
+          "$slotId": {
+            "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+            "reserved": { ".validate": "newData.isBoolean()" },
+            "reservationId": { ".validate": "(newData.isString() && newData.val().length <= 100) || newData.val() === null" },
+            "status": { ".validate": "newData.isString() && (newData.val() === 'active' || newData.val() === 'hidden')" },
+            "$other": { ".validate": false }
+          }
+        },
+        "reservations": {
+          "$resId": {
+            "nickname": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
+            "slotId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+            "reservationId": { ".validate": "newData.isString() && newData.val() === $resId" },
+            "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+            "status": { ".validate": "newData.isString() && (newData.val() === 'booked' || newData.val() === 'confirmed' || newData.val() === 'completed' || newData.val() === 'canceled')" },
+            "cancelCode": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9]{5}$/)" },
+            "timestamp": { ".validate": "newData.isNumber()" },
+            "archived": { ".validate": "newData.isBoolean() || newData.val() === null" },
+            "feeStatus": { ".validate": "newData.isString() && (newData.val() === 'posted' || newData.val() === 'pending' || newData.val() === 'dismissed')" },
+            "feePostedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
+            "feeDismissedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
+            "feeRecordId": { ".validate": "(newData.isString() && newData.val().length <= 200) || newData.val() === null" },
+            "slotSnapshot": { ".validate": "newData.hasChildren()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "settings": {
+          "$key": {
+            ".validate": "newData.isString() || newData.isBoolean() || newData.isNumber() || newData.hasChildren()"
+          }
+        },
+        "studentWhitelist": {
+          "$id": {
+            ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)"
+          }
+        },
+        "operationLog": {},
+        "metadata": {},
+        "dailyLocks": {}
+      }
+    },
+    "examRankings": {
+      ".read": true,
+      ".write": true,
+      "$paper": {
+        "$student": {
+          "name": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
+          "paperTitle": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
+          "time": { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "score": { ".validate": "newData.isNumber() && newData.val() >= 0 && (!newData.parent().child('maxScore').exists() || newData.val() <= newData.parent().child('maxScore').val())" },
+          "maxScore": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "submittedExamLocks": {
+      "$paper": {
+        "$student": {
+          ".read": true,
+          ".write": "!data.exists() || (data.hasChildren(['status', 'clientToken']) && data.child('status').val() === 'pending' && (newData.child('clientToken').val() === data.child('clientToken').val() || now - data.child('createdAt').val() > 1800000) && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'submitted'))",
+          ".validate": "newData.hasChildren(['status', 'clientToken', 'createdAt']) && newData.child('clientToken').isString() && newData.child('clientToken').val().length > 0 && newData.child('clientToken').val().length <= 200 && (newData.child('status').val() === 'pending' || (newData.child('status').val() === 'submitted' && newData.child('submittedAt').isNumber() && newData.child('receiptId').isString() && newData.child('receiptId').val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)))",
+          "status": { ".validate": "newData.isString()" },
+          "clientToken": { ".validate": "newData.isString()" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "submittedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
+          "receiptId": { ".validate": "newData.isString() && newData.val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "admin_auth": {
+      ".read": false,
+      ".write": false,
+      "$token": {
+        ".read": "data.val() === true"
+      }
+    }
+  }
+}

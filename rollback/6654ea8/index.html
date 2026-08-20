@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专业课辅导</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="sync-overlay">
+        <div class="spinner"></div>
+        <div id="sync-text">正在连接，请稍候...</div>
+    </div>
+
+    <div class="container" id="app-container">
+        <h1 id="main-title">专业课辅导</h1>
+        <div id="message"></div>
+
+        <div class="nav-btn-container">
+            <button id="nav-booking-btn" onclick="switchView('booking')">我要约课</button>
+            <button id="nav-history-btn" style="background: #67c23a;" onclick="switchView('history')">历史记录</button>
+            <button id="nav-exam-btn" style="background: #e6a23c;" onclick="window.location.href='exam_student.html'">模拟考试</button>
+        </div>
+
+        <div id="booking-section">
+            <div class="notice-board" id="notice-board" style="display: none;">
+                <h4>系统公告：</h4>
+                <div id="notice-content">加载中...</div>
+            </div>
+
+            <div id="booking-form" style="display: none;">
+                <div class="form-group">
+                    <label for="nickname">请输入姓名：</label>
+                    <input type="text" id="nickname" placeholder="例如：张三" required>
+                </div>
+                <div class="form-group">
+                    <label for="access-code">请输入班级预约口令：</label>
+                    <input type="text" id="access-code" placeholder="输入班级群口令" required>
+                </div>
+                <div class="form-group">
+                    <label>请选择辅导时间：</label>
+                    <div id="slots-container">正在调取排班...</div>
+                </div>
+                <button id="submit-btn" onclick="submitBooking()">提交预约申请</button>
+            </div>
+
+            <section id="booking-receipt" class="booking-receipt" style="display:none;" aria-live="polite">
+                <div class="booking-receipt-kicker">预约已完成</div>
+                <h2>请保存这张预约凭证</h2>
+                <div class="booking-receipt-main">
+                    <div><span>姓名</span><strong id="receipt-student-name">-</strong></div>
+                    <div><span>上课时间</span><strong id="receipt-lesson-time">-</strong></div>
+                    <div><span>取消凭证</span><strong id="receipt-cancel-code" class="receipt-code">-</strong></div>
+                </div>
+                <p class="booking-receipt-note">查询或取消预约时，需要输入姓名和取消凭证。凭证不会永久保存在本设备。</p>
+                <div class="booking-receipt-actions">
+                    <button type="button" onclick="copyBookingReceiptCode()">复制凭证</button>
+                    <button type="button" onclick="downloadBookingReceipt()">下载凭证</button>
+                    <button type="button" onclick="closeBookingReceipt()" class="receipt-secondary-btn">继续约课</button>
+                </div>
+            </section>
+        </div>
+
+        <div id="history-section" style="display: none;">
+            <div class="form-group" style="background: #fdfdfe; padding: 15px; border: 1px dashed #ccc; border-radius: 8px; margin-bottom: 20px;">
+                <label style="font-size: 14px; color: #555; font-weight: bold;">历史约课身份验证：</label>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                    <input type="text" id="history-search-name" placeholder="请输入预约时填写的真实姓名">
+                    <input type="text" id="history-search-code" placeholder="请输入任意一次约课的凭证码（大写5位）">
+                    <button onclick="loadMyHistory()" style="background: #409eff; font-size: 15px; font-weight: bold; padding: 10px 0;">验证并调取记录</button>
+                </div>
+            </div>
+            <div id="history-container"><p style="text-align: center; color: #999; padding: 20px;">请输入姓名与凭证码进行查询。</p></div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <script src="config/firebase-env.js"></script>
+    <script src="utils/time-parser.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

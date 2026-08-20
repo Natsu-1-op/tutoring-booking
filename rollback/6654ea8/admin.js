@@ -10,22 +10,15 @@
     let dashboardReservations = {};
     let dashboardStudentHours = {};
     let viewingYear = "2026";
+    const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
+    const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
+    const MONEY_HANDOFF_KEY = 'money_admin_handoff_v1';
+    const MONEY_HANDOFF_TTL_MS = 60 * 1000;
     const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
+    let adminLoginFailures = 0;
+    let adminLoginBlockedUntil = 0;
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
     const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
-
-    function studentWhitelistIndexKey(name) {
-        return Array.from(new TextEncoder().encode(String(name || '')), value => value.toString(16).padStart(2, '0')).join('');
-    }
-
-    function buildStudentWhitelistIndex(list) {
-        const index = {};
-        Object.values(list || {}).forEach(name => {
-            if (typeof name !== 'string' || !isValidStudentName(name)) return;
-            index[studentWhitelistIndexKey(name)] = name;
-        });
-        return index;
-    }
 
     function localDateKey(date) {
         const y = date.getFullYear();
@@ -64,13 +57,10 @@
         const futureEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         const futureItems = canShowToday ? parsedItems.filter(item => item.date > todayKey && item.date <= localDateKey(futureEnd)).sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)) : [];
         const feeItems = parsedItems.filter(item => item.data.status === 'completed' && !['posted', 'dismissed'].includes(item.data.feeStatus));
-        const postedFeeItems = parsedItems.filter(item => item.data.status === 'completed' && item.data.feeStatus === 'posted');
 
         document.getElementById('today-count').textContent = todayItems.length;
         document.getElementById('today-pending-count').textContent = todayItems.filter(item => item.data.status === 'booked').length;
         document.getElementById('today-fee-count').textContent = feeItems.length;
-        const postedFeeCountEl = document.getElementById('today-fee-posted-count');
-        if (postedFeeCountEl) postedFeeCountEl.textContent = postedFeeItems.length;
         const todayPanelCount = document.getElementById('today-panel-count');
         const upcomingPanelCount = document.getElementById('upcoming-panel-count');
         if (todayPanelCount) todayPanelCount.textContent = `${todayItems.length} 节`;
@@ -157,7 +147,7 @@
         if (todayEl) todayEl.innerHTML = `<p class="today-empty">${escapeHtml(message)}</p>`;
         if (upcomingEl) upcomingEl.innerHTML = '<p class="today-empty">请稍后刷新重试</p>';
         if (warningEl) warningEl.innerHTML = '<p class="today-empty">未能完成数据检查</p>';
-        ['today-count', 'today-pending-count', 'today-fee-count', 'today-fee-posted-count', 'today-warning-count'].forEach(id => {
+        ['today-count', 'today-pending-count', 'today-fee-count', 'today-warning-count'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.textContent = '—';
         });
@@ -188,24 +178,73 @@
         return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
     }
 
-    // 课时费页面自行校验 Google 教师身份；这里不再传递前端通行令牌。
-    window.openMoneyFromAdmin = function() { return true; };
+    // 课时费页面使用一次性短时通行标记，避免从管理员工作台进入时再次输入密码。
+    // 直接访问 money.html 没有这个标记，仍会显示管理员密码验证。
+    window.openMoneyFromAdmin = function(event) {
+        if (!isAdminAuthenticated) return true;
+        if (event) event.preventDefault();
+        const link = event && event.currentTarget;
+        const targetUrl = new URL(link && link.href ? link.href : 'money.html', window.location.href);
+        let token = '';
+        try {
+            token = generateSecureCode(48);
+            const payload = JSON.stringify({ token, expiresAt: Date.now() + MONEY_HANDOFF_TTL_MS });
+            try { localStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
+            try { sessionStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
+        } catch (e) { token = ''; }
+        if (token) targetUrl.hash = `admin-handoff=${encodeURIComponent(token)}`;
+        const opened = window.open(targetUrl.toString(), '_blank');
+        if (!opened) window.location.assign(targetUrl.toString());
+        return false;
+    };
 
     function inlineArg(value) {
         return escapeHtml(JSON.stringify(String(value ?? '')));
     }
 
-    function enterAdminAfterGoogleAuth() {
-        if (isAdminAuthenticated) return;
-        isAdminAuthenticated = true;
-        const contentEl = document.getElementById('admin-content');
-        if (contentEl) {
-            contentEl.classList.add('is-visible');
-            contentEl.style.display = '';
+    function registerAdminLoginFailure(errorEl) {
+        adminLoginFailures++;
+        if (adminLoginFailures >= 5) {
+            adminLoginFailures = 0;
+            adminLoginBlockedUntil = Date.now() + 30 * 1000;
+            errorEl.textContent = '尝试过多，请 30 秒后重试。';
+        } else {
+            errorEl.textContent = '密码错误！';
         }
-        // 先结束页面中的静态“正在读取”占位，避免 Firebase 初始化异常时界面一直假加载。
-        renderTodayDashboard();
-        initAdminSystem();
+    }
+
+    // 核验成功后只向当前标签页签发 30 分钟会话标记，供教师端无感通行。
+    function verifyAdmin() {
+        const inputPass = document.getElementById('admin-password').value.trim();
+        const errorEl = document.getElementById('login-error');
+        if (Date.now() < adminLoginBlockedUntil) {
+            errorEl.textContent = `尝试过多，请 ${Math.ceil((adminLoginBlockedUntil - Date.now()) / 1000)} 秒后重试。`;
+            return;
+        }
+        if (!inputPass) return alert('请输入密码！');
+        if (inputPass.length > 128 || INVALID_FIREBASE_KEY_CHARS.test(inputPass)) return errorEl.textContent = '密码格式不合法。';
+
+        db.ref(`admin_auth/${inputPass}`).once('value').then((snapshot) => {
+            if (snapshot.exists() && snapshot.val() === true) {
+                adminLoginFailures = 0;
+                localStorage.removeItem('admin_session_auth');
+                sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({ expiresAt: Date.now() + ADMIN_SESSION_TTL_MS }));
+
+                isAdminAuthenticated = true; 
+                document.getElementById('admin-login').style.display = 'none';
+                const contentEl = document.getElementById('admin-content');
+                contentEl.classList.add('is-visible');
+                contentEl.style.display = '';
+                // 先结束页面中的静态“正在读取”占位，避免 Firebase 初始化异常时界面一直假加载。
+                renderTodayDashboard();
+                initAdminSystem();
+            } else {
+                registerAdminLoginFailure(errorEl);
+            }
+        }).catch(error => {
+            if (String(error && error.code || '').toUpperCase().includes('PERMISSION_DENIED')) registerAdminLoginFailure(errorEl);
+            else errorEl.textContent = '网络错误，请检查连接后重试。';
+        });
     }
 
     function initAdminSystem() {
@@ -309,7 +348,6 @@
         currentActiveStudentHoursRefMemory = db.ref(`years/${viewingYear}/studentHours`);
         currentActiveDeadlineRefMemory = SystemRouter.getSettingsRef(viewingYear).child('deadline');
         currentActiveAccessCodeRefMemory = SystemRouter.getSettingsRef(viewingYear).child('accessCode');
-        const loadedYear = viewingYear;
         dashboardSlots = {};
         dashboardReservations = {};
         dashboardStudentHours = {};
@@ -378,7 +416,6 @@
                     if(confirm(`确定将 [${name}] 从当前学年准入名单中移除吗？`)) {
                         const updates = {};
                         updates[`years/${viewingYear}/studentWhitelist/${id}`] = null;
-                        updates[`years/${viewingYear}/studentWhitelistIndex/${studentWhitelistIndexKey(name)}`] = null;
                         updates[`years/${viewingYear}/studentHours/${name}`] = null;
                         db.ref().update(updates).then(() => {
                             SystemRouter.getLogsRef(viewingYear).push({
@@ -451,13 +488,6 @@
         currentActiveStudentListRefMemory.on('value', (snapshot) => {
             currentStudentList = snapshot.val() || null;
             renderWhitelist();
-            // 应急预约规则按不可公开读取的索引核验姓名。教师端每次读取名单时自动修复索引，
-            // 避免旧学年或批量导入的名单缺少索引而阻止学生预约。
-            if (loadedYear === viewingYear) {
-                db.ref(`years/${loadedYear}/studentWhitelistIndex`).set(buildStudentWhitelistIndex(currentStudentList)).catch(error => {
-                    console.warn('准入名单索引同步失败:', error);
-                });
-            }
         });
 
         currentActiveSlotsRefMemory.on('value', (snapshot) => {
@@ -687,7 +717,6 @@
             const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
             const updates = {};
             updates[`years/${viewingYear}/studentWhitelist/${studentKey}`] = name;
-            updates[`years/${viewingYear}/studentWhitelistIndex/${studentWhitelistIndexKey(name)}`] = name;
             if (validHours) updates[`years/${viewingYear}/studentHours/${name}`] = parsedHours;
             db.ref().update(updates).then(() => {
                 SystemRouter.getLogsRef(viewingYear).push({
@@ -959,26 +988,12 @@
 
     function releaseSlotIfOwned(year, slotId, reservationId) {
         if (!slotId) return Promise.resolve({ committed: true, legacy: false });
-        return SystemRouter.getSlotsRef(year).child(slotId).once('value').then(snapshot => {
-            const slot = snapshot.val();
-            // 时段不存在或本就空闲：无需释放，视为成功（否则删除记录会误报"所有权异常"）
-            if (!slot) return { committed: true };
-            if (!slot.reserved) return { committed: true };
-            // 所有权不匹配（时段被其他记录占用）：真正的异常，交由调用方提示
-            if (slot.reservationId !== reservationId) return { committed: false };
-            return SystemRouter.getSlotsRef(year).child(slotId).transaction(current => {
-                if (!current || !current.reserved || current.reservationId !== reservationId) return;
-                current.reserved = false;
-                delete current.reservationId;
-                return current;
-            }).then(result => {
-                // 释放排班的同时清理应急预约占位：否则学生端 emergencyClaims[slotId] 会永久显示"已满"，
-                // 即使教师端已显示空闲，学生端也一直无法看到该时段。
-                if (result.committed) {
-                    db.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => {});
-                }
-                return result;
-            });
+        return SystemRouter.getSlotsRef(year).child(slotId).transaction(slot => {
+            // 旧排班没有所有权标记时不自动释放，避免把别人的预约重新开放。
+            if (!slot || !slot.reserved || slot.reservationId !== reservationId) return;
+            slot.reserved = false;
+            delete slot.reservationId;
+            return slot;
         });
     }
 
@@ -1046,113 +1061,18 @@
         return { ok: result.committed, changed: result.committed };
     }
 
-    // 一键修复排班幽灵占用：释放 reserved=true 但无所有权/记录已删的时段，
-    // 清理残留所有权字段与应急占位。用于批量修复历史遗留的"时段显示已满"问题。
-    async function repairSlotOwnership() {
-        if (!confirm('将扫描当前学年全部排班：\n① 释放"显示已满但没有归属记录"的时段\n② 清理已取消/已删除预约的时段占用\n③ 清理残留所有权字段与应急占位\n\n执行后学生端将恢复显示真实空闲时段。继续？')) return;
-        const slotsSnap = await SystemRouter.getSlotsRef(viewingYear).once('value');
-        const slots = slotsSnap.val() || {};
-        const slotIds = Object.keys(slots);
-        let releasedGhost = 0, keptValid = 0, clearedResidue = 0;
-        const resRef = SystemRouter.getReservationsRef(viewingYear);
-        for (const slotId of slotIds) {
-            const slot = slots[slotId];
-            if (!slot || slot.status === 'hidden') continue;
-            if (slot.reserved === true && !slot.reservationId) {
-                // 幽灵占用：reserved=true 但无所有权记录 → 释放
-                await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
-                    if (!s || s.status === 'hidden') return;
-                    if (s.reserved === true && !s.reservationId) {
-                        s.reserved = false;
-                        return s;
-                    }
-                });
-                releasedGhost++;
-            } else if (slot.reserved === true && slot.reservationId) {
-                // 有所有权：验证记录是否仍有效（存在且未取消）
-                let valid = false;
-                try {
-                    const resSnap = await resRef.child(slot.reservationId).once('value');
-                    const res = resSnap.val();
-                    valid = !!res && res.status !== 'canceled';
-                } catch (e) { valid = false; }
-                if (valid) {
-                    keptValid++;
-                } else {
-                    await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
-                        if (!s || s.status === 'hidden') return;
-                        if (s.reserved === true && s.reservationId === slot.reservationId) {
-                            s.reserved = false;
-                            delete s.reservationId;
-                            return s;
-                        }
-                    });
-                    db.ref(`emergencySlotClaims/${viewingYear}/${slotId}`).remove().catch(() => {});
-                    releasedGhost++;
-                }
-            } else if (slot.reserved === false && slot.reservationId) {
-                // 已释放但残留所有权字段 → 清理
-                await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
-                    if (!s || s.status === 'hidden') return;
-                    if (s.reserved === false && s.reservationId) {
-                        delete s.reservationId;
-                        return s;
-                    }
-                });
-                clearedResidue++;
-            }
-        }
-        // 清理应急占位残留（占位对应预约已不存在或已取消）
-        let claimsCleaned = 0;
-        try {
-            const claimsSnap = await db.ref(`emergencySlotClaims/${viewingYear}`).once('value');
-            const claims = claimsSnap.val() || {};
-            for (const slotId of Object.keys(claims)) {
-                const claimResId = claims[slotId];
-                if (!claimResId) continue;
-                let stillValid = false;
-                try {
-                    const resSnap = await resRef.child(claimResId).once('value');
-                    const res = resSnap.val();
-                    stillValid = !!res && res.status !== 'canceled';
-                } catch (e) { stillValid = false; }
-                if (!stillValid) {
-                    await db.ref(`emergencySlotClaims/${viewingYear}/${slotId}`).remove().catch(() => null);
-                    claimsCleaned++;
-                }
-            }
-        } catch (e) { /* 占位清理失败不影响主流程 */ }
-        SystemRouter.getLogsRef(viewingYear).push({ action: `修复排班：释放幽灵时段 ${releasedGhost}，保留有效预约 ${keptValid}，清理残留字段 ${clearedResidue}，清理占位 ${claimsCleaned}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-        alert(`排班修复完成：\n\n释放幽灵占用时段：${releasedGhost} 个\n保留有效预约：${keptValid} 个\n清理残留所有权字段：${clearedResidue} 个\n清理应急占位残留：${claimsCleaned} 个\n\n学生端已恢复显示真实空闲时段。`);
-        handleViewingYearChange();
-    }
-
     function deleteSingleReservation(resKey, slotId, nickname) {
         if (!confirm(`确定要删除 ${nickname} 的预约记录吗？`)) return;
-        SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snapshot => {
-            const reservation = snapshot.val();
-            if (!reservation) {
-                alert('该记录已不存在。');
+        updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
+            if (!result.ok) {
+                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
                 throw { silent: true };
             }
-            return updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
-                if (!result.ok) {
-                    alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
-                    throw { silent: true };
-                }
-                if (result.slotConflict) {
-                    alert('预约已标记为取消，但排班所有权异常，记录暂不删除，请先修复排班。');
-                    throw { silent: true };
-                }
-                return SystemRouter.getReservationsRef(viewingYear).child(resKey).remove().then(() => {
-                    // 写墓碑：学生端本机缓存据此自动清理这条已被删除的预约（幽灵记录）
-                    return db.ref(`years/${viewingYear}/reservationTombstones/${resKey}`).set({
-                        nickname,
-                        time: String(reservation.time || ''),
-                        deletedAt: Date.now()
-                    }).catch(() => null);
-                });
-            });
+            if (result.slotConflict) {
+                alert('预约已标记为取消，但排班所有权异常，记录暂不删除，请先修复排班。');
+                throw { silent: true };
+            }
+            return SystemRouter.getReservationsRef(viewingYear).child(resKey).remove();
         }).then(() => {
             SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
         }).catch((err) => {
@@ -1189,7 +1109,7 @@
             initialPack[`years/${newY}/settings/accessCode`] = secureRandomCode; 
 
             db.ref().update(initialPack).then(() => {
-                SystemRouter.getLogsRef(newY).push({ action: '新建了学年并生成初始预约口令', timestamp: firebase.database.ServerValue.TIMESTAMP });
+                SystemRouter.getLogsRef(newY).push({ action: `新建了学年，初始口令: ${secureRandomCode}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
                 handleViewingYearChange(newY);
             });
         });
@@ -1273,50 +1193,6 @@
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
             URL.revokeObjectURL(url);
         }).catch(err => alert('导出失败：' + err.message));
-    }
-
-    // ---- 一键生成 6654 回退包 ----
-    // 旧版(6654ea8)使用相同的 years/$year 树状结构，数据完全兼容；
-    // 本功能导出全量快照 + 修剪版(去掉 Google 授权时代节点)两个 JSON，
-    // 配合仓库 rollback/6654ea8/ 目录的旧版代码即可一键回退。
-    const ROLLBACK_TOP_KEYS = ['teacherAllowlist', 'system', 'years', 'emergencyBookingRequests', 'emergencySlotClaims', 'emergencyCancelRequests', 'emergencyExamSessions', 'examDefinitions', 'examRankings', 'submittedExamLocks', 'privateRuntime'];
-    const ROLLBACK_KEEP_TOP = ['system', 'years', 'examRankings', 'submittedExamLocks'];
-    const ROLLBACK_DROP_YEAR_KEYS = ['studentWhitelistIndex', 'reservationTombstones'];
-
-    function downloadJsonBlob(data, filename) {
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url; link.download = filename;
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-
-    function generateRollbackPackage() {
-        if (!confirm('将读取当前数据库全部节点，生成两个文件：\n\n① 全量备份（当前所有数据，含 Google 授权时代节点）\n② 6654 修剪版（移除 teacherAllowlist/emergency*/examDefinitions/privateRuntime/studentWhitelistIndex/reservationTombstones）\n\n用于回退到 6654ea8 旧版（无 Google 授权）。继续？')) return;
-        Promise.all(ROLLBACK_TOP_KEYS.map(key =>
-            db.ref(key).once('value').then(snap => [key, snap.val()]).catch(() => [key, null])
-        )).then(entries => {
-            const full = {};
-            entries.forEach(([key, value]) => { if (value !== null) full[key] = value; });
-            // 深拷贝保留节点并修剪
-            const trimmed = {};
-            ROLLBACK_KEEP_TOP.forEach(key => {
-                if (full[key] !== undefined && full[key] !== null) trimmed[key] = JSON.parse(JSON.stringify(full[key]));
-            });
-            if (trimmed.years && typeof trimmed.years === 'object') {
-                Object.keys(trimmed.years).forEach(year => {
-                    const yearNode = trimmed.years[year];
-                    if (yearNode && typeof yearNode === 'object') {
-                        ROLLBACK_DROP_YEAR_KEYS.forEach(dropKey => { delete yearNode[dropKey]; });
-                    }
-                });
-            }
-            const date = new Date().toISOString().split('T')[0];
-            downloadJsonBlob(full, `回退备份_全量_${date}.json`);
-            downloadJsonBlob(trimmed, `回退数据_6654修剪版_${date}.json`);
-            alert(`回退包已生成（两个文件已下载）：\n\n① 回退备份_全量_${date}.json\n　当前全部数据快照，保留以防万一（可用于还原当前版本）\n② 回退数据_6654修剪版_${date}.json\n　已移除 Google 授权时代节点，可直接用于旧版\n\n回退步骤（详见仓库 rollback/README-回退步骤.md）：\n1. 把 rollback/6654ea8/ 目录全部文件部署到 GitHub Pages\n2. Firebase 控制台发布 rollback/6654ea8/database.rules.json（旧版宽松规则）\n3. 控制台导入「回退数据_6654修剪版」并删除冗余节点\n4. 控制台创建 admin_auth/<密码> = true，用密码登录教师端\n\n数据不会丢失：全量备份已下载，随时可恢复。`);
-        }).catch(err => alert('生成回退包失败：' + err.message));
     }
 
     function triggerRestoreFile() {
@@ -1600,16 +1476,8 @@
 
     // 注意：escapeHtml 由 config/firebase-env.js 全局提供，此处不再重复定义
 
-    TeacherAuth.requireTeacher({
-        config: firebaseConfig,
-        overlay: document.getElementById('admin-login'),
-        signInButton: document.getElementById('admin-login-submit'),
-        signOutButton: document.getElementById('admin-signout'),
-        errorElement: document.getElementById('login-error'),
-        requireManager: true,
-        onSignedOut: () => window.location.reload(),
-        onAuthorized: enterAdminAfterGoogleAuth
-    });
+    document.getElementById('admin-login-submit').onclick = verifyAdmin;
+    document.getElementById('admin-password').onkeypress = (e) => { if (e.key === 'Enter') verifyAdmin(); };
     document.getElementById('admin-year-select').onchange = handleViewingYearChange;
     document.getElementById('btn-set-active').onclick = setAsActiveYear;
     document.getElementById('btn-create-year').onclick = createNewYearNode;
@@ -1638,7 +1506,5 @@
     if (newStudentHoursInput) newStudentHoursInput.onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
     document.getElementById('btn-export-all').onclick = exportAllDataJSON;
     document.getElementById('btn-restore-all').onclick = triggerRestoreFile;
-    document.getElementById('btn-repair-slots').onclick = repairSlotOwnership;
-    document.getElementById('btn-gen-rollback').onclick = generateRollbackPackage;
 
 })();

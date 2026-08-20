@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>考试与复盘</title>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$']] },
+            options: { renderActions: { addMenu: [] } },
+            startup: { ready: () => { MathJax.startup.defaultReady(); MathJax.startup.document.outputJax.options.displayAlign = 'left'; } }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="exam-student-body">
+
+    <!-- 认证遮罩 -->
+    <div id="auth-overlay" class="exam-auth-overlay">
+        <div class="exam-auth-card" id="exam-auth-card">
+            <div class="exam-mode-tabs">
+                <button class="exam-mode-btn active" id="tab-mode-exam" onclick="toggleOverlayUIMode('exam')">考试模式</button>
+                <button class="exam-mode-btn" id="tab-mode-review" onclick="toggleOverlayUIMode('review')">复查模式</button>
+            </div>
+            <div id="view-box-exam">
+                <input type="file" id="input-paper-json" accept=".json">
+                <div id="student-name-zone" style="display:none;">
+                    <input type="text" id="student-name" placeholder="例如：丁真" class="exam-name-input">
+                    <button class="exam-start-btn" onclick="verifyAndStartExam()">进入考试</button>
+                </div>
+            </div>
+            <div id="view-box-review" style="display:none;">
+                <p class="exam-import-label">请导入评卷打分包：</p>
+                <input type="file" id="input-review-package" accept=".json">
+            </div>
+            <p id="auth-error" class="exam-auth-error"></p>
+        </div>
+        <section id="exam-submit-receipt" class="exam-submit-receipt" style="display:none;" aria-live="polite">
+            <div class="exam-receipt-kicker">交卷已确认</div>
+            <h2>本次考试已完成</h2>
+            <div class="exam-receipt-grid">
+                <div><span>试卷</span><strong id="exam-receipt-paper">-</strong></div>
+                <div><span>姓名</span><strong id="exam-receipt-student">-</strong></div>
+                <div><span>交卷时间</span><strong id="exam-receipt-time">-</strong></div>
+                <div><span>流水号</span><strong id="exam-receipt-id" class="exam-receipt-id">-</strong></div>
+            </div>
+            <p>请保存流水号。如需核对交卷状态，可向教师提供此流水号。</p>
+            <div class="exam-receipt-actions">
+                <button type="button" onclick="copyExamReceiptId()">复制流水号</button>
+                <button type="button" onclick="downloadExamReceipt()">下载凭证</button>
+                <button type="button" class="exam-receipt-secondary" onclick="closeExamSubmitReceipt()">返回</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- 考试主界面 -->
+    <div class="exam-app-container" id="exam-app">
+        <div class="exam-header-bar">
+            <div class="exam-paper-meta">
+                <div class="exam-save-badge" id="save-light">已自动保存</div>
+                <div><b>考试科目：</b><span id="meta-paper-title">-</span></div>
+                <div><b>答题学生：</b><span id="meta-student-name" class="text-red text-bold">-</span></div>
+                <div><b>有效时段：</b><br><span id="meta-time-window" class="exam-meta-sub">-</span></div>
+            </div>
+            <div class="exam-timer-row">
+                <span class="exam-progress-text">当前进度: <span id="current-idx-text">1</span>/<span id="total-idx-text">1</span></span>
+                <span class="exam-timer-box" id="exam-timer">已答题 00:00</span>
+            </div>
+        </div>
+
+        <div class="exam-main-content" id="questions-wrapper"></div>
+
+        <div class="exam-nav-footer">
+            <button class="exam-nav-btn" id="btn-prev" onclick="changeQuestion(-1)">上一题</button>
+            <button class="exam-nav-btn" id="btn-next" onclick="changeQuestion(1)">下一题</button>
+            <button class="exam-submit-btn" id="btn-finish" onclick="triggerManualSubmit(false)">提交答卷</button>
+        </div>
+    </div>
+
+    <!-- 全屏看图 -->
+    <div id="global-lightbox" class="lightbox-overlay" onclick="closeGlobalLightbox()">
+        <img id="global-lightbox-img" src="" alt="全屏大图">
+    </div>
+
+    <!-- 复查答题面板 -->
+    <div class="review-float-btn" id="review-panel-trigger" onclick="openReviewNavModal()">答题<br>面板</div>
+    <div id="review-nav-modal" class="review-modal-overlay" onclick="closeReviewNavModal()">
+        <div class="review-modal-card" onclick="event.stopPropagation()">
+            <h3 class="review-modal-title">答题面板</h3>
+            <div class="review-grid-grid" id="review-grid-dots-container"></div>
+            <button class="review-modal-close-btn" onclick="closeReviewNavModal()">关闭面板</button>
+        </div>
+    </div>
+
+    <!-- 图片裁剪 -->
+    <div id="cropper-modal" class="cropper-full-modal">
+        <div class="cropper-wrap"><img id="cropper-image" src=""></div>
+        <div class="cropper-toolbar">
+            <button class="cropper-btn-cancel" onclick="closeCropperModal()">取消</button>
+            <button class="cropper-btn-rotate" onclick="rotateImage()">旋转90°</button>
+            <button class="cropper-btn-save" onclick="saveCroppedResult()">保存裁剪</button>
+        </div>
+    </div>
+    <input type="file" id="hidden-camera-input" accept="image/*" class="hidden-file-input">
+
+    <script src="config/firebase-env.js"></script>
+    <script src="exam_student.js"></script>
+</body>
+</html>

@@ -1,0 +1,965 @@
+/* 管理端专用布局：功能和数据逻辑继续由 admin.js 负责。 */
+
+.admin-page {
+    max-width: none;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background: #f5f7fb;
+}
+
+.admin-page #admin-login {
+    background: #f5f7fb;
+}
+
+.admin-login-card {
+    width: min(380px, calc(100% - 32px));
+    box-sizing: border-box;
+    padding: 30px;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #e4e9f1;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, .06);
+}
+
+.admin-login-card h1 {
+    margin: 0;
+    font-size: 22px;
+}
+
+.admin-login-subtitle {
+    margin: 8px 0 24px;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.admin-login-card .form-group {
+    margin-bottom: 12px;
+}
+
+.admin-login-card input {
+    background: #f8fafc;
+}
+
+.admin-page #admin-content.admin-shell {
+    display: none;
+    width: min(1240px, 100%);
+    min-height: 100vh;
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1.35fr) minmax(300px, .75fr);
+    align-content: start;
+    gap: 16px;
+    margin: 0 auto;
+    padding: 24px 28px 48px;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.admin-page #admin-content.admin-shell.is-visible {
+    display: grid;
+}
+
+.admin-header,
+.admin-page-nav,
+.today-dashboard,
+.migration-panel,
+#year-card,
+#reservations-section {
+    grid-column: 1 / -1;
+}
+
+.admin-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 54px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0 2px 16px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-title-block h1 {
+    margin: 2px 0 0;
+    padding: 0;
+    border: 0;
+    color: #0f172a;
+    font-size: 21px;
+    letter-spacing: -.02em;
+}
+
+.admin-eyebrow,
+.today-kicker {
+    margin: 0;
+    color: #2563eb;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.admin-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.admin-toolbar .tool-btn {
+    padding: 7px 10px;
+    color: #475569;
+    background: #fff;
+    border: 1px solid #dbe3ee;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.admin-toolbar .tool-btn:hover {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    filter: none;
+}
+
+.admin-toolbar .tool-exam,
+.admin-toolbar .tool-student,
+.admin-toolbar .tool-money {
+    color: #475569;
+    background: #fff;
+}
+
+.admin-page-nav {
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    padding: 4px;
+    background: #eaf0f7;
+    border-radius: 8px;
+}
+
+.admin-page-nav a {
+    flex: 0 0 auto;
+    padding: 7px 14px;
+    color: #64748b;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.admin-page-nav a:hover,
+.admin-page-nav a:focus-visible {
+    color: #1d4ed8;
+    background: #fff;
+}
+
+.admin-card,
+.today-dashboard,
+.migration-panel,
+.reservations-section,
+.admin-log-card {
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+.admin-card-h {
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 12px 16px;
+    color: #334155;
+    background: #fff;
+    border-bottom: 1px solid #edf1f6;
+    font-size: 13px;
+}
+
+.admin-card-h .hint {
+    color: #94a3b8;
+    font-size: 11px;
+}
+
+.admin-card-b {
+    padding: 16px;
+}
+
+#schedule-card {
+    grid-column: 1;
+}
+
+.admin-side-column {
+    grid-column: 2;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-self: start;
+    gap: 16px;
+}
+
+.admin-side-column .admin-card {
+    grid-column: auto;
+    width: 100%;
+}
+
+#preferences-card,
+#logs-card {
+    grid-column: 2;
+}
+
+#preferences-card {
+    order: -1;
+}
+
+#data-card {
+    grid-column: 1;
+}
+
+#logs-card {
+    align-self: start;
+}
+
+.today-dashboard {
+    padding: 18px;
+}
+
+.today-dashboard-header {
+    align-items: flex-start;
+}
+
+.today-dashboard h2 {
+    margin: 4px 0 2px;
+    padding: 0;
+    border: 0;
+    color: #0f172a;
+    font-size: 20px;
+    letter-spacing: -.02em;
+}
+
+.today-dashboard-header p {
+    color: #64748b;
+}
+
+.today-refresh-btn {
+    min-height: 34px;
+    padding: 7px 12px;
+    color: #1d4ed8;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    font-size: 12px;
+}
+
+.today-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 16px 0 12px;
+}
+
+.today-summary-item {
+    padding: 11px 12px;
+    background: #f8fafc;
+    border: 1px solid #edf1f6;
+    border-radius: 8px;
+}
+
+.today-summary-item span {
+    color: #64748b;
+    font-size: 11px;
+}
+
+.today-summary-item strong {
+    margin-top: 3px;
+    color: #0f172a;
+    font-size: 21px;
+}
+
+.today-dashboard-columns {
+    gap: 12px;
+}
+
+.today-panel {
+    min-width: 0;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+}
+
+.today-panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    color: #334155;
+    background: #f8fafc;
+    border-bottom-color: #edf1f6;
+    font-size: 12px;
+}
+
+.panel-count {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.today-course-list {
+    max-height: 166px;
+    box-sizing: border-box;
+    padding: 3px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+.today-course-item {
+    min-height: 80px;
+    box-sizing: border-box;
+    padding: 10px 2px;
+}
+
+.today-course-info {
+    min-width: 0;
+}
+
+.today-course-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.today-course-actions button {
+    min-height: 30px;
+    padding: 5px 8px;
+}
+
+.today-warning-panel {
+    margin-top: 12px;
+}
+
+.today-empty {
+    padding: 15px 2px;
+}
+
+.migration-panel {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 16px;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.migration-panel h2 {
+    margin: 0 0 4px;
+    padding: 0;
+    border: 0;
+    color: #92400e;
+    font-size: 14px;
+}
+
+.migration-panel p {
+    margin: 0;
+    color: #a16207;
+    font-size: 12px;
+}
+
+.migration-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+.migration-actions button {
+    width: auto;
+    padding: 7px 10px;
+    background: #d97706;
+    font-size: 12px;
+}
+
+.migration-actions #purge-old-btn {
+    background: #cbd5e1;
+}
+
+#migration-log {
+    grid-column: 1 / -1;
+}
+
+.year-row {
+    gap: 6px;
+}
+
+.year-select-dropdown {
+    min-width: 220px;
+    padding: 8px 10px;
+    color: #334155;
+    background: #f8fafc;
+    border-color: #dbe3ee;
+    font-size: 13px;
+}
+
+#year-status-bar {
+    margin-top: 9px;
+    padding: 7px 9px;
+    color: #64748b;
+    background: #f8fafc;
+    border-color: #edf1f6;
+    font-size: 12px;
+}
+
+.template-panel {
+    padding: 14px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+.template-panel h4 {
+    margin-bottom: 10px;
+    color: #334155;
+    font-size: 13px;
+}
+
+.template-slots-grid {
+    gap: 7px;
+}
+
+.template-slots-grid input {
+    background: #fff;
+    border-color: #dbe3ee;
+}
+
+.control-panel {
+    gap: 8px;
+}
+
+.control-panel input,
+.admin-card textarea,
+.admin-card select {
+    min-width: 0;
+}
+
+.admin-mini-btn,
+.admin-btn-row button {
+    min-height: 34px;
+}
+
+#admin-slots-container {
+    max-height: 540px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.date-group {
+    margin-bottom: 10px;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    box-shadow: none;
+}
+
+.date-header {
+    padding: 10px 12px;
+    color: #475569;
+    background: #f8fafc;
+    border-bottom-color: #edf1f6;
+    font-size: 12px;
+}
+
+.date-header:hover {
+    background: #f1f5f9;
+}
+
+.date-body {
+    padding: 9px 10px;
+}
+
+.slot-item {
+    margin-bottom: 6px;
+    padding: 9px 10px;
+    background: #fff;
+    border-color: #edf1f6;
+    border-radius: 7px;
+}
+
+.btn-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 5px;
+}
+
+.slot-edit-btn,
+.slot-save-btn,
+.slot-cancel-btn,
+.btn-archive,
+.btn-unarchive {
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: 11px;
+}
+
+.whitelist-box {
+    max-height: 250px;
+    overflow-y: auto;
+    background: #f8fafc;
+    border-color: #edf1f6;
+    scrollbar-width: thin;
+}
+
+.student-tag {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+#preferences-card .control-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+}
+
+#preferences-card .control-panel + .control-panel {
+    margin-top: 8px;
+}
+
+.reservations-section {
+    padding: 16px;
+}
+
+#reservations-title {
+    margin: 0 0 10px;
+    padding: 0;
+    border: 0;
+    color: #334155;
+    font-size: 15px;
+}
+
+#admin-reservations-container {
+    min-width: 0;
+}
+
+.res-current-group .date-body,
+.res-history-group .date-body {
+    max-height: 420px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.res-current-group .date-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+#admin-reservations-container table {
+    margin-top: 0;
+    font-size: 12px;
+}
+
+#admin-reservations-container th,
+#admin-reservations-container td {
+    padding: 9px 8px;
+    border-color: #edf1f6;
+}
+
+#admin-reservations-container th {
+    color: #64748b;
+    background: #f8fafc;
+    font-weight: 600;
+}
+
+.status-select-admin {
+    min-height: 30px;
+    color: #475569;
+    background: #fff;
+    border-color: #dbe3ee;
+}
+
+.data-btn-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin: 0;
+}
+
+.data-btn-row button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 7px 10px;
+    color: #475569 !important;
+    background: #f8fafc !important;
+    border: 1px solid #dbe3ee !important;
+    font-size: 12px;
+}
+
+.data-btn-row #btn-clear-year {
+    color: #b91c1c !important;
+    background: #fef2f2 !important;
+    border-color: #fecaca !important;
+}
+
+.admin-log-card {
+    overflow: hidden;
+}
+
+.admin-log-card .date-header {
+    background: #fff;
+    color: #475569;
+}
+
+.admin-log-card .logs-box {
+    max-height: 250px;
+    padding: 12px;
+    color: #64748b;
+    background: #f8fafc;
+    border: 0;
+    font-size: 11px;
+}
+
+#batch-action-bar.show {
+    display: flex;
+    flex-wrap: wrap;
+    border-top: 1px solid #bfdbfe;
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, .06);
+}
+
+@media screen and (max-width: 760px) {
+    .admin-page {
+        padding-bottom: 64px;
+    }
+
+    .admin-page #admin-content.admin-shell,
+    .admin-page #admin-content.admin-shell.is-visible {
+        width: 100%;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+        padding: 12px 12px 76px;
+    }
+
+    .admin-header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        min-height: 48px;
+        margin: -12px -12px 0;
+        padding: 12px;
+        background: rgba(245, 247, 251, .96);
+        border-bottom: 1px solid #e2e8f0;
+        backdrop-filter: blur(8px);
+    }
+
+    .admin-title-block h1 {
+        font-size: 18px;
+    }
+
+    .admin-eyebrow {
+        font-size: 10px;
+    }
+
+    .admin-toolbar {
+        max-width: 48%;
+        flex-wrap: nowrap;
+        justify-content: flex-end;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .admin-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .admin-toolbar .tool-btn {
+        white-space: nowrap;
+    }
+
+    .admin-page-nav {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 80;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 2px;
+        box-sizing: border-box;
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+        background: rgba(255, 255, 255, .97);
+        border-top: 1px solid #dbe3ee;
+        border-radius: 0;
+        box-shadow: 0 -4px 14px rgba(15, 23, 42, .06);
+        backdrop-filter: blur(10px);
+    }
+
+    .admin-page-nav a {
+        min-width: 0;
+        padding: 8px 2px;
+        text-align: center;
+        font-size: 11px;
+    }
+
+    .admin-page-nav a:nth-child(n + 5) {
+        display: none;
+    }
+
+    .today-dashboard {
+        padding: 14px 12px;
+    }
+
+    .today-dashboard h2 {
+        font-size: 18px;
+    }
+
+    .today-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 13px;
+    }
+
+    .today-dashboard-columns {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .today-course-list {
+        max-height: 180px;
+    }
+
+    .today-course-item {
+        min-height: 86px;
+        align-items: center;
+    }
+
+    .today-course-actions {
+        flex-direction: row;
+    }
+
+    .migration-panel {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .migration-actions button {
+        flex: 1;
+    }
+
+    #schedule-card,
+    #admin-side-column,
+    #data-card,
+    #logs-card {
+        grid-column: 1;
+    }
+
+    .admin-card-h {
+        padding: 11px 13px;
+    }
+
+    .admin-card-b,
+    .reservations-section {
+        padding: 13px;
+    }
+
+    .admin-card-h .hint {
+        display: none;
+    }
+
+    .year-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) repeat(3, minmax(0, auto));
+    }
+
+    .year-select-dropdown {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .control-panel {
+        align-items: stretch;
+    }
+
+    .control-panel input,
+    .control-panel button {
+        min-height: 42px;
+    }
+
+    .template-slots-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .template-slots-grid input {
+        min-width: 0;
+    }
+
+    #admin-slots-container {
+        max-height: 420px;
+    }
+
+    .slot-item {
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .slot-text-span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .btn-group {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    #preferences-card .control-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .data-btn-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .data-btn-row button {
+        width: 100%;
+    }
+
+    #batch-action-bar.show {
+        position: fixed;
+        right: 8px;
+        bottom: calc(58px + env(safe-area-inset-bottom));
+        left: 8px;
+        z-index: 70;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 8px 10px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, .98);
+    }
+
+    #admin-reservations-container .date-body {
+        padding: 8px;
+    }
+
+    .res-current-group .date-body,
+    .res-history-group .date-body {
+        max-height: 55vh;
+    }
+
+    #admin-reservations-container table,
+    #admin-reservations-container tbody,
+    #admin-reservations-container tr,
+    #admin-reservations-container td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    #admin-reservations-container thead {
+        display: none;
+    }
+
+    #admin-reservations-container tr {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) auto;
+        gap: 4px 8px;
+        margin-bottom: 8px;
+        padding: 10px;
+        background: #fff;
+        border: 1px solid #edf1f6;
+        border-radius: 8px;
+    }
+
+    #admin-reservations-container td {
+        min-width: 0;
+        padding: 0;
+        border: 0;
+        font-size: 12px;
+    }
+
+    #admin-reservations-container td::before {
+        display: inline-block;
+        margin-right: 5px;
+        color: #94a3b8;
+        font-size: 10px;
+        content: attr(data-label);
+    }
+
+    #admin-reservations-container td:nth-child(1) {
+        grid-row: 1 / span 3;
+        align-self: start;
+    }
+
+    #admin-reservations-container td:nth-child(1)::before {
+        display: none;
+    }
+
+    #admin-reservations-container td:nth-child(2) {
+        grid-column: 2 / -1;
+    }
+
+    #admin-reservations-container td:nth-child(3) {
+        grid-column: 2;
+    }
+
+    #admin-reservations-container td:nth-child(4) {
+        grid-column: 3;
+    }
+
+    #admin-reservations-container td:nth-child(5),
+    #admin-reservations-container td:nth-child(6) {
+        grid-column: 2 / -1;
+    }
+
+    #admin-reservations-container td:nth-child(6) {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 5px;
+        border-top: 1px solid #f1f5f9;
+    }
+
+    #admin-reservations-container td:nth-child(6)::before {
+        width: 100%;
+    }
+
+    #admin-reservations-container .status-select-admin {
+        max-width: 100%;
+    }
+}
+
+@media screen and (max-width: 360px) {
+    .admin-page #admin-content.admin-shell,
+    .admin-page #admin-content.admin-shell.is-visible {
+        padding-right: 10px;
+        padding-left: 10px;
+    }
+
+    .admin-header {
+        margin-right: -10px;
+        margin-left: -10px;
+        padding-right: 10px;
+        padding-left: 10px;
+    }
+
+    .admin-toolbar {
+        max-width: 44%;
+    }
+
+    .template-slots-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .year-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .year-select-dropdown {
+        grid-column: 1 / -1;
+    }
+}

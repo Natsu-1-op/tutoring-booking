@@ -1,0 +1,532 @@
+/* style.css — 全局样式 */
+:root {
+    --c-primary: #3b82f6; --c-success: #22c55e; --c-warning: #f59e0b; --c-danger: #ef4444;
+    --c-bg: #f8fafc; --c-surface: #fff; --c-border: #e2e8f0; --c-text: #334155; --c-muted: #94a3b8;
+    --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* ========== 基础布局 ========== */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--c-bg); color: var(--c-text); max-width: 600px; margin: 0 auto; padding: 20px;
+    -webkit-font-smoothing: antialiased;
+}
+.container { background: var(--c-surface); padding: 28px 24px; border-radius: var(--radius); box-shadow: var(--shadow); }
+h1 { font-size: 22px; text-align: center; color: #1e293b; font-weight: 700; letter-spacing: -0.3px; }
+h2 { font-size: 16px; color: #475569; font-weight: 600; border-bottom: 1px solid var(--c-border); padding-bottom: 10px; margin-top: 28px; }
+
+/* ========== 表单 ========== */
+.form-group { margin-bottom: 18px; }
+label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color: #475569; }
+input[type="text"], input[type="date"], input[type="password"], input[type="datetime-local"] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: 8px; box-sizing: border-box;
+    font-size: 15px; color: var(--c-text); background: var(--c-bg); transition: border-color 0.15s;
+}
+input:focus { border-color: var(--c-primary); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+
+/* ========== 按钮 ========== */
+button {
+    background: var(--c-primary); color: #fff; border: none; padding: 11px 18px; border-radius: 8px;
+    cursor: pointer; font-size: 15px; font-weight: 600; width: 100%; transition: all 0.15s;
+}
+button:hover { filter: brightness(0.95); }
+button.danger { background: var(--c-danger); width: auto; padding: 7px 12px; font-size: 13px; border-radius: 6px; }
+button.danger:hover { background: #dc2626; }
+button.action-btn { width: auto; padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+.btn-cancel-booking { background: #fee2e2; color: var(--c-danger); }
+.btn-cancel-booking:hover { background: var(--c-danger); color: #fff; }
+.btn-cal-add { background: #eff6ff; color: var(--c-primary); border: 1px solid #bfdbfe; font-size: 12px; padding: 5px 10px; font-weight: 600; }
+.btn-cal-add:hover { background: var(--c-primary); color: #fff; }
+
+/* ========== 导航按钮 ========== */
+.nav-btn-container { display: flex; gap: 12px; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
+.nav-btn-container button {
+    flex: 1; margin: 0; padding: 12px 0; height: 50px; font-size: 16px; font-weight: bold;
+    box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ========== 消息提示 ========== */
+#message { text-align: center; font-weight: bold; margin-bottom: 15px; }
+.success { color: #52c41a; }
+.error { color: #ff4d4f; }
+
+/* ========== 排班卡片 ========== */
+.slot-item {
+    padding: 12px; border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center; background: #fafafa;
+}
+.slot-item.disabled { background: #f0f0f0; color: #999; }
+.slot-radio-label { display: flex; align-items: center; width: 100%; cursor: pointer; font-weight: normal; margin: 0; }
+.slot-radio-label input[type="radio"] { margin-right: 10px; }
+
+/* ========== 表格 ========== */
+table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+th, td { border: 1px solid #eee; padding: 10px; text-align: left; }
+th { background: #f9f9f9; }
+
+/* ========== 历史记录卡片 ========== */
+.history-card { border: 1px solid #e4e7ed; border-radius: 8px; padding: 15px; margin-bottom: 12px; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+.history-summary { background: #f0f9eb; border: 1px solid #b7eb8f; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 15px; text-align: center; }
+.booking-receipt { margin: 18px 0 24px; padding: 22px; border: 1px solid #bfdbfe; border-radius: 12px; background: #f8fbff; }
+.booking-receipt-kicker { color: #2563eb; font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.booking-receipt h2 { margin: 6px 0 18px; padding: 0; border: 0; font-size: 20px; color: #1e293b; }
+.booking-receipt-main { display: grid; gap: 10px; }
+.booking-receipt-main div { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 9px; border-bottom: 1px solid #dbeafe; font-size: 14px; }
+.booking-receipt-main span { color: #64748b; }
+.booking-receipt-main strong { color: #1e293b; text-align: right; }
+.booking-receipt-code, .receipt-code { color: #1d4ed8 !important; letter-spacing: .12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.booking-receipt-note { margin: 16px 0; color: #64748b; font-size: 12px; line-height: 1.7; }
+.booking-receipt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.booking-receipt-actions button { width: auto; flex: 1; min-width: 100px; padding: 9px 12px; font-size: 13px; }
+.booking-receipt-actions .receipt-secondary-btn { background: #fff; color: #2563eb; border: 1px solid #93c5fd; }
+.batch-action-bar { display:none; position:sticky; bottom:0; background:#fff; border-top:2px solid #409eff; padding:12px 16px; margin-top:10px; z-index:50; gap:10px; align-items:center; box-shadow:0 -2px 8px rgba(0,0,0,0.08); }
+.batch-action-bar.show { display:flex; }
+.card-row { margin: 6px 0; font-size: 14px; text-align: left; }
+.card-row-sub { color: #999; font-size: 12px; }
+.card-footer { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 8px; text-align: right; }
+
+/* ========== 状态标签 ========== */
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-left: 5px; }
+.status-pending { background: #fff7e6; color: #e6a23c; border: 1px solid #ffd591; }
+.status-confirmed { background: #e6f7ff; color: #409eff; border: 1px solid #91d5ff; }
+.status-canceled { background: #f0f0f0; color: #909399; border: 1px solid #dcdfe6; }
+.status-completed { background: #f0f9eb; color: #67c23a; border: 1px solid #b7eb8f; }
+
+/* ========== 管理后台通用 ========== */
+.status-select-admin { padding: 4px 6px; border-radius: 4px; font-weight: bold; font-size: 13px; border: 1px solid #ccc; }
+.slot-edit-btn { background: #67c23a; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: auto; padding: 8px 12px; font-size: 14px; }
+.slot-save-btn { background: #409eff; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: auto; padding: 8px 12px; font-size: 14px; }
+.slot-cancel-btn { background: #909399; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: auto; padding: 8px 12px; font-size: 14px; }
+.empty-hint { color: #999; text-align: center; padding: 20px; }
+.text-red { color: #ff4d4f; }
+.text-green { color: #67c23a; }
+.text-blue { color: #409eff; }
+.text-gray { color: #909399; }
+.text-bold { font-weight: bold; }
+.msg-hint { text-align: center; color: #999; padding: 20px; }
+.msg-error { text-align: center; color: #f56c6c; font-weight: bold; padding: 20px; }
+.pending-fee-summary { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+.pending-fee-summary div { min-width:0; }
+.pending-fee-summary span { display:block; color:#94a3b8; font-size:11px; }
+.pending-fee-summary strong { display:block; margin-top:3px; color:#334155; font-size:16px; }
+@media screen and (max-width:640px) { .pending-fee-summary { grid-template-columns:repeat(2, 1fr); } }
+
+/* ========== 归档按钮 ========== */
+.btn-archive, .btn-unarchive {
+    border: none; padding: 5px 10px; border-radius: 4px; font-size: 12px;
+    cursor: pointer; margin-right: 4px; font-weight: bold; width: auto;
+    transition: opacity 0.15s;
+}
+.btn-archive { background: #f0f0f0; color: #909399; border: 1px solid #dcdfe6; }
+.btn-archive:hover { background: #e6a23c; color: #fff; border-color: #e6a23c; }
+.btn-unarchive { background: #f0f0f0; color: #909399; border: 1px solid #dcdfe6; }
+.btn-unarchive:hover { background: #67c23a; color: #fff; border-color: #67c23a; }
+
+/* ========== 加载动画 ========== */
+.spinner {
+    border: 4px solid #f3f3f3; border-top: 4px solid #409eff;
+    border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;
+    margin-bottom: 15px;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* ========== 公告栏 ========== */
+.notice-board {
+    background: #fff7e6; border: 2px solid #ffb036; padding: 15px 20px;
+    border-radius: 8px; margin-bottom: 20px; color: #d46b08; font-size: 14px; line-height: 1.6;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+.notice-board h4 { margin: 0 0 5px 0; font-size: 15px; font-weight: bold; }
+
+/* ========== 同步遮罩 ========== */
+#sync-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #fff; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; z-index: 99999;
+    font-size: 16px; color: #409eff; font-weight: bold;
+}
+
+/* ========== 响应式适配 ========== */
+@media screen and (max-width: 640px) {
+    body { padding: 10px; }
+    .container { padding: 20px 15px; border-radius: 8px; }
+    h1 { font-size: 20px; }
+    .nav-btn-container { gap: 8px; }
+    .nav-btn-container button { font-size: 14px; padding: 10px 0; height: 44px; }
+    .slot-item { padding: 10px; font-size: 14px; }
+    table { font-size: 12px; }
+    th, td { padding: 8px 6px; }
+}
+
+/* ========== 考试系统样式 ========== */
+.exam-student-body { max-width:none; margin:0; padding:0; background:#f5f7fa; }
+
+/* ---- 学生端认证页 ---- */
+.exam-auth-overlay { position: fixed; top:0; left:0; width:100%; height:100%; box-sizing:border-box; background:#fff; z-index:999; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:20px; }
+.exam-auth-card { width:100%; max-width:400px; box-sizing:border-box; text-align:center; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.08); }
+.exam-auth-card input[type="file"] { width:100%; padding:14px 12px; border:2px dashed #c0c4cc; border-radius:8px; font-size:14px; color:#666; cursor:pointer; background:#fafafa; }
+.exam-mode-tabs { display:flex; background:#eef1f6; padding:4px; border-radius:8px; margin-bottom:20px; }
+.exam-mode-btn { flex:1; padding:10px 0; border:none; background:transparent; font-weight:bold; font-size:14px; cursor:pointer; border-radius:6px; color:#666; transition:all 0.2s; }
+.exam-mode-btn.active { background:#fff; color:#409eff; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
+.exam-name-input { width:100%; padding:12px; margin:10px 0; border:1px solid #dcdfe6; border-radius:8px; font-size:16px; text-align:center; box-sizing:border-box; }
+.exam-start-btn { width:100%; padding:12px; background:#409eff; color:#fff; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; margin-top:8px; }
+.exam-start-btn:hover { background:#337ecc; }
+.exam-import-label { margin-bottom:8px; text-align:left; font-size:14px; color:#666; }
+.exam-auth-error { color:#f56c6c; font-weight:bold; margin-top:15px; font-size:14px; }
+.exam-submit-receipt { width:100%; max-width:460px; box-sizing:border-box; background:#fff; padding:28px; border:1px solid #bfdbfe; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,.06); }
+.exam-receipt-kicker { color:#2563eb; font-size:13px; font-weight:700; }
+.exam-submit-receipt h2 { margin:6px 0 18px; padding:0; border:0; font-size:21px; color:#1e293b; }
+.exam-receipt-grid { display:grid; gap:10px; }
+.exam-receipt-grid div { display:flex; justify-content:space-between; gap:16px; padding-bottom:9px; border-bottom:1px solid #dbeafe; font-size:13px; }
+.exam-receipt-grid span { color:#64748b; }
+.exam-receipt-grid strong { color:#1e293b; text-align:right; }
+.exam-receipt-id { color:#1d4ed8 !important; letter-spacing:.1em; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.exam-submit-receipt p { color:#64748b; font-size:12px; line-height:1.7; }
+.exam-receipt-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+.exam-receipt-actions button { flex:1; min-width:100px; padding:9px 10px; font-size:13px; }
+.exam-receipt-actions .exam-receipt-secondary { color:#2563eb; background:#fff; border:1px solid #93c5fd; }
+
+/* ---- 学生端考试界面 ---- */
+.exam-app-container { display:none; max-width:100%; margin:0 auto; min-height:100vh; flex-direction:column; background:#fff; }
+.exam-header-bar { background:#fff; border-bottom:1px solid #ebeef5; padding:16px 20px; position:sticky; top:0; z-index:10; }
+.exam-paper-meta { background:#f4f9ff; border-radius:8px; padding:14px 16px; margin-bottom:12px; font-size:14px; color:#2c3e50; position:relative; }
+.exam-paper-meta div { margin-bottom:3px; }
+.exam-save-badge { position:absolute; top:10px; right:14px; background:#e6ffed; color:#28a745; font-size:11px; padding:3px 10px; border-radius:4px; font-weight:bold; opacity:0; transition:opacity 0.3s; }
+.exam-save-badge.show { opacity:1; }
+.exam-meta-sub { font-size:12px; color:#888; }
+.exam-timer-row { display:flex; justify-content:space-between; align-items:center; font-weight:bold; }
+.exam-progress-text { font-size:14px; color:#888; }
+.exam-timer-box { font-size:17px; color:#e6a23c; font-weight:bold; }
+
+.exam-main-content { flex:1; padding:20px 24px; overflow-y:auto; }
+.exam-nav-footer { border-top:1px solid #ebeef5; padding:14px 20px; display:flex; gap:12px; background:#fff; position:sticky; bottom:0; z-index:10; }
+.exam-nav-btn { flex:1; padding:13px 0; border-radius:8px; font-size:15px; font-weight:bold; border:1px solid #dcdfe6; cursor:pointer; background:#f5f7fa; color:#606266; }
+.exam-nav-btn:hover { background:#e8eaed; }
+.exam-submit-btn { flex:1; padding:13px 0; border-radius:8px; font-size:15px; font-weight:bold; border:none; cursor:pointer; background:#67c23a; color:#fff; display:none; }
+.exam-submit-btn:hover { background:#5daf34; }
+
+/* ---- 题目通用 ---- */
+.question-card { display:none; }
+.question-card.active { display:block; }
+.question-meta { font-size:13px; color:#409eff; font-weight:bold; margin-bottom:10px; }
+.question-stem { font-size:16px; line-height:1.9; margin-bottom:24px; word-break:break-word; white-space:pre-wrap; }
+.question-stem mjx-container { display:inline-block!important; margin:0 3px!important; vertical-align:middle; }
+.options-list { display:flex; flex-direction:column; gap:10px; }
+.option-item { border:2px solid #e4e7ed; padding:15px 18px; border-radius:10px; cursor:pointer; font-size:15px; transition:all 0.15s; }
+.option-item:hover { border-color:#b3d8ff; background:#fafcff; }
+.option-item.selected { background:#ecf5ff; border-color:#409eff; color:#409eff; font-weight:bold; }
+.text-answer-box { width:100%; padding:14px; border:2px solid #e4e7ed; border-radius:10px; font-size:15px; resize:vertical; font-family:inherit; box-sizing:border-box; }
+.text-answer-box:focus { border-color:#409eff; outline:none; }
+
+/* ---- 上传裁剪 ---- */
+.upload-section { margin-top:12px; text-align:center; }
+.upload-placeholder { border:2px dashed #d0d5dd; padding:20px; border-radius:10px; cursor:pointer; color:#999; font-size:14px; background:#fafbfc; transition:border-color 0.2s; }
+.upload-placeholder:hover { border-color:#409eff; color:#409eff; }
+.preview-wrapper { position:relative; margin-top:15px; display:inline-block; width:100%; }
+.btn-remove-img { position:absolute; top:-10px; right:-10px; background:#f56c6c; color:#fff; width:24px; height:24px; border-radius:50%; border:none; font-weight:bold; cursor:pointer; z-index:5; font-size:14px; line-height:1; }
+.hidden-file-input { display:none; }
+
+/* ---- 裁切弹窗 ---- */
+.cropper-full-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:1000; display:none; flex-direction:column; }
+.cropper-wrap { flex:1; position:relative; overflow:hidden; }
+.cropper-toolbar { background:rgba(0,0,0,0.85); padding:15px; display:flex; gap:10px; }
+.cropper-toolbar button { flex:1; padding:13px; font-size:14px; border-radius:6px; border:none; font-weight:bold; cursor:pointer; }
+.cropper-btn-cancel { background:#555; color:#fff; }
+.cropper-btn-rotate { background:#e6a23c; color:#fff; }
+.cropper-btn-save { background:#67c23a; color:#fff; }
+
+/* ---- 复查面板 ---- */
+.review-float-btn { position:fixed; bottom:80px; right:20px; background:#333; color:#fff; width:52px; height:52px; border-radius:50%; display:none; justify-content:center; align-items:center; font-size:12px; font-weight:bold; box-shadow:0 4px 16px rgba(0,0,0,0.2); z-index:99; cursor:pointer; text-align:center; line-height:1.2; }
+.review-modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); z-index:1000; display:none; justify-content:center; align-items:center; padding:20px; }
+.review-modal-card { background:#fff; width:100%; max-width:380px; border-radius:14px; padding:24px; box-shadow:0 8px 30px rgba(0,0,0,0.15); }
+.review-modal-title { margin:0 0 16px 0; text-align:center; font-size:16px; color:#333; }
+.review-modal-close-btn { width:100%; margin-top:20px; padding:11px; border-radius:8px; font-weight:bold; border:1px solid #dcdfe6; background:#f5f7fa; cursor:pointer; color:#606266; }
+.review-score-banner { display:flex; justify-content:space-between; padding:12px 16px; border-radius:8px; font-weight:bold; font-size:14px; margin-top:10px; }
+.review-grid-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-top:15px; }
+.r-dot { padding:10px 0; text-align:center; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; border:2px solid transparent; }
+.r-dot.correct { background:#f0f9eb; color:#67c23a; }
+.r-dot.wrong { background:#fef0f0; color:#f56c6c; border-color:#fde2e2; }
+.r-dot.active { border-color:#409eff; box-shadow:0 0 0 2px rgba(64,159,255,0.25); }
+
+/* ---- 图片缩放 ---- */
+.click-zoom-img { max-width:100%; max-height:180px; display:block; margin:10px auto; border-radius:8px; border:1px solid #eee; cursor:zoom-in; }
+.lightbox-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.92); z-index:10000; display:none; justify-content:center; align-items:center; cursor:zoom-out; }
+.lightbox-overlay img { max-width:96%; max-height:94%; object-fit:contain; border-radius:4px; }
+
+/* ---- 教师端通用 ---- */
+.q-nav-dot { padding:8px 0; text-align:center; background:#edf0f5; border-radius:6px; font-size:12px; font-weight:bold; cursor:pointer; border:2px solid transparent; user-select:none; }
+.q-nav-dot.active { border-color:#409eff; box-shadow:0 0 0 2px rgba(64,159,255,0.2); }
+.q-nav-dot.correct { background:#f0f9eb; color:#67c23a; }
+.q-nav-dot.wrong { background:#fef0f0; color:#f56c6c; }
+
+/* ---- 教师端评卷卡片 ---- */
+.grade-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.grade-q-badge { background:#ecf5ff; color:#409eff; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:bold; }
+.grade-q-score { font-size:13px; color:#888; font-weight:bold; }
+.grade-options-row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.grade-opt { display:inline-block; padding:6px 14px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; background:#fafafa; }
+.grade-opt-correct { background:#f0f9eb; border-color:#67c23a; color:#67c23a; }
+.grade-opt-wrong { background:#fef0f0; border-color:#f56c6c; color:#f56c6c; }
+.grade-opt-answer { border-color:#409eff; background:#ecf5ff; }
+.grade-judge-row { margin-bottom:14px; font-size:14px; }
+.grade-judge-item { display:inline-block; padding:4px 12px; border-radius:4px; font-weight:bold; }
+.grade-judge-correct { background:#f0f9eb; color:#67c23a; }
+.grade-judge-wrong { background:#fef0f0; color:#f56c6c; }
+.grade-judge-answer { background:#ecf5ff; color:#409eff; }
+.grading-editor-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.grade-student-answer { background:#fafbfc; border:2px solid #e4e7ed; border-radius:8px; padding:12px 16px; margin-bottom:12px; }
+.grade-student-label { font-size:11px; color:#999; font-weight:bold; margin-bottom:4px; text-transform:uppercase; }
+.grade-student-text { font-size:15px; font-weight:bold; color:#333; white-space:pre-wrap; }
+.grade-score-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.grade-auto-badge { font-size:12px; padding:3px 10px; border-radius:4px; font-weight:bold; }
+.grade-badge-ok { background:#f0f9eb; color:#67c23a; }
+.grade-badge-ng { background:#fef0f0; color:#f56c6c; }
+.grade-badge-manual { background:#fff7e6; color:#e6a23c; }
+.grade-score-input-group { display:flex; align-items:center; gap:6px; }
+.grade-score-input { width:70px; padding:6px 8px; border:2px solid #409eff; border-radius:6px; font-size:16px; font-weight:bold; text-align:center; color:#409eff; }
+.grade-ai-row { margin-top:10px; display:flex; gap:8px; align-items:flex-start; }
+.grade-ai-feedback { flex:1; }
+
+/* ---- 教师端评卷 ---- */
+.grading-answer-editor { background:#f4f9ff; padding:14px; border-radius:8px; border:1px solid #c6e2ff; margin:15px 0; font-size:13px; line-height:1.6; }
+.grading-ans-input { width:160px; padding:5px 8px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; }
+.score-input-label { color:#666; font-size:12px; font-weight:bold; }
+.manual-score-input { margin-top:10px; font-size:16px; font-weight:bold; text-align:center; color:#e6a23c; width:100%; padding:8px; border:2px solid #ffe58f; border-radius:6px; }
+
+/* ---- 教师端表格 ---- */
+.score-summary-table, .rank-table { width:100%; border-collapse:collapse; background:#fff; font-size:14px; }
+.score-summary-table th, .score-summary-table td, .rank-table th, .rank-table td { border:1px solid #ebeef5; padding:10px 12px; }
+.score-summary-header, .rank-table-header { background:#f5f7fa; }
+.score-editable { color:#f56c6c; font-weight:bold; cursor:pointer; }
+.rank-score { font-size:16px; font-weight:bold; color:#f56c6c; cursor:pointer; }
+
+/* ---- AI 批改 ---- */
+.ai-config-panel { background:#fafafa; border:1px solid #e4e7ed; border-radius:8px; margin-bottom:16px; overflow:hidden; }
+.ai-config-header { padding:10px 16px; background:#f0f0f0; cursor:pointer; display:flex; justify-content:space-between; font-weight:bold; font-size:13px; color:#666; user-select:none; }
+.ai-config-arrow { font-size:12px; color:#999; }
+.ai-config-body { padding:14px 16px; }
+.ai-config-body.hidden { display:none; }
+.ai-config-row { margin-bottom:8px; }
+.ai-config-row label { display:block; font-size:12px; color:#666; margin-bottom:3px; }
+.ai-grade-btn { background:#8e44ad; color:#fff; }
+.ai-grade-btn:hover { background:#7d3c98; }
+.ai-grade-all-btn { background:#8e44ad; color:#fff; margin-top:10px; }
+.ai-grade-all-btn:hover { background:#7d3c98; }
+.ai-grade-all-btn:disabled { background:#ccc; cursor:not-allowed; }
+.ai-loading { color:#8e44ad; font-size:13px; padding:8px 0; animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.ai-feedback-card { background:#faf5ff; border:1px solid #d4c4e8; border-radius:8px; padding:10px 14px; font-size:13px; line-height:1.6; }
+.ai-feedback-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:8px; border-bottom:1px solid #e8dcf5; }
+.ai-accept-btn { background:#67c23a; color:#fff; border:none; padding:4px 12px; border-radius:4px; font-size:12px; cursor:pointer; width:auto; }
+.ai-accept-btn:hover { background:#5daf34; }
+.ai-accept-btn:disabled { background:#ccc; cursor:default; }
+.ai-feedback-body { color:#555; white-space:pre-wrap; }
+.ai-feedback-error { border-color:#fde2e2; background:#fef0f0; color:#f56c6c; }
+
+/* ---- 教师端复查 ---- */
+.review-card { border:1px solid #e4e7ed; padding:20px; margin-bottom:15px; border-radius:10px; background:#fff; }
+.review-card-wrong { border-left:5px solid #f56c6c; }
+.review-card-correct { border-left:5px solid #67c23a; }
+.review-score-panel { text-align:center; }
+.score-result-label { font-size:12px; font-weight:bold; }
+.score-result-num { font-size:26px; font-weight:bold; margin-top:8px; }
+.score-readonly-input { text-align:center; font-size:12px; margin-top:8px; background:#f0f0f0; border:1px solid #e0e0e0; border-radius:4px; padding:6px; width:100%; box-sizing:border-box; }
+
+/* ---- 教师端导入区 ---- */
+.import-section { padding:16px 20px; border-radius:10px; margin-bottom:20px; }
+.import-section input[type="file"] { width:100%; padding:14px; border:2px dashed #c0c4cc; border-radius:8px; font-size:14px; background:#fafbfc; cursor:pointer; box-sizing:border-box; }
+.import-section-blue { border:2px dashed #409eff; background:#f4f9ff; }
+.import-section-green { border:2px dashed #67c23a; background:#f0f9eb; }
+.import-section-yellow { border:2px dashed #e6a23c; background:#fffbe6; }
+
+/* ---- 考试图片辅助 ---- */
+.exam-img-label { font-size:12px; color:#999; display:block; margin-top:4px; }
+.exam-standard-answer { color:#409eff; font-size:14px; margin-top:10px; }
+
+/* ---- 教师端页面 ---- */
+.teacher-body { font-family:system-ui,sans-serif; background:#f4f6f9; padding:20px; color:#333; margin:0; max-width:none; }
+
+/* 门禁 */
+.teacher-gate-mask { position:fixed; top:0; left:0; width:100%; height:100%; background:#f4f6f9; z-index:100010; display:flex; justify-content:center; align-items:center; }
+.teacher-gate-card { background:#fff; padding:40px 30px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.08); text-align:center; width:100%; max-width:400px; }
+.teacher-gate-card h3 { margin:0 0 8px 0; font-size:20px; color:#2c3e50; }
+.teacher-gate-hint { font-size:13px; color:#888; margin:0 0 16px 0; }
+.teacher-gate-input { width:100%; padding:12px; border:2px solid #e4e7ed; border-radius:8px; text-align:center; font-size:16px; margin-bottom:16px; box-sizing:border-box; }
+.teacher-gate-input:focus { border-color:#409eff; outline:none; }
+.teacher-gate-btn { background:#409eff; color:#fff; border:none; padding:12px 0; width:100%; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; }
+.teacher-gate-btn:hover { background:#337ecc; }
+.teacher-gate-error { color:#f56c6c; font-size:13px; font-weight:bold; margin-top:12px; min-height:20px; }
+
+/* 容器与Tab */
+.teacher-container { max-width:100%; margin:0 auto; background:#fff; padding:30px 40px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
+.teacher-tabs { display:flex; gap:8px; margin-bottom:28px; border-bottom:2px solid #ebeef5; padding-bottom:12px; }
+.teacher-tab { flex:1; padding:12px 8px; background:#f0f2f5; border:none; font-size:14px; font-weight:bold; cursor:pointer; border-radius:8px; color:#666; transition:all 0.15s; }
+.teacher-tab.active { background:#409eff; color:#fff; }
+.teacher-tab:hover:not(.active) { background:#e4e7ed; }
+.teacher-pane { display:none; }
+.teacher-pane.active { display:block; }
+
+/* 表单 */
+.teacher-section { padding:16px 20px; background:#f5f7fa; border-radius:10px; margin-bottom:20px; border:1px solid #e4e7ed; }
+.teacher-section label, .teacher-section-label { display:block; margin-bottom:10px; font-weight:bold; color:#555; font-size:14px; }
+.teacher-section input[type="file"] { width:100%; padding:12px; border:2px dashed #c0c4cc; border-radius:8px; font-size:14px; background:#fafbfc; cursor:pointer; box-sizing:border-box; }
+.teacher-form-row { margin-bottom:18px; }
+.teacher-form-group { margin-bottom:14px; }
+.teacher-form-group label { display:block; margin-bottom:5px; font-weight:bold; font-size:14px; color:#555; }
+.teacher-form-row-split { display:flex; gap:14px; }
+.teacher-form-row-split .teacher-form-group { flex:1; }
+.teacher-input { width:100%; padding:10px 14px; border:2px solid #e4e7ed; border-radius:8px; font-size:14px; box-sizing:border-box; }
+.teacher-input:focus { border-color:#409eff; outline:none; }
+
+/* 按钮 */
+.teacher-btn-row { display:flex; gap:10px; margin-top:16px; }
+.teacher-btn-row-equal .teacher-btn { flex:1; padding:10px 0; font-size:14px; }
+.teacher-btn { padding:8px 16px; border-radius:8px; font-weight:bold; font-size:13px; cursor:pointer; border:none; transition:all 0.15s; }
+.teacher-btn-gray { background:#6c757d; color:#fff; }
+.teacher-btn-gray:hover { background:#5a6268; }
+.teacher-btn-green { background:#67c23a; color:#fff; }
+.teacher-btn-green:hover { background:#5daf34; }
+.teacher-btn-orange { background:#e6a23c; color:#fff; }
+.teacher-btn-orange:hover { background:#d49530; }
+.teacher-btn-cyan { background:#13c2c2; color:#fff; width:auto; font-size:13px; padding:8px 16px; }
+.teacher-btn-cyan:hover { background:#10aeae; }
+.teacher-btn-full { width:100%; }
+.teacher-btn-sm { padding:6px 14px; font-size:12px; }
+.teacher-btn-outline { background:#fff; color:#409eff; border:2px solid #409eff; }
+.teacher-btn-outline:hover { background:#ecf5ff; }
+
+/* 试题编辑器 */
+.question-builder-item { border:2px solid #e4e7ed; padding:20px; border-radius:10px; margin-bottom:14px; background:#fafbfc; position:relative; }
+.q-remove-btn { position:absolute; top:10px; right:12px; background:#fff; color:#f56c6c; border:1px solid #fde2e2; border-radius:50%; width:28px; height:28px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; line-height:1; }
+.q-remove-btn:hover { background:#fef0f0; border-color:#f56c6c; }
+.q-meta-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.q-type-select { width:130px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-score-input { width:70px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-ans-input { flex:1; min-width:150px; padding:8px 10px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; }
+.q-stem-input { width:100%; min-height:80px; padding:10px 12px; border:2px solid #e4e7ed; border-radius:8px; font-size:14px; resize:vertical; font-family:inherit; margin-bottom:8px; box-sizing:border-box; }
+.q-stem-input:focus, .q-ans-input:focus, .q-type-select:focus, .q-score-input:focus { border-color:#409eff; outline:none; }
+.q-opts-input { width:100%; padding:8px 12px; border:2px solid #e4e7ed; border-radius:6px; font-size:14px; box-sizing:border-box; margin-bottom:8px; }
+.q-img-del-btn { background:#ff4d4f; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
+.q-img-del-btn:hover { background:#e60000; }
+.img-upload-row { margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.builder-img-preview { max-height:80px; border-radius:6px; display:none; }
+
+/* 评卷工作区 */
+.grading-workspace { display:flex; gap:20px; margin-top:20px; align-items:flex-start; }
+.grading-left-core { flex:1; min-width:0; }
+.grading-right-panel { width:320px; background:#f8fafc; border:1px solid #e4e7ed; border-radius:10px; padding:16px; position:sticky; top:20px; }
+.grading-student-card { background:#fff7e6; border:2px solid #ffa940; padding:14px 16px; border-radius:10px; margin-bottom:16px; font-size:14px; }
+.grading-student-card h4 { margin:0 0 10px 0; color:#d46b08; font-size:15px; }
+.grading-student-card div { margin-bottom:4px; }
+.grading-draft-status { margin:-4px 0 14px; padding:10px 12px; border:1px solid #bfdbfe; border-radius:8px; background:#eff6ff; color:#1e40af; font-size:12px; line-height:1.6; }
+.grading-draft-actions { display:flex; gap:8px; margin-top:8px; }
+.grading-draft-save-status { margin:-8px 0 14px; color:#64748b; font-size:11px; line-height:1.5; }
+.grading-side-label { display:block; margin-bottom:8px; font-weight:bold; font-size:13px; color:#666; }
+.grading-review-panel { border-color:#67c23a; }
+.grading-review-card { background:#f0f9eb; border-color:#c2e7b0; }
+.grading-review-score { margin-top:10px; border-top:1px dashed #c2e7b0; padding-top:8px; }
+
+.grade-item-card { border:2px solid #e4e7ed; padding:22px 20px; margin-bottom:20px; border-radius:10px; background:#fff; }
+.grade-item-card.hidden-card { display:none!important; }
+.grade-item-stem { font-size:16px; line-height:1.8; margin-bottom:16px; word-break:break-word; white-space:pre-wrap; }
+.grade-item-stem mjx-container { display:inline-block!important; margin:0 3px!important; vertical-align:middle; }
+.grading-split { display:flex; gap:14px; margin-top:14px; flex-wrap:wrap; }
+.ans-panel { flex:1; border:1px solid #e4e7ed; padding:14px; border-radius:8px; background:#fdfdfd; min-width:260px; line-height:1.6; }
+.ans-panel mjx-container { display:inline-block!important; vertical-align:middle; }
+.score-panel { width:220px; border:1px solid #e4e7ed; padding:14px; border-radius:8px; background:#fcfcfc; }
+
+/* 浏览模式切换 */
+.teacher-view-toggle { display:flex; gap:4px; margin-bottom:14px; background:#e4e7ed; padding:4px; border-radius:8px; }
+.teacher-view-btn { flex:1; padding:7px 0; border:none; background:transparent; font-weight:bold; cursor:pointer; border-radius:6px; font-size:12px; color:#666; }
+.teacher-view-btn.active { background:#fff; color:#409eff; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+
+/* 排名 */
+.teacher-rank-filter { background:#f4f9ff; border:1px solid #b3d8ff; border-radius:10px; padding:14px 18px; margin-bottom:18px; display:flex; align-items:center; gap:14px; }
+.teacher-rank-select { padding:8px 14px; font-size:14px; font-weight:bold; border:1px solid #b3d8ff; border-radius:6px; background:#fff; color:#409eff; flex:1; }
+.teacher-rank-stats { background:#f6ffed; border:1px solid #c2e7b0; padding:16px 20px; border-radius:10px; color:#389e0d; display:flex; gap:30px; margin-bottom:18px; font-size:15px; }
+.teacher-rank-stats b { font-size:24px; font-family:monospace; margin-left:4px; }
+.teacher-rank-avg { border-left:1px dashed #c2e7b0; padding-left:24px; }
+.teacher-rank-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.teacher-rank-header h3 { margin:0; color:#4a5568; font-size:16px; }
+.rank-gold-lbl { background:#fff1f0; color:#cf1322; font-weight:bold; border-radius:4px; padding:3px 8px; display:inline-block; }
+.analytics-dashboard-card { background:#f6ffed; border:1px solid #b7eb8f; padding:18px; border-radius:8px; color:#389e0d; display:flex; gap:30px; margin-bottom:20px; font-size:15px; }
+.analytics-dashboard-card b { font-size:24px; font-family:monospace; vertical-align:middle; margin-left:5px; }
+
+/* 考试容器基值 */
+.exam-app-container { max-width: 100%; }
+
+/* ========== 考试系统响应式 ========== */
+
+/* ——— 平板及以上 (>768px) ——— */
+@media screen and (min-width: 768px) {
+    .exam-app-container { max-width: 800px; }
+    .question-stem { font-size: 17px; }
+    .option-item { font-size: 16px; padding: 16px; }
+    .text-answer-box { font-size: 16px; }
+    .ans-panel { min-width: 300px; }
+}
+
+/* ——— 桌面 (>1024px) ——— */
+@media screen and (min-width: 1024px) {
+    .exam-app-container { max-width: 900px; }
+    .question-stem { font-size: 18px; line-height: 2; }
+    .options-list { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+    .options-list .option-item { margin:0; }
+    .exam-nav-footer button { font-size:16px; padding:14px; }
+    .click-zoom-img { max-height:240px; }
+    .grading-right-panel { width:360px; }
+}
+
+/* ——— 宽屏桌面 (>1400px) ——— */
+@media screen and (min-width: 1400px) {
+    .exam-app-container { max-width: 1000px; }
+    .exam-main-content { padding: 28px 40px; }
+    .question-stem { font-size: 19px; }
+    .options-list { gap: 14px; }
+    .option-item { padding: 18px 22px; font-size: 17px; }
+    .teacher-container { padding: 36px 60px; }
+    .grading-right-panel { width: 380px; }
+    .grading-split { gap: 20px; }
+}
+
+/* ——— 手机 (<640px) ——— */
+@media screen and (max-width: 640px) {
+    .exam-app-container { max-width:100%; }
+    .exam-header-bar { padding:10px 12px; }
+    .exam-main-content { padding:14px 12px; }
+    .options-list { grid-template-columns:1fr; }
+
+    .teacher-body { padding:6px; }
+    .teacher-container { padding:14px 10px; border-radius:10px; }
+    .teacher-tabs { flex-wrap:wrap; gap:4px; }
+    .teacher-tab { font-size:12px; padding:9px 4px; flex:1 1 calc(50% - 4px); }
+    .teacher-form-row-split { flex-direction:column; gap:8px; }
+
+    .grading-workspace { flex-direction:column; }
+    .grading-right-panel { width:100%; position:static; }
+    .grading-split { flex-direction:column; }
+    .score-panel { width:100%; }
+
+    .question-builder-item { padding:12px; }
+    #rank-table-wrapper { overflow-x:auto; }
+    .rank-table { font-size:12px; }
+    .rank-table th, .rank-table td { padding:6px 4px; }
+    .review-card { padding:12px; }
+    .teacher-rank-stats { flex-direction:column; gap:8px; }
+    .teacher-rank-avg { border-left:none; padding-left:0; }
+}
+
+/* ========== 批改评语（教师编辑 + 学生复盘展示） ========== */
+.feedback-textarea {
+    width: 100%; min-height: 72px; padding: 8px 10px;
+    border: 1px solid #d9d9d9; border-radius: 6px;
+    font-size: 13px; font-family: inherit; box-sizing: border-box;
+    resize: vertical; background: #fffdf6; color: #555;
+}
+.feedback-textarea:focus { border-color: #e6a23c; outline: none; box-shadow: 0 0 0 3px rgba(230,162,60,0.12); }
+.grade-feedback-editor { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e4e7ed; }
+.review-teacher-feedback {
+    background: #fff7e6; border: 1px solid #ffd591; border-radius: 6px;
+    padding: 10px 12px; margin-top: 10px;
+    font-size: 13px; color: #7a4d00; line-height: 1.7;
+}
