@@ -51,6 +51,10 @@
                 console.warn('App Check 初始化失败，将使用兼容验证：', error);
             }
         }
+        // 大陆网络下先探测一次后端可达性：不可达则后续请求直接走直连通道，避免每次等待超时
+        fetchWithTimeout(`${apiBaseUrl}/health`, { method: 'GET', cache: 'no-store' }, 1200)
+            .then(response => { if (!response.ok) backendUnreachable = true; })
+            .catch(() => { backendUnreachable = true; });
         initialized = true;
     }
 
@@ -190,6 +194,11 @@
             else if (challenge) {
                 headers['X-Student-Challenge-Id'] = challenge.id;
                 headers['X-Student-Challenge-Nonce'] = challenge.nonce;
+            } else if (backendUnreachable) {
+                // 已确认后端不可达（大陆常态）：不再等待网络超时，立即走直连通道
+                const unreachable = new Error('后端不可达');
+                unreachable.reason = 'INTERNAL';
+                throw unreachable;
             }
             const response = await fetchWithTimeout(`${apiBaseUrl}/${encodeURIComponent(name)}`, {
                 method: 'POST',
