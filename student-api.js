@@ -56,8 +56,36 @@
         return Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('');
     }
 
+    async function fetchWithTimeout(url, options, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...(options || {}), signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    function apiError(message, reason, details) {
+        const error = new Error(message);
+        error.reason = reason || '';
+        error.details = details || {};
+        return error;
+    }
+
+    function studentIndexKey(name) {
+        return bytesToHex(new TextEncoder().encode(String(name || '')));
+    }
+
+    function randomCancelCode() {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        const bytes = new Uint8Array(5);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
+    }
+
     async function getClientChallenge() {
-        const response = await fetch(`${apiBaseUrl}/challenge`, { method: 'GET', cache: 'no-store' });
+        const response = await fetchWithTimeout(`${apiBaseUrl}/challenge`, { method: 'GET', cache: 'no-store' }, 5000);
         let body = null;
         try { body = await response.json(); } catch (error) {}
         if (!response.ok || !body || !body.data || !body.data.id || !body.data.salt) {
@@ -99,11 +127,11 @@
                 headers['X-Student-Challenge-Id'] = challenge.id;
                 headers['X-Student-Challenge-Nonce'] = challenge.nonce;
             }
-            const response = await fetch(`${apiBaseUrl}/${encodeURIComponent(name)}`, {
+            const response = await fetchWithTimeout(`${apiBaseUrl}/${encodeURIComponent(name)}`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(payload || {})
-            });
+            }, 7000);
             let body = null;
             try { body = await response.json(); } catch (parseError) {}
             if (!response.ok || !body || body.error) {
@@ -125,9 +153,132 @@
         }
     }
 
+    function isBackendUnavailable(error) {
+        const reason = String(error && error.reason || '');
+        if (!reason) return true;
+        return /^(APP_CHECK|CLIENT_CHALLENGE)_/.test(reason) || reason === 'INTERNAL';
+    }
+
+    async function createBookingEmergency(payload) {
+        if (!settings.emergencyDirectBookingFallback) {
+            throw apiError('预约服务连接失败，请稍后重试。', 'BACKEND_UNAVAILABLE');
+        }
+        if (!global.TimeParser || typeof global.TimeParser.parseRawText !== 'function') {
+            throw apiError('页面组件尚未加载完成，请刷新后重试。', 'EMERGENCY_COMPONENT_MISSING');
+        }
+
+        const year = String(payload && payload.year || '');
+        const nickname = String(payload && payload.nickname || '').trim();
+        const accessCode = String(payload && payload.accessCode || '').trim();
+        const slotId = String(payload && payload.slotId || '');
+        const database = firebase.database();
+
+        if (!/^\d{4}$/.test(year) || !nickname || !accessCode || !/^[A-Za-z0-9_-]{1,100}$/.test(slotId)) {
+            throw apiError('预约信息格式不完整，请刷新页面后重新填写。', 'INVALID_ARGUMENT');
+        }
+
+        const activeYearSnapshot = await database.ref('system/activeYear').once('value');
+        if (String(activeYearSnapshot.val() || '') !== year) {
+            throw apiError('当前开放学年已经变化，请刷新页面后重试。', 'YEAR_CHANGED');
+        }
+
+        const [slotSnapshot, deadlineSnapshot] = await Promise.all([
+            database.ref(`years/${year}/slots/${slotId}`).once('value'),
+            database.ref(`years/${year}/settings/deadline`).once('value')
+        ]);
+        const slot = slotSnapshot.val();
+        const parsedSlot = slot && global.TimeParser.parseRawText(slot.time, year);
+        if (!slot || slot.status === 'hidden' || slot.reserved || !parsedSlot) {
+            throw apiError('该时间段已不可预约，请刷新后重试。', 'SLOT_UNAVAILABLE');
+        }
+        const deadlineMs = deadlineSnapshot.val() ? new Date(deadlineSnapshot.val()).getTime() : NaN;
+        if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+            throw apiError('本轮预约已截止。', 'BOOKING_CLOSED');
+        }
+
+        const reservationId = database.ref(`emergencyBookingRequests/${year}`).push().key;
+        if (!reservationId) throw apiError('无法生成预约编号，请刷新后重试。', 'EMERGENCY_ID_FAILED');
+        const cancelCode = randomCancelCode();
+        const timestamp = Date.now();
+        const slotSnapshotData = {
+            rawTime: parsedSlot.rawTime,
+            date: parsedSlot.date,
+            startTime: parsedSlot.startTime,
+            endTime: parsedSlot.endTime,
+            formattedSlotText: parsedSlot.formattedSlotText
+        };
+        const requestData = {
+            reservationId,
+            year,
+            nickname,
+            studentKey: studentIndexKey(nickname),
+            accessCode,
+            slotId,
+            time: parsedSlot.formattedSlotText,
+            status: 'booked',
+            cancelCode,
+            timestamp,
+            slotSnapshot: slotSnapshotData
+        };
+
+        try {
+            await database.ref(`emergencyBookingRequests/${year}/${reservationId}`).set(requestData);
+        } catch (error) {
+            throw apiError('姓名不在准入名单、预约口令错误，或应急通道尚未启用。', 'EMERGENCY_AUTH_FAILED');
+        }
+
+        const claimRef = database.ref(`emergencySlotClaims/${year}/${slotId}`);
+        const claimResult = await claimRef.transaction(current => current == null ? reservationId : undefined, undefined, false);
+        if (!claimResult.committed || claimResult.snapshot.val() !== reservationId) {
+            throw apiError('该时间段刚刚被其他同学预约，请刷新后重试。', 'SLOT_UNAVAILABLE');
+        }
+
+        const reservation = {
+            nickname,
+            slotId,
+            reservationId,
+            time: parsedSlot.formattedSlotText,
+            status: 'booked',
+            cancelCode,
+            slotSnapshot: slotSnapshotData,
+            timestamp
+        };
+        try {
+            await database.ref(`years/${year}/reservations/${reservationId}`).set(reservation);
+            const slotResult = await database.ref(`years/${year}/slots/${slotId}`).transaction(current => {
+                if (!current || current.status === 'hidden' || current.reserved || current.time !== slot.time) return;
+                return { ...current, reserved: true, reservationId };
+            }, undefined, false);
+            if (!slotResult.committed) {
+                throw apiError('预约记录已保存，但排班状态同步失败，请立即联系老师核对。', 'EMERGENCY_SLOT_SYNC_FAILED');
+            }
+        } catch (error) {
+            if (error && error.reason) throw error;
+            throw apiError('应急预约保存失败，请不要重复提交，并联系老师核对。', 'EMERGENCY_SAVE_FAILED');
+        }
+
+        return {
+            nickname,
+            time: parsedSlot.formattedSlotText,
+            cancelCode,
+            slotSnapshot: slotSnapshotData,
+            emergencyMode: true
+        };
+    }
+
+    async function createBooking(payload) {
+        try {
+            return await call('createBooking', payload);
+        } catch (error) {
+            if (!settings.emergencyDirectBookingFallback || !isBackendUnavailable(error)) throw error;
+            console.warn('安全后端当前不可达，切换到受限应急预约通道。', error);
+            return createBookingEmergency(payload);
+        }
+    }
+
     global.StudentApi = Object.freeze({
         init,
-        createBooking: payload => call('createBooking', payload),
+        createBooking,
         getBookingHistory: payload => call('getBookingHistory', payload),
         cancelBooking: payload => call('cancelBooking', payload),
         startExam: payload => call('startExam', payload),

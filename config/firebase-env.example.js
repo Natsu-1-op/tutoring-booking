@@ -16,7 +16,8 @@ window.__STUDENT_API_CONFIG__ = {
     apiBaseUrl: "https://your-worker.workers.dev",
     provider: "recaptcha-v3",
     appCheckSiteKey: "",
-    allowClientChallengeFallback: true
+    allowClientChallengeFallback: true,
+    emergencyDirectBookingFallback: false
 };
 
 if (!window.__SKIP_FIREBASE_ENV_INIT__) {

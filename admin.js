@@ -14,6 +14,19 @@
     // 「当前排课 / 历史归档」按查看学年动态取分界（7月26日），避免未来学年被旧常量一锅端进当前
     const getGroupCutoff = () => new Date(+viewingYear, 6, 26).getTime();
 
+    function studentWhitelistIndexKey(name) {
+        return Array.from(new TextEncoder().encode(String(name || '')), value => value.toString(16).padStart(2, '0')).join('');
+    }
+
+    function buildStudentWhitelistIndex(list) {
+        const index = {};
+        Object.values(list || {}).forEach(name => {
+            if (typeof name !== 'string' || !isValidStudentName(name)) return;
+            index[studentWhitelistIndexKey(name)] = name;
+        });
+        return index;
+    }
+
     function localDateKey(date) {
         const y = date.getFullYear();
         const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -296,6 +309,7 @@
         currentActiveStudentHoursRefMemory = db.ref(`years/${viewingYear}/studentHours`);
         currentActiveDeadlineRefMemory = SystemRouter.getSettingsRef(viewingYear).child('deadline');
         currentActiveAccessCodeRefMemory = SystemRouter.getSettingsRef(viewingYear).child('accessCode');
+        const loadedYear = viewingYear;
         dashboardSlots = {};
         dashboardReservations = {};
         dashboardStudentHours = {};
@@ -364,6 +378,7 @@
                     if(confirm(`确定将 [${name}] 从当前学年准入名单中移除吗？`)) {
                         const updates = {};
                         updates[`years/${viewingYear}/studentWhitelist/${id}`] = null;
+                        updates[`years/${viewingYear}/studentWhitelistIndex/${studentWhitelistIndexKey(name)}`] = null;
                         updates[`years/${viewingYear}/studentHours/${name}`] = null;
                         db.ref().update(updates).then(() => {
                             SystemRouter.getLogsRef(viewingYear).push({
@@ -436,6 +451,13 @@
         currentActiveStudentListRefMemory.on('value', (snapshot) => {
             currentStudentList = snapshot.val() || null;
             renderWhitelist();
+            // 应急预约规则按不可公开读取的索引核验姓名。教师端每次读取名单时自动修复索引，
+            // 避免旧学年或批量导入的名单缺少索引而阻止学生预约。
+            if (loadedYear === viewingYear) {
+                db.ref(`years/${loadedYear}/studentWhitelistIndex`).set(buildStudentWhitelistIndex(currentStudentList)).catch(error => {
+                    console.warn('准入名单索引同步失败:', error);
+                });
+            }
         });
 
         currentActiveSlotsRefMemory.on('value', (snapshot) => {
@@ -665,6 +687,7 @@
             const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
             const updates = {};
             updates[`years/${viewingYear}/studentWhitelist/${studentKey}`] = name;
+            updates[`years/${viewingYear}/studentWhitelistIndex/${studentWhitelistIndexKey(name)}`] = name;
             if (validHours) updates[`years/${viewingYear}/studentHours/${name}`] = parsedHours;
             db.ref().update(updates).then(() => {
                 SystemRouter.getLogsRef(viewingYear).push({

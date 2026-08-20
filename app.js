@@ -173,6 +173,7 @@ function bindActiveYearListeners() {
     });
 
     let currentSlots = null;
+    let emergencyClaims = {};
     function renderSlots() {
         if (isDeadlined) return;
         const container = document.getElementById('slots-container');
@@ -184,8 +185,10 @@ function bindActiveYearListeners() {
         Object.keys(currentSlots).forEach(slotId => {
             const slot = currentSlots[slotId];
             if (!slot || slot.status === "hidden" || !slot.time) return;
-            if (slot.reserved) reservedSlots.push({ id: slotId, data: slot });
-            else availableSlots.push({ id: slotId, data: slot });
+            const isReserved = Boolean(slot.reserved || emergencyClaims[slotId]);
+            const displaySlot = isReserved && !slot.reserved ? { ...slot, reserved: true } : slot;
+            if (isReserved) reservedSlots.push({ id: slotId, data: displaySlot });
+            else availableSlots.push({ id: slotId, data: displaySlot });
         });
 
         const sortedSlots = [...availableSlots, ...reservedSlots];
@@ -208,6 +211,11 @@ function bindActiveYearListeners() {
 
     bind(SystemRouter.getSlotsRef(year), (snapshot) => {
         currentSlots = snapshot.val();
+        renderSlots();
+    });
+
+    bind(db.ref(`emergencySlotClaims/${year}`), (snapshot) => {
+        emergencyClaims = snapshot.val() || {};
         renderSlots();
     });
 }
