@@ -2205,8 +2205,11 @@ async function refreshPendingList() {
         let reconciledImportedCount = 0;
         let reconciledDismissedCount = 0;
         let legacyLinked = false;
-        const queuePostedStatus = (key, lesson, candidate) => {
-            const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
+        let autoLedgerCreatedCount = 0;
+        const ledgerMutationTargetKeys = new Set();
+        const autoLedgerTargetKeys = new Set();
+        const queuePostedStatus = (key, lesson, candidate, explicitRecordId) => {
+            const recordId = explicitRecordId || (candidate && candidate.record ? String(candidate.record.id || '') : '');
             const postedAt = candidate && candidate.record
                 ? Number(candidate.record.postedAt || candidate.record.createdAt || Date.now())
                 : Date.now();
@@ -2326,6 +2329,32 @@ async function refreshPendingList() {
                 return;
             }
 
+            if (feeRecordCandidate) {
+                // 兼容旧数据：有 feeRecordId 但尚未写 feeStatus/sourceId 时，优先关联已有记录，不能再新建一条重复账本记录。
+                const diffs = getReconciliationDiffs(lesson, feeRecordCandidate.record);
+                const recordOwnedByAnotherReservation = feeRecordCandidate.record.sourceId && feeRecordCandidate.record.sourceId !== sourceId;
+                if (diffs.length === 0 && !recordOwnedByAnotherReservation && !consumedRecordIndexes.has(feeRecordCandidate.index)) {
+                    consumedRecordIndexes.add(feeRecordCandidate.index);
+                    if (feeRecordCandidate.record && !feeRecordCandidate.record.sourceId) {
+                        feeRecordCandidate.record.sourceId = sourceId;
+                        legacyLinked = true;
+                        ledgerMutationTargetKeys.add(key);
+                    }
+                    queuePostedStatus(key, lesson, feeRecordCandidate);
+                } else {
+                    addReconciliationCase({
+                        type: 'fieldMismatch',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: '预约指定的账本记录与课程姓名、日期或课时不一致'
+                    });
+                }
+                return;
+            }
+
             if (legacyCandidates.length === 1 && !consumedRecordIndexes.has(legacyCandidates[0].index)) {
                 // 只有一条 姓名+日期+课时 完全一致的旧记录 → 自动关联为已入账（补齐 sourceId，避免反复人工核对）
                 const legacy = legacyCandidates[0];
@@ -2333,6 +2362,7 @@ async function refreshPendingList() {
                 if (legacy.record && typeof legacy.record === 'object' && !legacy.record.sourceId) {
                     legacy.record.sourceId = sourceId; // 直接改 data.records 中的对象，随后 saveData 持久化
                     legacyLinked = true;
+                    ledgerMutationTargetKeys.add(key);
                 }
                 queuePostedStatus(key, lesson, legacy);
                 return;
@@ -2363,13 +2393,66 @@ async function refreshPendingList() {
                 return;
             }
 
-            lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
-            pendingLessons.push(lesson);
+            // 正常的新完成预约没有任何本地候选时，直接生成账本记录。
+            // 只有日期、姓名、课时均可解析且不存在相近候选才走这里；异常或疑似重复仍交给人工核对。
+            try {
+                const canonical = getReconciliationCanonicalFromBooking({ booking: lesson }, null);
+                const ledgerResult = upsertReconciliationLedgerRecord({ sourceId, booking: lesson }, canonical, null);
+                ledgerMutationTargetKeys.add(key);
+                autoLedgerTargetKeys.add(key);
+                // 本轮新建的记录不能被后面的相同姓名/日期/课时预约误认为是旧账本记录。
+                consumedRecordIndexes.add(data.records.length - 1);
+                autoLedgerCreatedCount++;
+                queuePostedStatus(key, lesson, null, ledgerResult.recordId);
+            } catch (error) {
+                addReconciliationCase({
+                    type: 'autoLedgerFailed',
+                    resKey: key,
+                    sourceId,
+                    reservation: r,
+                    booking: lesson,
+                    candidates,
+                    message: `自动入账失败：${error.message || '账本数据不完整，请人工核对'}`
+                });
+            }
         });
 
-        if (legacyLinked) saveData(); // 持久化自动补上的 sourceId（并推送加密账本），避免下次仍要人工核对
+        let ledgerSyncFailed = false;
+        if (legacyLinked || autoLedgerCreatedCount > 0) {
+            // 必须先确认加密账本写入云端成功，再把预约标记为已入账，避免出现“约课端已入账、账本云端没有记录”。
+            saveData();
+            ledgerSyncFailed = !(await cloudPushChain.catch(() => false));
+        }
 
         let reconciliationSyncFailed = false;
+        if (ledgerSyncFailed) {
+            const failedTargets = autoReconciledTargets.filter(target => ledgerMutationTargetKeys.has(target.key));
+            failedTargets.forEach(target => {
+                if (autoLedgerTargetKeys.has(target.key)) {
+                    // 云端加密账本未确认写入时撤回本轮新建记录，避免本页下一次刷新把本机孤立记录误判为已入账。
+                    data.records = (data.records || []).filter(record => record.sourceId !== target.lesson.sourceId);
+                } else {
+                    // 旧记录只是补 sourceId 的情况下也撤回这次关联，保留原账本内容供下次重试。
+                    const linkedRecord = (data.records || []).find(record => record.sourceId === target.lesson.sourceId);
+                    if (linkedRecord) delete linkedRecord.sourceId;
+                }
+                const prefix = `years/${activeYear}/reservations/${target.key}/`;
+                Object.keys(reconciliationUpdates).forEach(path => {
+                    if (path.startsWith(prefix)) delete reconciliationUpdates[path];
+                });
+                addReconciliationCase({
+                    type: 'syncFailed',
+                    resKey: target.key,
+                    sourceId: target.lesson.sourceId,
+                    reservation: res[target.key],
+                    booking: target.lesson,
+                    candidates: getReconciliationCandidates(target.lesson, target.lesson.sourceId, res[target.key] && res[target.key].feeRecordId),
+                    message: `自动入账已写入本机，但加密账本云端同步失败：${lastCloudPushError || '请重试'}`
+                });
+            });
+            reconciledImportedCount = Math.max(0, reconciledImportedCount - failedTargets.length);
+            autoLedgerCreatedCount = Math.max(0, autoLedgerCreatedCount - failedTargets.filter(target => autoLedgerTargetKeys.has(target.key)).length);
+        }
         if (Object.keys(reconciliationUpdates).length > 0) {
             try {
                 await moneyDb.ref().update(reconciliationUpdates);
@@ -2377,7 +2460,10 @@ async function refreshPendingList() {
                 console.error('历史课时费状态同步失败:', error);
                 reconciliationSyncFailed = true;
                 reconciledImportedCount = 0;
+                autoLedgerCreatedCount = 0;
                 autoReconciledTargets.forEach(target => {
+                    const statusPath = `years/${activeYear}/reservations/${target.key}/feeStatus`;
+                    if (!Object.prototype.hasOwnProperty.call(reconciliationUpdates, statusPath)) return;
                     addReconciliationCase({
                         type: 'syncFailed',
                         resKey: target.key,
@@ -2396,7 +2482,7 @@ async function refreshPendingList() {
         const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
         renderReconciliationCases();
-        renderReconciliationNotice({ reconciledImportedCount, reconciledDismissedCount, reconciliationSyncFailed });
+        renderReconciliationNotice({ reconciledImportedCount, autoLedgerCreatedCount, reconciledDismissedCount, reconciliationSyncFailed: reconciliationSyncFailed || ledgerSyncFailed });
         statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${reconciliationCases.length ? ` · ${reconciliationCases.length} 条需核对` : ''}${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
         renderYearSummary();
     } catch (e) {
@@ -2406,7 +2492,7 @@ async function refreshPendingList() {
     }
 }
 
-function renderReconciliationNotice({ reconciledImportedCount = 0, reconciledDismissedCount = 0, reconciliationSyncFailed = false, reset = false } = {}) {
+function renderReconciliationNotice({ reconciledImportedCount = 0, autoLedgerCreatedCount = 0, reconciledDismissedCount = 0, reconciliationSyncFailed = false, reset = false } = {}) {
     const noticeEl = document.getElementById('feeReconciliationNotice');
     if (!noticeEl) return;
     if (reset) {
@@ -2415,7 +2501,9 @@ function renderReconciliationNotice({ reconciledImportedCount = 0, reconciledDis
         return;
     }
     const messages = [];
-    if (reconciledImportedCount > 0) messages.push(`已同步 ${reconciledImportedCount} 条历史入账状态`);
+    if (autoLedgerCreatedCount > 0) messages.push(`已自动入账 ${autoLedgerCreatedCount} 条已完成课程`);
+    const linkedCount = reconciledImportedCount - autoLedgerCreatedCount;
+    if (linkedCount > 0) messages.push(`已同步 ${linkedCount} 条历史入账状态`);
     if (reconciledDismissedCount > 0) messages.push(`已同步 ${reconciledDismissedCount} 条忽略状态`);
     if (reconciliationCases.length > 0) messages.push(`${reconciliationCases.length} 条记录需要人工核对`);
     if (reconciliationSyncFailed) messages.push('云端状态同步失败，请点击刷新重试');

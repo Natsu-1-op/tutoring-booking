@@ -51,10 +51,13 @@
         const futureEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         const futureItems = canShowToday ? parsedItems.filter(item => item.date > todayKey && item.date <= localDateKey(futureEnd)).sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)) : [];
         const feeItems = parsedItems.filter(item => item.data.status === 'completed' && !['posted', 'dismissed'].includes(item.data.feeStatus));
+        const postedFeeItems = parsedItems.filter(item => item.data.status === 'completed' && item.data.feeStatus === 'posted');
 
         document.getElementById('today-count').textContent = todayItems.length;
         document.getElementById('today-pending-count').textContent = todayItems.filter(item => item.data.status === 'booked').length;
         document.getElementById('today-fee-count').textContent = feeItems.length;
+        const postedFeeCountEl = document.getElementById('today-fee-posted-count');
+        if (postedFeeCountEl) postedFeeCountEl.textContent = postedFeeItems.length;
         const todayPanelCount = document.getElementById('today-panel-count');
         const upcomingPanelCount = document.getElementById('upcoming-panel-count');
         if (todayPanelCount) todayPanelCount.textContent = `${todayItems.length} 节`;
@@ -141,7 +144,7 @@
         if (todayEl) todayEl.innerHTML = `<p class="today-empty">${escapeHtml(message)}</p>`;
         if (upcomingEl) upcomingEl.innerHTML = '<p class="today-empty">请稍后刷新重试</p>';
         if (warningEl) warningEl.innerHTML = '<p class="today-empty">未能完成数据检查</p>';
-        ['today-count', 'today-pending-count', 'today-fee-count', 'today-warning-count'].forEach(id => {
+        ['today-count', 'today-pending-count', 'today-fee-count', 'today-fee-posted-count', 'today-warning-count'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.textContent = '—';
         });

@@ -25,4 +25,6 @@ https://<worker-name>.<account>.workers.dev/health
 
 看到 `{"ok":true}` 后，把这个 Worker 的基础地址填入 `config/firebase-env.js` 的 `apiBaseUrl`，再部署静态页面。
 
+大陆网络无法稳定获取 reCAPTCHA 时，Worker 会在 `CLIENT_CHALLENGE_ENABLED=true` 下提供一次性兼容挑战。该路径不等同于 App Check，但仍绑定来源 IP、短期有效、一次性消费，并继续检查预约口令、学生白名单和限流；不要把它改成无验证直写数据库。
+
 Worker 会验证 `X-Firebase-AppCheck`，再通过 Google OAuth2 服务账号令牌访问 RTDB。服务账号令牌和私钥只在 Worker 侧存在；不要把它们放入学生端代码。Firebase REST API 的 OAuth2 认证说明见 Firebase 官方文档。

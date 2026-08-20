@@ -17,7 +17,9 @@ window.__FIREBASE_CONFIG__ = firebaseConfig;
 window.__STUDENT_API_CONFIG__ = {
     apiBaseUrl: "https://tutoring-booking-api.xiasong062.workers.dev",
     provider: "recaptcha-v3",
-    appCheckSiteKey: "6LdpbY8tAAAAALSPaYpNJJ0NAouRj6tlD2ixCDGd"
+    appCheckSiteKey: "6LdpbY8tAAAAALSPaYpNJJ0NAouRj6tlD2ixCDGd",
+    // Google 验证在大陆网络不可达时，由 Worker 的一次性挑战接管；不退回匿名直写数据库。
+    allowClientChallengeFallback: true
 };
 
 // money.html 只需要读取配置并由教师认证模块初始化 Firebase，避免和它自己的 db 变量冲突。

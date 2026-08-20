@@ -10,16 +10,17 @@ const env = {
   FIREBASE_APP_ID: "1:859111669333:web:ec5cea5bd22dc0c495dedc",
   FIREBASE_DATABASE_URL: "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app",
   ALLOWED_ORIGINS: "http://localhost:4173",
+  CLIENT_CHALLENGE_ENABLED: "true",
 };
 
-test("worker rejects requests without App Check", async () => {
+test("worker rejects requests without App Check or the mainland compatibility challenge", async () => {
   const response = await worker.fetch(new Request("https://worker.test/createBooking", {
     method: "POST",
     headers: {origin: "http://localhost:4173", "content-type": "application/json"},
     body: "{}",
   }), env);
   assert.equal(response.status, 403);
-  assert.equal((await response.json()).error.reason, "APP_CHECK_MISSING");
+  assert.equal((await response.json()).error.reason, "CLIENT_CHALLENGE_MISSING");
 });
 
 test("worker restricts unknown origins", async () => {

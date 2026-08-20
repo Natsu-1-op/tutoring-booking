@@ -42,11 +42,13 @@
    ```
    Worker 部署和服务账号配置见 `workers/README.md`。Firebase 项目保持 Spark 免费方案，不部署 `functions/`。静态页面必须部署到 HTTPS 服务（如 GitHub Pages、Firebase Hosting、Vercel、Netlify）。
 
+   学生端默认优先使用 Firebase App Check；当大陆网络无法获取 reCAPTCHA 令牌时，会自动改用 Worker 的一次性兼容挑战。该挑战绑定来源 IP、两分钟过期且只能使用一次，同时仍需要预约口令、学生白名单并受服务端限流保护。部署 Worker 时保持 `workers/wrangler.toml` 中的 `CLIENT_CHALLENGE_ENABLED = "true"`，否则大陆兼容路径不会启用。
+
 ## 上线前安全说明
 
 教师端现在使用 Google 登录和教师 UID 白名单，Database Rules 会在服务器端再次验证 Google 身份、邮箱验证状态和白名单。页面上的登录遮罩不是安全边界，真正权限由 Rules 决定；不要把 `teacherAllowlist` 或教师 UID 白名单的写权限开放给浏览器。
 
-学生预约端保持“姓名、班级口令、选择时段”的方式不变。预约提交、历史查询、取消以及考试交卷均通过强制 App Check 的 Cloudflare Worker 完成；Worker 通过服务账号 OAuth2 访问 RTDB，匿名浏览器不能直接写入受保护数据。历史查询成功后使用 15 分钟内存会话取消预约，会话不会写入本地存储。
+学生预约端保持“姓名、班级口令、选择时段”的方式不变。预约提交、历史查询、取消以及考试交卷均通过 Cloudflare Worker 完成；可用时使用 App Check，不可用时使用一次性兼容挑战，Worker 始终通过服务账号 OAuth2 访问 RTDB，匿名浏览器不能直接写入受保护数据。历史查询成功后使用 15 分钟内存会话取消预约，会话不会写入本地存储。
 
 模拟考试进入时需要额外输入同一个班级预约口令。教师每次生成试卷时会先在 `examDefinitions` 登记随机试卷 ID 和票据哈希，学生文件只携带随机票据；后端会以云端登记的名称和时间为准。交卷锁只允许 Worker 使用服务账号更新，网页不能直接创建或覆盖。旧版学生试卷没有云端登记，升级后需要教师重新导出一次；旧母卷和旧答案仍可配对批改。
 

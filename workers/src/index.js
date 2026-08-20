@@ -1,5 +1,5 @@
 import {verifyAppCheck} from "./app-check.js";
-import {dbDelete, dbGet, dbPatch, dbTransaction} from "./firebase.js";
+import {dbDelete, dbGet, dbPatch, dbPut, dbTransaction} from "./firebase.js";
 import {
   ApiError,
   hashKey,
@@ -61,6 +61,49 @@ async function enforceRateLimit(env, request, bucket, {limit = 10, windowMs = 10
     return {count: Number(previous.count || 0) + 1, windowStartedAt: Number(previous.windowStartedAt), lastSeenAt: now};
   });
   if (!result.committed) throw new ApiError(429, "操作过于频繁，请稍后重试。", "RATE_LIMITED");
+}
+
+// 大陆网络可能无法获取 Google reCAPTCHA。该兼容验证不是 App Check 的等价替代，
+// 只作为网络兜底，并继续叠加预约口令、学生白名单、一次性挑战和服务端限流。
+const CLIENT_CHALLENGE_DIFFICULTY = 3;
+const CLIENT_CHALLENGE_TTL_MS = 2 * 60 * 1000;
+
+async function createClientChallenge(env, request) {
+  if (String(env.CLIENT_CHALLENGE_ENABLED || "false") !== "true") {
+    throw new ApiError(503, "当前安全校验暂不可用，请稍后重试。", "CLIENT_CHALLENGE_DISABLED");
+  }
+  await enforceRateLimit(env, request, "clientChallenge", {limit: 12});
+  const id = randomToken(18);
+  const salt = randomToken(18);
+  const expiresAt = Date.now() + CLIENT_CHALLENGE_TTL_MS;
+  await dbPut(env, `privateRuntime/clientChallenges/${id}`, {
+    salt,
+    expiresAt,
+    ipHash: await hashKey(requestIp(request)),
+    createdAt: Date.now(),
+  });
+  return {id, salt, difficulty: CLIENT_CHALLENGE_DIFFICULTY, expiresAt};
+}
+
+async function verifyClientChallenge(env, request) {
+  if (String(env.CLIENT_CHALLENGE_ENABLED || "false") !== "true") throw new Error("APP_CHECK_MISSING");
+  const id = request.headers.get("X-Student-Challenge-Id");
+  const nonce = request.headers.get("X-Student-Challenge-Nonce");
+  if (!id || !/^[A-Za-z0-9_-]{10,100}$/.test(id) || !nonce || !/^\d{1,7}$/.test(nonce)) throw new Error("CLIENT_CHALLENGE_MISSING");
+  await enforceRateLimit(env, request, "clientChallengeVerify", {limit: 30});
+  const path = `privateRuntime/clientChallenges/${id}`;
+  const snapshot = await dbGet(env, path);
+  const challenge = snapshot.value;
+  if (!challenge || Number(challenge.expiresAt || 0) <= Date.now() || challenge.usedAt) throw new Error("CLIENT_CHALLENGE_INVALID");
+  if (challenge.ipHash !== await hashKey(requestIp(request))) throw new Error("CLIENT_CHALLENGE_INVALID");
+  const digest = await hashKey(`${id}.${challenge.salt}.${nonce}`);
+  if (!digest.startsWith("0".repeat(CLIENT_CHALLENGE_DIFFICULTY))) throw new Error("CLIENT_CHALLENGE_INVALID");
+  const consumed = await dbTransaction(env, path, (current) => {
+    if (!current || current.usedAt || Number(current.expiresAt || 0) <= Date.now()) return;
+    return {...current, usedAt: Date.now()};
+  });
+  if (!consumed.committed) throw new Error("CLIENT_CHALLENGE_REPLAYED");
+  await dbDelete(env, path).catch(() => null);
 }
 
 async function cleanupExpiredSessions(env, path) {
@@ -308,8 +351,8 @@ function jsonResponse(body, status, request, env) {
   const headers = {"content-type": "application/json; charset=utf-8", "cache-control": "no-store"};
   if (origin) {
     headers["access-control-allow-origin"] = origin;
-    headers["access-control-allow-headers"] = "content-type, x-firebase-appcheck";
-    headers["access-control-allow-methods"] = "POST, OPTIONS";
+    headers["access-control-allow-headers"] = "content-type, x-firebase-appcheck, x-student-challenge-id, x-student-challenge-nonce";
+    headers["access-control-allow-methods"] = "GET, POST, OPTIONS";
     headers["vary"] = "Origin";
   }
   return new Response(JSON.stringify(body), {status, headers});
@@ -321,11 +364,21 @@ export default {
     if (!origin) return jsonResponse({error: {message: "请求来源不被允许。", reason: "ORIGIN_NOT_ALLOWED"}}, 403, request, env);
     const pathname = new URL(request.url).pathname;
     if (request.method === "GET" && pathname.endsWith("/health")) return jsonResponse({ok: true, service: "tutoring-booking-api"}, 200, request, env);
-    if (request.method === "OPTIONS") return new Response(null, {status: 204, headers: {"access-control-allow-origin": origin, "access-control-allow-headers": "content-type, x-firebase-appcheck", "access-control-allow-methods": "POST, OPTIONS", "access-control-max-age": "86400", vary: "Origin"}});
+    if (request.method === "GET" && pathname.endsWith("/challenge")) {
+      try {
+        return jsonResponse({data: await createClientChallenge(env, request)}, 200, request, env);
+      } catch (error) {
+        if (error instanceof ApiError) return jsonResponse({error: {message: error.message, reason: error.reason, details: error.details}}, error.status, request, env);
+        console.error(error);
+        return jsonResponse({error: {message: "安全校验服务暂时不可用，请稍后重试。", reason: "CLIENT_CHALLENGE_FAILED"}}, 503, request, env);
+      }
+    }
+    if (request.method === "OPTIONS") return new Response(null, {status: 204, headers: {"access-control-allow-origin": origin, "access-control-allow-headers": "content-type, x-firebase-appcheck, x-student-challenge-id, x-student-challenge-nonce", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-max-age": "86400", vary: "Origin"}});
     if (request.method !== "POST") return jsonResponse({error: {message: "只支持 POST 请求。", reason: "METHOD_NOT_ALLOWED"}}, 405, request, env);
     try {
-      await verifyAppCheck(request, env);
       const data = await request.json();
+      if (request.headers.get("X-Firebase-AppCheck")) await verifyAppCheck(request, env);
+      else await verifyClientChallenge(env, request);
       const name = pathname.split("/").filter(Boolean).pop();
       let result;
       if (name === "createBooking") result = await createBooking(env, request, data || {});
@@ -337,7 +390,7 @@ export default {
       return jsonResponse({data: result}, 200, request, env);
     } catch (error) {
       if (error instanceof ApiError) return jsonResponse({error: {message: error.message, reason: error.reason, details: error.details}}, error.status, request, env);
-      if (String(error && error.message).startsWith("APP_CHECK_")) return jsonResponse({error: {message: "安全校验失败，请刷新页面后重试。", reason: error.message}}, 403, request, env);
+      if (/^(APP_CHECK|CLIENT_CHALLENGE)_/.test(String(error && error.message))) return jsonResponse({error: {message: "安全校验失败，请刷新页面后重试。", reason: error.message}}, 403, request, env);
       console.error(error);
       return jsonResponse({error: {message: "服务暂时不可用，请稍后重试。", reason: "INTERNAL"}}, 500, request, env);
     }
