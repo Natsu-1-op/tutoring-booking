@@ -16,8 +16,8 @@ window.__FIREBASE_CONFIG__ = firebaseConfig;
 // 学生写操作全部通过强制 App Check 的 Cloud Functions；缺少密钥时会明确阻止提交，不会退回匿名直写数据库。
 window.__STUDENT_API_CONFIG__ = {
     region: "asia-southeast1",
-    provider: "recaptcha-enterprise",
-    appCheckSiteKey: ""
+    provider: "recaptcha-v3",
+    appCheckSiteKey: "6LdpbY8tAAAAALSPaYpNJJ0NAouRj6tlD2ixCDGd"
 };
 
 // money.html 只需要读取配置并由教师认证模块初始化 Firebase，避免和它自己的 db 变量冲突。

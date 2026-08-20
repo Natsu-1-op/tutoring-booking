@@ -24,7 +24,7 @@
 1. 为这套系统创建一个独立的 Firebase 项目和 Realtime Database
 2. 在 Authentication 中启用 Google 登录，并把实际部署域名加入授权域名
 3. 将 `config/firebase-env.example.js` 复制为 `config/firebase-env.js`，再填入 Firebase Web 配置（Web API Key 本身不是服务端密钥，真正的数据权限由 Database Rules 和 Functions 决定）
-4. 在 Firebase App Check 中为 Web 应用启用 reCAPTCHA Enterprise，把站点密钥填入 `window.__STUDENT_API_CONFIG__.appCheckSiteKey`
+4. 在 Firebase App Check 中为 Web 应用启用 reCAPTCHA v3，把 reCAPTCHA 网站密钥填入 `window.__STUDENT_API_CONFIG__.appCheckSiteKey`；reCAPTCHA 私密密钥只填入 Firebase 控制台，不要写入仓库
 5. 将 `.firebaserc.example` 复制为 `.firebaserc`，把项目 ID 改为自己的 Firebase 项目；进入 `functions/` 执行 `npm install`
 6. 老师第一次使用 Google 登录后，从 Firebase Authentication 用户列表复制 UID，在数据库写入教师白名单：
    ```text
