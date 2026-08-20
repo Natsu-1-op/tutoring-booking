@@ -86,6 +86,42 @@
         return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
     }
 
+    // ---- 本机预约记录（后端不可达时的历史/取消兜底）----
+    const LOCAL_RESERVATIONS_KEY = 'tutoring_local_reservations_v1';
+
+    function readLocalReservations() {
+        try { return JSON.parse(localStorage.getItem(LOCAL_RESERVATIONS_KEY) || '[]'); } catch (e) { return []; }
+    }
+
+    function writeLocalReservations(list) {
+        try { localStorage.setItem(LOCAL_RESERVATIONS_KEY, JSON.stringify(list.slice(-50))); } catch (e) {}
+    }
+
+    function rememberLocalReservation(record) {
+        if (!record || !record.reservationId) return;
+        const list = readLocalReservations();
+        const index = list.findIndex(item => item.reservationId === record.reservationId);
+        if (index >= 0) list[index] = { ...list[index], ...record };
+        else list.push(record);
+        writeLocalReservations(list);
+    }
+
+    function updateLocalReservationStatus(reservationId, status) {
+        const list = readLocalReservations();
+        const item = list.find(r => r.reservationId === reservationId);
+        if (item) { item.status = status; writeLocalReservations(list); }
+    }
+
+    function calcHoursLocal(timeStr) {
+        try {
+            if (global.TimeParser && typeof global.TimeParser.calcHours === 'function') return global.TimeParser.calcHours(timeStr);
+        } catch (e) {}
+        const match = String(timeStr || '').match(/(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})/);
+        if (!match) return 0;
+        const diff = (Number(match[3]) * 60 + Number(match[4])) - (Number(match[1]) * 60 + Number(match[2]));
+        return diff > 0 ? diff / 60 : 0;
+    }
+
     async function getClientChallenge() {
         const response = await fetchWithTimeout(`${apiBaseUrl}/challenge`, { method: 'GET', cache: 'no-store' }, 2500);
         let body = null;
@@ -272,25 +308,133 @@
             time: parsedSlot.formattedSlotText,
             cancelCode,
             slotSnapshot: slotSnapshotData,
+            reservationId,
             emergencyMode: true
         };
     }
 
     async function createBooking(payload) {
+        let result;
         try {
-            return await call('createBooking', payload);
+            result = await call('createBooking', payload);
         } catch (error) {
             if (!settings.emergencyDirectBookingFallback || !isBackendUnavailable(error)) throw error;
-            console.warn('安全后端当前不可达，切换到受限应急预约通道。', error);
-            return createBookingEmergency(payload);
+            console.warn('后端当前不可达，切换到直连预约通道。', error);
+            result = await createBookingEmergency(payload);
         }
+        // 记录到本机（后端不可达时历史/取消兜底用）
+        rememberLocalReservation({
+            year: String(payload && payload.year || ''),
+            reservationId: String(result && result.reservationId || ''),
+            slotId: String(payload && payload.slotId || ''),
+            nickname: String(result && result.nickname || ''),
+            time: String(result && result.time || ''),
+            cancelCode: String(result && result.cancelCode || ''),
+            bookedAt: Date.now(),
+            status: 'booked'
+        });
+        return result;
+    }
+
+    async function getBookingHistory(payload) {
+        try {
+            const response = await call('getBookingHistory', payload);
+            // 成功后同步本机记录状态（教师端完成/取消等变更）
+            (response.reservations || []).forEach(r => updateLocalReservationStatus(r.id, r.status));
+            return response;
+        } catch (error) {
+            if (!isBackendUnavailable(error)) throw error;
+            // 后端不可达：用本机记录兜底（只显示本人预约过的记录，凭证码验证后可见）
+            const code = String(payload && payload.cancelCode || '').trim().toUpperCase();
+            const name = String(payload && payload.nickname || '').trim();
+            const localList = readLocalReservations()
+                .filter(r => r.year === String(payload && payload.year || '') && r.nickname === name);
+            if (!localList.some(r => r.cancelCode === code)) {
+                throw apiError('姓名或凭证码错误。', 'HISTORY_AUTH_FAILED');
+            }
+            const reservations = localList.map(r => ({
+                id: r.reservationId,
+                nickname: r.nickname,
+                time: r.time,
+                status: r.status || 'booked',
+                cancelCode: r.cancelCode,
+                timestamp: Number(r.bookedAt || 0)
+            })).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            const usedHours = reservations.filter(r => r.status !== 'canceled').reduce((sum, r) => sum + calcHoursLocal(r.time), 0);
+            window.__localHistoryMode = true;
+            return { reservations, sessionToken: '', expiresAt: 0, summary: { completedHours: 0, usedHours, totalHours: null, remainingHours: null } };
+        }
+    }
+
+    // 凭证码直连取消：规则校验凭证后放行（大陆后端不可达时的兜底）
+    async function cancelBookingEmergency(payload) {
+        const year = String(payload.year || '');
+        const reservationId = String(payload.reservationId || '');
+        const nickname = String(payload.nickname || '').trim();
+        const cancelCode = String(payload.cancelCode || '').trim().toUpperCase();
+        const slotId = String(payload.slotId || '');
+        if (!/^\d{4}$/.test(year) || !/^[A-Za-z0-9_-]{1,100}$/.test(reservationId) || !nickname ||
+            !/^[A-Z0-9]{5}$/.test(cancelCode) || !/^[A-Za-z0-9_-]{1,100}$/.test(slotId)) {
+            throw apiError('取消凭证格式不完整，请刷新后重试。', 'INVALID_ARGUMENT');
+        }
+        const database = firebase.database();
+        const timestamp = Date.now();
+        try {
+            await database.ref(`emergencyCancelRequests/${year}/${reservationId}`).set({
+                reservationId, year, nickname, cancelCode, slotId, timestamp
+            });
+        } catch (error) {
+            throw apiError('取消凭证校验未通过，请核对凭证码后重试。', 'EMERGENCY_CANCEL_AUTH_FAILED');
+        }
+        // 标记取消（规则校验凭证后放行）
+        const statusResult = await database.ref(`years/${year}/reservations/${reservationId}/status`).transaction(current => {
+            if (!current || current === 'canceled') return;
+            return 'canceled';
+        }, undefined, false);
+        if (!statusResult.committed) throw apiError('该预约已无法取消，请刷新后重试。', 'RESERVATION_NOT_CANCELABLE');
+        // 释放排班（规则校验取消请求 + 预约已取消后放行）
+        let slotReleased = false;
+        try {
+            const releaseResult = await database.ref(`years/${year}/slots/${slotId}/reserved`).transaction(current => {
+                if (current !== true) return;
+                return false;
+            }, undefined, false);
+            slotReleased = releaseResult.committed;
+        } catch (error) {
+            slotReleased = false;
+        }
+        // 清理占位与本机记录
+        await database.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => null);
+        await database.ref(`emergencyCancelRequests/${year}/${reservationId}`).remove().catch(() => null);
+        updateLocalReservationStatus(reservationId, 'canceled');
+        return { canceled: true, slotReleased };
+    }
+
+    async function cancelBooking(payload) {
+        const reservationId = String(payload && payload.reservationId || '');
+        const year = String(payload && payload.year || '');
+        if (payload && payload.sessionToken) {
+            try {
+                const result = await call('cancelBooking', payload);
+                updateLocalReservationStatus(reservationId, 'canceled');
+                return result;
+            } catch (error) {
+                if (!isBackendUnavailable(error)) throw error;
+            }
+        }
+        // 后端不可达或无查询会话：凭证码直连取消（本机记录提供 resId/slotId/凭证）
+        const local = readLocalReservations().find(r => r.reservationId === reservationId && r.year === year);
+        if (!local) throw apiError('本机没有这条预约记录，无法直连取消。请稍后重试或联系老师。', 'LOCAL_RECORD_MISSING');
+        return cancelBookingEmergency({
+            year, reservationId, nickname: local.nickname, cancelCode: local.cancelCode, slotId: local.slotId
+        });
     }
 
     global.StudentApi = Object.freeze({
         init,
         createBooking,
-        getBookingHistory: payload => call('getBookingHistory', payload),
-        cancelBooking: payload => call('cancelBooking', payload),
+        getBookingHistory,
+        cancelBooking,
         startExam: payload => call('startExam', payload),
         submitExam: payload => call('submitExam', payload)
     });

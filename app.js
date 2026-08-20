@@ -485,7 +485,7 @@ async function requestCancelBooking(resKey) {
     if (!confirm('确定要取消这条预约吗？取消后该时段将重新开放给其他同学。')) return;
     const year = SystemRouter.activeYear;
     try {
-        if (!currentHistorySessionToken) return alert('查询凭证已失效，请重新验证历史记录。');
+        if (!currentHistorySessionToken && !window.__localHistoryMode) return alert('查询凭证已失效，请重新验证历史记录。');
         const result = await StudentApi.cancelBooking({ year, reservationId: resKey, sessionToken: currentHistorySessionToken });
         if (result.slotReleased === false) {
             alert('预约已取消，但原排班没有可验证的所有权标记，时段暂未自动释放，请联系老师处理。');

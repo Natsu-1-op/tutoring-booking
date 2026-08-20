@@ -205,7 +205,7 @@ async function createBooking(env, request, data) {
     console.error("Failed to persist reservation", error);
     throw new ApiError(500, "预约保存失败，请稍后重试。", "BOOKING_SAVE_FAILED");
   }
-  return {nickname, time: parsedSlot.formattedSlotText, cancelCode, slotSnapshot: reservation.slotSnapshot};
+  return {nickname, time: parsedSlot.formattedSlotText, cancelCode, slotSnapshot: reservation.slotSnapshot, reservationId};
 }
 
 async function getBookingHistory(env, request, data) {
