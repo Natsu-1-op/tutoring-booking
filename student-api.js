@@ -5,6 +5,8 @@
     let initialized = false;
     let apiBaseUrl = '';
     let appCheckEnabled = false;
+    // 后端不可达时缓存标记：后续请求直接走直连通道，不再重复等待超时（学生无感知）
+    let backendUnreachable = false;
 
     function withTimeout(promise, timeoutMs) {
         return new Promise((resolve, reject) => {
@@ -12,7 +14,7 @@
             const timer = setTimeout(() => {
                 if (settled) return;
                 settled = true;
-                reject(new Error('安全校验服务连接超时'));
+                reject(new Error('网络繁忙，请稍后重试'));
             }, timeoutMs);
             promise.then(value => {
                 if (settled) return;
@@ -85,11 +87,11 @@
     }
 
     async function getClientChallenge() {
-        const response = await fetchWithTimeout(`${apiBaseUrl}/challenge`, { method: 'GET', cache: 'no-store' }, 5000);
+        const response = await fetchWithTimeout(`${apiBaseUrl}/challenge`, { method: 'GET', cache: 'no-store' }, 2500);
         let body = null;
         try { body = await response.json(); } catch (error) {}
         if (!response.ok || !body || !body.data || !body.data.id || !body.data.salt) {
-            throw new Error('兼容安全校验服务暂时不可用，请刷新页面重试。');
+            throw new Error('网络繁忙，请稍后重试。');
         }
         const challenge = body.data;
         const difficulty = Math.max(1, Math.min(5, Number(challenge.difficulty) || 3));
@@ -101,29 +103,32 @@
                 return { id: String(challenge.id), nonce: String(nonce) };
             }
         }
-        throw new Error('兼容安全校验未完成，请刷新页面重试。');
+        throw new Error('网络繁忙，请稍后重试。');
     }
 
     async function call(name, payload) {
         init();
         try {
             let appCheckToken = null;
-            if (appCheckEnabled) {
+            let challenge = null;
+            if (appCheckEnabled && !backendUnreachable) {
                 try {
                     // reCAPTCHA 在大陆可能一直等待网络响应，必须超时后进入兼容路径。
-                    appCheckToken = await withTimeout(firebase.appCheck().getToken(false), 3500);
+                    appCheckToken = await withTimeout(firebase.appCheck().getToken(false), 1500);
                     if (!appCheckToken || !appCheckToken.token) appCheckToken = null;
                 } catch (error) {
                     console.warn('App Check 获取失败，将使用兼容验证：', error);
                 }
             }
             if (!appCheckToken && settings.allowClientChallengeFallback === false) {
-                throw new Error('安全校验令牌获取失败，请刷新页面后重试。');
+                throw new Error('网络繁忙，请稍后重试。');
             }
-            const challenge = appCheckToken ? null : await getClientChallenge();
+            if (!appCheckToken && !backendUnreachable) {
+                challenge = await getClientChallenge();
+            }
             const headers = { 'content-type': 'application/json' };
             if (appCheckToken) headers['X-Firebase-AppCheck'] = appCheckToken.token;
-            else {
+            else if (challenge) {
                 headers['X-Student-Challenge-Id'] = challenge.id;
                 headers['X-Student-Challenge-Nonce'] = challenge.nonce;
             }
@@ -131,24 +136,27 @@
                 method: 'POST',
                 headers,
                 body: JSON.stringify(payload || {})
-            }, 7000);
+            }, 6000);
             let body = null;
             try { body = await response.json(); } catch (parseError) {}
             if (!response.ok || !body || body.error) {
                 const serverError = body && body.error || {};
-                const normalized = new Error(serverError.message || '服务暂时不可用，请稍后重试。');
+                const normalized = new Error(serverError.message || '网络繁忙，请稍后重试。');
                 normalized.code = `http-${response.status}`;
                 normalized.details = serverError.details || {};
                 normalized.reason = serverError.reason || '';
                 throw normalized;
             }
+            // 后端恢复可达后清除缓存标记，回到主通道
+            backendUnreachable = false;
             return body.data;
         } catch (error) {
             if (error && error.reason) throw error;
-            const normalized = new Error(error && error.message ? String(error.message).replace(/^Firebase:\s*/i, '') : '服务暂时不可用，请稍后重试。');
+            const normalized = new Error(error && error.message ? String(error.message).replace(/^Firebase:\s*/i, '') : '网络繁忙，请稍后重试。');
             normalized.code = error && error.code || '';
             normalized.details = error && error.details || {};
             normalized.reason = normalized.details && normalized.details.reason || '';
+            if (isBackendUnavailable(normalized)) backendUnreachable = true;
             throw normalized;
         }
     }
@@ -224,7 +232,7 @@
         try {
             await database.ref(`emergencyBookingRequests/${year}/${reservationId}`).set(requestData);
         } catch (error) {
-            throw apiError('姓名不在准入名单、预约口令错误，或应急通道尚未启用。', 'EMERGENCY_AUTH_FAILED');
+            throw apiError('预约信息校验未通过，请核对姓名与口令后重试。', 'EMERGENCY_AUTH_FAILED');
         }
 
         const claimRef = database.ref(`emergencySlotClaims/${year}/${slotId}`);
@@ -250,13 +258,13 @@
                 return { ...current, reserved: true, reservationId };
             }, undefined, false);
             if (!slotResult.committed) {
-                throw apiError('预约记录已保存，但排班状态同步失败，请立即联系老师核对。', 'EMERGENCY_SLOT_SYNC_FAILED');
+                throw apiError('预约提交异常，请稍后刷新查看，或联系老师确认。', 'EMERGENCY_SLOT_SYNC_FAILED');
             }
             // 预约成功：清理自己的应急占位（规则允许预约已存在时删除；失败也无妨，取消/教师流程会兜底清理）
             await database.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => null);
         } catch (error) {
             if (error && error.reason) throw error;
-            throw apiError('应急预约保存失败，请不要重复提交，并联系老师核对。', 'EMERGENCY_SAVE_FAILED');
+            throw apiError('预约保存未完成，请不要重复提交，稍后刷新查看或联系老师。', 'EMERGENCY_SAVE_FAILED');
         }
 
         return {
