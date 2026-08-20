@@ -90,6 +90,11 @@
         return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
     }
 
+    // 全角→半角归一化（大陆中文输入法全角字符会被格式校验误拒）
+    function normalizeHalfWidth(value) {
+        return String(value || '').replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/\u3000/g, ' ');
+    }
+
     // ---- 本机预约记录（后端不可达时的历史/取消兜底）----
     const LOCAL_RESERVATIONS_KEY = 'tutoring_local_reservations_v1';
 
@@ -377,7 +382,7 @@
         } catch (error) {
             if (!isBackendUnavailable(error)) throw error;
             // 后端不可达：用本机记录兜底（只显示本人预约过的记录，凭证码验证后可见）
-            const code = String(payload && payload.cancelCode || '').trim().toUpperCase();
+            const code = normalizeHalfWidth(String(payload && payload.cancelCode || '')).trim().toUpperCase();
             const name = String(payload && payload.nickname || '').trim();
             const localList = readLocalReservations()
                 .filter(r => r.year === String(payload && payload.year || '') && r.nickname === name);
@@ -403,7 +408,7 @@
         const year = String(payload.year || '');
         const reservationId = String(payload.reservationId || '');
         const nickname = String(payload.nickname || '').trim();
-        const cancelCode = String(payload.cancelCode || '').trim().toUpperCase();
+        const cancelCode = normalizeHalfWidth(String(payload.cancelCode || '')).trim().toUpperCase();
         const slotId = String(payload.slotId || '');
         if (!/^\d{4}$/.test(year) || !/^[A-Za-z0-9_-]{1,100}$/.test(reservationId) || !nickname ||
             !/^[A-Z0-9]{5}$/.test(cancelCode) || !/^[A-Za-z0-9_-]{1,100}$/.test(slotId)) {

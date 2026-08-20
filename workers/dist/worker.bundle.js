@@ -1,4 +1,4 @@
-// tutoring-booking/workers/src/app-check.js
+// src/app-check.js
 var jwksCache = null;
 function decodeBase64Url(value) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
@@ -50,7 +50,7 @@ async function verifyAppCheck(request, env) {
   return payload.sub;
 }
 
-// tutoring-booking/workers/src/firebase.js
+// src/firebase.js
 var accessTokenCache = null;
 var signingKeyPromise = null;
 function base64UrlEncode(value) {
@@ -165,10 +165,13 @@ async function dbTransaction(env, path, updater, attempts = 5) {
   return { committed: false, value: null };
 }
 
-// tutoring-booking/workers/src/security.js
+// src/security.js
 var STUDENT_NAME_PATTERN = /^[^.#$\/\[\]<>,\u0000-\u001F\u007F]{1,50}$/;
 var ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 var CANCEL_CODE_PATTERN = /^[A-Z2-9]{5}$/;
+function normalizeHalfWidth(value) {
+  return String(value || "").replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 65248)).replace(/\u3000/g, " ");
+}
 var ApiError = class extends Error {
   constructor(status, message, reason = "", details = {}) {
     super(message);
@@ -199,7 +202,7 @@ function requireId(value, field = "\u6807\u8BC6") {
   return id;
 }
 function requireCancelCode(value) {
-  const code = requireString(value, "\u53D6\u6D88\u51ED\u8BC1", 5).toUpperCase();
+  const code = normalizeHalfWidth(requireString(value, "\u53D6\u6D88\u51ED\u8BC1", 5)).toUpperCase();
   if (!CANCEL_CODE_PATTERN.test(code)) throw new ApiError(400, "\u53D6\u6D88\u51ED\u8BC1\u683C\u5F0F\u4E0D\u5408\u6CD5\u3002", "INVALID_ARGUMENT");
   return code;
 }
@@ -243,7 +246,7 @@ function requestIp(request) {
   return String(request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown").split(",")[0].trim().slice(0, 128);
 }
 
-// tutoring-booking/workers/src/time.js
+// src/time.js
 function isValidCalendarDate(month, day, year) {
   if (month < 1 || month > 12 || day < 1 || day > 31) return false;
   if (month === 2) {
@@ -290,7 +293,7 @@ function parseChinaDateTime(value) {
   return new Date(normalized).getTime();
 }
 
-// tutoring-booking/workers/src/index.js
+// src/index.js
 function values(object) {
   return object && typeof object === "object" ? Object.values(object) : [];
 }

@@ -6,6 +6,12 @@ let currentHistorySessionToken = '';
 
 const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
 
+// 全角→半角归一化：大陆中文输入法常打出全角字母数字（ＡＢＣ／１２３），
+// toUpperCase/正则都只认半角，不转换会误报"格式不合法"。
+function normalizeHalfWidth(value) {
+    return String(value || '').replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/\u3000/g, ' ');
+}
+
 function isValidStudentName(name) {
     return typeof name === 'string' && name.length > 0 && name.length <= 50 && !INVALID_FIREBASE_KEY_CHARS.test(name) && !name.includes(',');
 }
@@ -287,7 +293,7 @@ async function submitBooking() {
     if (isSubmitting) return;
 
     const nickname = document.getElementById('nickname').value.trim();
-    const accessCode = document.getElementById('access-code').value.trim();
+    const accessCode = normalizeHalfWidth(document.getElementById('access-code').value).trim();
     const selectedSlot = document.querySelector('input[name="slot"]:checked');
 
     if (!nickname) return showMessage('请输入姓名！', false);
@@ -352,7 +358,7 @@ function switchView(view) {
 
 async function loadMyHistory() {
     const searchName = document.getElementById('history-search-name').value.trim();
-    const searchCode = document.getElementById('history-search-code').value.trim().toUpperCase();
+    const searchCode = normalizeHalfWidth(document.getElementById('history-search-code').value).trim().toUpperCase();
     const container = document.getElementById('history-container');
     
     if (!searchName) return alert('请输入真实姓名！');

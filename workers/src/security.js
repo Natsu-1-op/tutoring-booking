@@ -2,6 +2,11 @@ const STUDENT_NAME_PATTERN = /^[^.#$\/\[\]<>,\u0000-\u001F\u007F]{1,50}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
 const CANCEL_CODE_PATTERN = /^[A-Z2-9]{5}$/;
 
+// 全角→半角归一化（大陆学生中文输入法常打出全角字母数字）
+function normalizeHalfWidth(value) {
+  return String(value || "").replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).replace(/\u3000/g, " ");
+}
+
 export class ApiError extends Error {
   constructor(status, message, reason = "", details = {}) {
     super(message);
@@ -37,7 +42,7 @@ export function requireId(value, field = "标识") {
 }
 
 export function requireCancelCode(value) {
-  const code = requireString(value, "取消凭证", 5).toUpperCase();
+  const code = normalizeHalfWidth(requireString(value, "取消凭证", 5)).toUpperCase();
   if (!CANCEL_CODE_PATTERN.test(code)) throw new ApiError(400, "取消凭证格式不合法。", "INVALID_ARGUMENT");
   return code;
 }
