@@ -309,7 +309,10 @@
         }
 
         const claimRef = database.ref(`emergencySlotClaims/${year}/${slotId}`);
-        const claimResult = await claimRef.transaction(current => current == null ? reservationId : undefined, undefined, false);
+        // 无条件尝试占位，成败由数据库规则权威裁决：
+        // - 无占位/残留占位（对应预约已删除或已取消）→ 规则允许写入
+        // - 有效占位（其他同学正在完成预约）→ 规则拒绝 → 提示已被约
+        const claimResult = await claimRef.transaction(() => reservationId, undefined, false);
         if (!claimResult.committed || claimResult.snapshot.val() !== reservationId) {
             throw apiError('该时间段刚刚被其他同学预约，请刷新后重试。', 'SLOT_UNAVAILABLE');
         }
