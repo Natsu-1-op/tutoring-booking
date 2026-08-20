@@ -35,7 +35,7 @@
    }
    ```
    只有 `canManageSystem: true` 的老师可以进入排班管理后台和课时费页面；其他老师配置 `enabled: true` 后可以进入出卷评卷页面。这个节点不能通过前端写入，只能由 Firebase Console 或受保护的管理脚本维护。
-8. 按“Worker → Database Rules → 静态页面”的顺序发布：
+8. 按“Worker → 静态页面 → Database Rules”的顺序发布，先让新页面使用 Worker，再收紧数据库规则，避免旧页面短暂失效：
    ```bash
    firebase deploy --only database --project class-optic
    # 在你的静态托管平台发布页面

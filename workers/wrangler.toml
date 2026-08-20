@@ -1,6 +1,8 @@
 name = "tutoring-booking-api"
 main = "src/index.js"
 compatibility_date = "2026-08-20"
+workers_dev = true
+preview_urls = false
 
 [vars]
 FIREBASE_PROJECT_ID = "class-optic"

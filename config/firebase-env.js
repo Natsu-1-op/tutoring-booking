@@ -13,9 +13,9 @@ const firebaseConfig = {
 window.__FIREBASE_CONFIG__ = firebaseConfig;
 
 // Firebase Console -> App Check -> Web 应用中创建 reCAPTCHA Enterprise/v3 密钥后填入。
-// 学生写操作全部通过强制 App Check 的 Cloud Functions；缺少密钥时会明确阻止提交，不会退回匿名直写数据库。
+// 学生敏感操作全部通过强制 App Check 的 Cloudflare Worker；缺少地址或密钥时会明确阻止提交，不会退回匿名直写数据库。
 window.__STUDENT_API_CONFIG__ = {
-    apiBaseUrl: "",
+    apiBaseUrl: "https://tutoring-booking-api.xiasong062.workers.dev",
     provider: "recaptcha-v3",
     appCheckSiteKey: "6LdpbY8tAAAAALSPaYpNJJ0NAouRj6tlD2ixCDGd"
 };
