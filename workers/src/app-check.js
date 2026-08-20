@@ -10,8 +10,8 @@ function parsePart(value) {
   return JSON.parse(new TextDecoder().decode(decodeBase64Url(value)));
 }
 
-async function getKeys() {
-  if (jwksCache && jwksCache.expiresAt > Date.now()) return jwksCache.keys;
+async function getKeys(forceRefresh = false) {
+  if (!forceRefresh && jwksCache && jwksCache.expiresAt > Date.now()) return jwksCache.keys;
   const response = await fetch("https://firebaseappcheck.googleapis.com/v1/jwks");
   if (!response.ok) throw new Error(`App Check public key request failed: ${response.status}`);
   const body = await response.json();
@@ -35,15 +35,18 @@ export async function verifyAppCheck(request, env) {
   const expectedIssuer = `https://firebaseappcheck.googleapis.com/${projectNumber}`;
   const audience = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   const now = Math.floor(Date.now() / 1000);
-  if (!projectNumber || payload.iss !== expectedIssuer || !audience.includes(`projects/${projectNumber}`) || !payload.sub || Number(payload.exp) <= now || Number(payload.iat) > now + 120) {
+  const expiresAt = Number(payload.exp);
+  const issuedAt = Number(payload.iat);
+  if (!projectNumber || payload.iss !== expectedIssuer || !audience.includes(`projects/${projectNumber}`) || !payload.sub || !Number.isFinite(expiresAt) || !Number.isFinite(issuedAt) || expiresAt <= now || issuedAt > now + 120) {
     throw new Error("APP_CHECK_INVALID");
   }
   if (env.FIREBASE_APP_ID && payload.sub !== env.FIREBASE_APP_ID) throw new Error("APP_CHECK_APP_MISMATCH");
-  const keys = await getKeys();
-  const key = keys.get(header.kid);
+  let keys = await getKeys();
+  let key = keys.get(header.kid);
   if (!key) {
-    jwksCache = null;
-    throw new Error("APP_CHECK_KEY_UNKNOWN");
+    keys = await getKeys(true);
+    key = keys.get(header.kid);
+    if (!key) throw new Error("APP_CHECK_KEY_UNKNOWN");
   }
   const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, decodeBase64Url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
   if (!valid) throw new Error("APP_CHECK_INVALID");

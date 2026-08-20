@@ -67,7 +67,7 @@ function databaseUrl(env, path, query = {}) {
   const base = String(env.FIREBASE_DATABASE_URL || "").replace(/\/$/, "");
   if (!base) throw new Error("Cloudflare Worker 尚未配置 FIREBASE_DATABASE_URL。");
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) params.set(key, typeof value === "string" ? value : JSON.stringify(value));
+  for (const [key, value] of Object.entries(query)) params.set(key, JSON.stringify(value));
   const queryString = params.toString();
   return `${base}/${encodePath(path)}.json${queryString ? `?${queryString}` : ""}`;
 }
