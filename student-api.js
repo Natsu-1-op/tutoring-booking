@@ -252,6 +252,8 @@
             if (!slotResult.committed) {
                 throw apiError('预约记录已保存，但排班状态同步失败，请立即联系老师核对。', 'EMERGENCY_SLOT_SYNC_FAILED');
             }
+            // 预约成功：清理自己的应急占位（规则允许预约已存在时删除；失败也无妨，取消/教师流程会兜底清理）
+            await database.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => null);
         } catch (error) {
             if (error && error.reason) throw error;
             throw apiError('应急预约保存失败，请不要重复提交，并联系老师核对。', 'EMERGENCY_SAVE_FAILED');

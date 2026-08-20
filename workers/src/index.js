@@ -267,6 +267,8 @@ async function cancelBooking(env, request, data) {
         return next;
       });
       slotReleased = release.committed;
+      // 清理应急预约占位，否则学生端 emergencyClaims 会永久显示"已满"
+      await dbDelete(env, `emergencySlotClaims/${year}/${original.slotId}`).catch(() => null);
     } catch (error) {
       slotReleased = false;
       console.error("Failed to release canceled slot", error);

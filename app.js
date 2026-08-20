@@ -185,7 +185,13 @@ function bindActiveYearListeners() {
         Object.keys(currentSlots).forEach(slotId => {
             const slot = currentSlots[slotId];
             if (!slot || slot.status === "hidden" || !slot.time) return;
-            const isReserved = Boolean(slot.reserved || emergencyClaims[slotId]);
+            const isReserved = Boolean(
+                slot.reserved ||
+                // 应急占位只有与当前排班的所有者(reservationId)一致才算"已满"。
+                // 教师删除/取消后 slot.reservationId 会被移除，残留的占位不再影响显示，
+                // 否则会出现"教师端空闲、学生端永久已满"。
+                (emergencyClaims[slotId] && slot.reservationId === emergencyClaims[slotId])
+            );
             const displaySlot = isReserved && !slot.reserved ? { ...slot, reserved: true } : slot;
             if (isReserved) reservedSlots.push({ id: slotId, data: displaySlot });
             else availableSlots.push({ id: slotId, data: displaySlot });

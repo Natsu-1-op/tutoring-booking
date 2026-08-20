@@ -965,6 +965,13 @@
             slot.reserved = false;
             delete slot.reservationId;
             return slot;
+        }).then(result => {
+            // 释放排班的同时清理应急预约占位：否则学生端 emergencyClaims[slotId] 会永久显示"已满"，
+            // 即使教师端已显示空闲，学生端也一直无法看到该时段。
+            if (result.committed) {
+                db.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => {});
+            }
+            return result;
         });
     }
 
