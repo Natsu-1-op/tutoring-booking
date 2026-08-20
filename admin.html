@@ -63,7 +63,7 @@
         .today-dashboard h3 { margin: 4px 0 2px; color: #1e293b; font-size: 21px; }
         .today-dashboard-header p { margin: 0; color: #94a3b8; font-size: 12px; }
         .today-refresh-btn { width: auto; padding: 7px 12px; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 12px; }
-        .today-summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 16px 0; }
+        .today-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
         .today-summary-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; }
         .today-summary-item span { display: block; color: #64748b; font-size: 12px; }
         .today-summary-item strong { display: block; margin-top: 4px; color: #1e293b; font-size: 22px; }
@@ -124,8 +124,10 @@
         <div class="admin-login-card">
             <h1>系统后台认证</h1>
             <p class="admin-login-subtitle">教师管理工作台</p>
-            <p class="admin-login-subtitle">仅限已加入教师名单的 Google 账号</p>
-            <button id="admin-login-submit" type="button">使用 Google 账号登录</button>
+            <div class="form-group">
+                <input type="password" id="admin-password" placeholder="请输入管理员密码">
+            </div>
+            <button id="admin-login-submit">登录</button>
             <p id="login-error" style="color: red; margin-top: 10px; font-weight: bold;"></p>
         </div>
     </div>
@@ -139,8 +141,7 @@
             <div class="admin-toolbar">
                 <a class="tool-btn tool-exam" href="exam_teacher.html" target="_blank">出卷评卷</a>
                 <a class="tool-btn tool-student" href="exam_student.html" target="_blank">模拟考试</a>
-                <a class="tool-btn tool-money" href="money.html" target="_blank" rel="noopener" onclick="return openMoneyFromAdmin(event)">课时费管家</a>
-                <button id="admin-signout" type="button" class="tool-btn" style="border:0; background:#eef2f7; color:#475569; cursor:pointer;" hidden>退出账号</button>
+                <a class="tool-btn tool-money" href="money.html" target="_blank" rel="opener" onclick="return openMoneyFromAdmin(event)">课时费管家</a>
             </div>
         </div>
 
@@ -149,7 +150,7 @@
             <a href="#schedule-card">排班</a>
             <a href="#access-card">学生</a>
             <a href="#reservations-title">预约</a>
-            <a href="money.html" target="_blank" rel="noopener" onclick="return openMoneyFromAdmin(event)">财务</a>
+            <a href="money.html" target="_blank" rel="opener" onclick="return openMoneyFromAdmin(event)">财务</a>
             <a href="exam_teacher.html" target="_blank">考试</a>
         </nav>
 
@@ -166,7 +167,6 @@
                 <div class="today-summary-item"><span>今日课程</span><strong id="today-count">0</strong></div>
                 <div class="today-summary-item"><span>待确认</span><strong id="today-pending-count">0</strong></div>
                 <div class="today-summary-item"><span>待入账</span><strong id="today-fee-count">0</strong></div>
-                <div class="today-summary-item"><span>已入账</span><strong id="today-fee-posted-count">0</strong></div>
                 <div class="today-summary-item"><span>异常</span><strong id="today-warning-count">0</strong></div>
             </div>
             <div class="today-dashboard-columns">
@@ -279,7 +279,7 @@
                     <button id="btn-set-deadline" class="admin-mini-btn">保存截止时间</button>
                 </div>
                 <div class="control-panel">
-                    <input type="password" id="code-input" maxlength="128" autocomplete="new-password" placeholder="输入新的预约口令">
+                    <input type="text" id="code-input" placeholder="输入新的预约口令">
                     <button id="btn-set-code" class="admin-mini-btn">保存口令</button>
                 </div>
             </div>
@@ -311,8 +311,6 @@
                     <button id="btn-show-stats" style="background:#e6a23c;">课时统计</button>
                     <button id="btn-export-all" style="background:#7c3aed;">全量备份</button>
                     <button id="btn-restore-all" style="background:#f59e0b;">还原备份</button>
-                    <button id="btn-repair-slots" style="background:#0ea5e9;">修复排班幽灵占用</button>
-                    <button id="btn-gen-rollback" style="background:#64748b;">生成 6654 回退包</button>
                     <button id="btn-clear-year" class="danger" style="background:#ef4444;">清空本年数据</button>
                 </div>
                 <input type="file" id="restore-file-input" accept=".json" style="display:none;">
@@ -335,12 +333,10 @@
         </div>
     </main>
 
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-database-compat.js"></script>
-    <script src="config/firebase-env.js?v=mainland-20260820-6"></script>
-    <script src="teacher-auth.js?v=teacher-auth-bootstrap-20260820"></script>
-    <script src="utils/time-parser.js?v=mainland-20260820-6"></script>
-    <script src="admin.js?v=mainland-20260820-6"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="config/firebase-env.js"></script>
+    <script src="utils/time-parser.js"></script>
+    <script src="admin.js"></script>
 </body>
 </html>

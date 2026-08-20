@@ -7,13 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-database-compat.js"></script>
-    <script>window.__SKIP_FIREBASE_ENV_INIT__ = true;</script>
-    <script src="config/firebase-env.js"></script>
-    <script>window.__SKIP_FIREBASE_ENV_INIT__ = false;</script>
-    <script src="teacher-auth.js?v=teacher-auth-bootstrap-20260820"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
         .tab-active { color: #2563eb; border-bottom: 2px solid #2563eb; }
@@ -61,13 +56,37 @@
         html:not(.fee-ledger-pending) #feeLedgerGate { display: none !important; }
     </style>
     <script>
-        // 课时费页面始终由 Firebase Auth 确认教师身份；不能用 URL、localStorage 或 opener 绕过。
+        // 课时费页面只接受 admin.html 发放的一次性通行标记；直接打开页面仍需输入管理员密码。
         (function () {
-            window.__moneyPageAccessGranted = false;
+            const handoffKey = 'money_admin_handoff_v1';
+            let granted = false;
+            try {
+                const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+                const token = hash.get('admin-handoff');
+                const handoffs = [];
+                for (const storage of [window.localStorage, window.sessionStorage]) {
+                    try {
+                        const raw = storage.getItem(handoffKey);
+                        if (raw) handoffs.push({ storage, value: JSON.parse(raw) });
+                    } catch (e) {}
+                }
+                const handoff = handoffs.find(item => item.value && item.value.token === token)?.value;
+                if (token && handoff && Number(handoff.expiresAt) > Date.now()) {
+                    granted = true;
+                    handoffs.forEach(item => { try { item.storage.removeItem(handoffKey); } catch (e) {} });
+                } else if (handoffs.some(item => item.value && Number(item.value.expiresAt) <= Date.now())) {
+                    handoffs.forEach(item => { try { item.storage.removeItem(handoffKey); } catch (e) {} });
+                }
+                if (token && window.history && window.history.replaceState) {
+                    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+                }
+            } catch (e) {}
+            window.__moneyPageAccessGranted = granted;
             window.__moneyPageStarted = false;
             window.__feeLedgerReady = false;
             document.documentElement.classList.add('money-auth-pending');
             document.documentElement.classList.add('fee-ledger-pending');
+            if (granted) document.documentElement.classList.remove('money-auth-pending');
         })();
     </script>
 </head>
@@ -76,8 +95,10 @@
     <div id="moneyPageGate" class="fixed inset-0 z-[100] bg-slate-50 flex items-center justify-center p-4">
         <div class="w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-sm p-6">
             <h1 class="text-lg font-semibold text-slate-800 mb-2">课时费管家</h1>
-            <p class="text-sm text-slate-500 mb-4">仅限已加入教师名单的 Google 账号。</p>
-            <button id="moneyPageGateSubmit" type="button" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">使用 Google 账号登录</button>
+            <p class="text-sm text-slate-500 mb-4">请输入管理员密码后进入教师端。</p>
+            <label for="moneyPageGatePassword" class="sr-only">管理员密码</label>
+            <input id="moneyPageGatePassword" type="password" autocomplete="current-password" placeholder="管理员密码" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <button id="moneyPageGateSubmit" type="button" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">进入</button>
             <p id="moneyPageGateError" class="text-sm text-red-600 mt-3 min-h-[1.25rem]" role="alert"></p>
         </div>
     </div>
@@ -104,7 +125,6 @@
                     <span id="saveStatus" class="text-xs text-green-500 font-medium opacity-0 transition-opacity duration-500">已保存</span>
                 </div>
                 <div class="money-top-actions flex space-x-1">
-                    <button id="money-signout" type="button" class="text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition text-xs font-medium" hidden>退出账号</button>
                     <button type="button" onclick="exportData()" class="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition text-xs font-medium flex items-center">
                         存到电脑
                     </button>
@@ -1246,11 +1266,21 @@
 <script>
 // ============ 课时费管家 · 约课云端联动 v1 ============
 // 数据加密存于约课系统数据库 years/<学年>/feeVault，学生端只能看到密文。
-// 页面代码可以公开；数据权限由教师认证和 Database Rules 控制，课时费口令只保存在本机浏览器。
+// 本文件为教师私有（未进入公开仓库），口令仅保存在本机浏览器。
 
-// 课时费页面复用部署者提供的 config/firebase-env.js，不在页面重复绑定项目。
-const FEE_FIREBASE_CONFIG = window.__FIREBASE_CONFIG__;
+// 约课系统 Firebase 配置（与 config/firebase-env.js 一致）
+const FEE_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4",
+  authDomain: "class-optic.firebaseapp.com",
+  projectId: "class-optic",
+  storageBucket: "class-optic.firebasestorage.app",
+  messagingSenderId: "859111669333",
+  appId: "1:859111669333:web:ec5cea5bd22dc0c495dedc",
+  databaseURL: "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
 
+let moneyGateLoginFailures = 0;
+let moneyGateBlockedUntil = 0;
 let moneyCloudStarted = false;
 
 function setMoneyGateError(message) {
@@ -1258,26 +1288,61 @@ function setMoneyGateError(message) {
     if (errorEl) errorEl.textContent = message || '';
 }
 
-function setupMoneyPageGate() {
+async function verifyMoneyPageAccess() {
+    const input = document.getElementById('moneyPageGatePassword');
     const button = document.getElementById('moneyPageGateSubmit');
-    TeacherAuth.requireTeacher({
-        config: FEE_FIREBASE_CONFIG,
-        overlay: document.getElementById('moneyPageGate'),
-        signInButton: button,
-        signOutButton: document.getElementById('money-signout'),
-        errorElement: document.getElementById('moneyPageGateError'),
-        requireManager: true,
-        onAuthorized: () => {
-            window.__moneyPageAccessGranted = true;
-            document.documentElement.classList.remove('money-auth-pending');
-            window.startMoneyPage();
-            onReady();
-        },
-        onSignedOut: () => window.location.reload()
-    });
+    const pass = input ? input.value.trim() : '';
+    if (Date.now() < moneyGateBlockedUntil) {
+        setMoneyGateError(`尝试过多，请 ${Math.ceil((moneyGateBlockedUntil - Date.now()) / 1000)} 秒后重试。`);
+        return;
+    }
+    if (!pass) { setMoneyGateError('请输入管理员密码。'); return; }
+    if (pass.length > 128 || /[.#$\/\[\]<>\u0000-\u001F\u007F]/.test(pass)) {
+        setMoneyGateError('密码格式不合法。');
+        return;
+    }
+    if (button) button.disabled = true;
+    setMoneyGateError('正在验证…');
+    try {
+        if (!window.firebase) throw new Error('认证服务尚未加载');
+        if (!firebase.apps.length) firebase.initializeApp(FEE_FIREBASE_CONFIG);
+        const snapshot = await firebase.database().ref(`admin_auth/${pass}`).once('value');
+        if (!snapshot.exists() || snapshot.val() !== true) {
+            moneyGateLoginFailures++;
+            if (moneyGateLoginFailures >= 5) {
+                moneyGateLoginFailures = 0;
+                moneyGateBlockedUntil = Date.now() + 30 * 1000;
+                setMoneyGateError('尝试过多，请 30 秒后重试。');
+            } else {
+                setMoneyGateError('密码错误。');
+            }
+            return;
+        }
+        moneyGateLoginFailures = 0;
+        window.__moneyPageAccessGranted = true;
+        document.documentElement.classList.remove('money-auth-pending');
+        const gate = document.getElementById('moneyPageGate');
+        if (gate) gate.remove();
+        if (input) input.value = '';
+        window.startMoneyPage();
+        onReady();
+    } catch (e) {
+        console.error('课时费页面认证失败', e);
+        setMoneyGateError('认证服务暂时不可用，请检查网络后重试。');
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
-let moneyDb = null;
+function setupMoneyPageGate() {
+    const input = document.getElementById('moneyPageGatePassword');
+    const button = document.getElementById('moneyPageGateSubmit');
+    if (button) button.onclick = verifyMoneyPageAccess;
+    if (input) input.onkeypress = event => { if (event.key === 'Enter') verifyMoneyPageAccess(); };
+    if (!window.__moneyPageAccessGranted && input) input.focus();
+}
+
+let db = null;
 let activeYear = null;
 let pendingLessons = [];
 let reconciliationIssues = [];
@@ -1288,7 +1353,7 @@ let _applyingCloud = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-08-23'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-08-22a'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
@@ -1298,12 +1363,12 @@ let feePassphraseChanging = false;
 let feePassphrasePromise = null;
 
 async function ensureCloudReady() {
-    if (moneyDb) return true;
+    if (db) return true;
     if (!window.firebase) return false;
     try {
         if (!firebase.apps.length) firebase.initializeApp(FEE_FIREBASE_CONFIG);
-        moneyDb = firebase.database();
-        const sysSnap = await moneyDb.ref('system').once('value');
+        db = firebase.database();
+        const sysSnap = await db.ref('system').once('value');
         const sys = sysSnap.val();
         activeYear = (sys && /^\d{4}$/.test(String(sys.activeYear || '')))
             ? String(sys.activeYear)
@@ -1496,8 +1561,8 @@ async function decryptFeeData(b64, saltB64, iterationValue) {
 }
 
 // ---- 云端同步：每次保存推送，启动时拉取（按 updatedAt 取新）----
-function vaultRef() { return moneyDb.ref(`years/${activeYear}/feeVault`); }
-function vaultRefFor(year) { return moneyDb.ref(`years/${year}/feeVault`); }
+function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
+function vaultRefFor(year) { return db.ref(`years/${year}/feeVault`); }
 
 function cloneForCloud(value) {
     try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
@@ -1638,7 +1703,7 @@ async function resolveCloudConflict(mode) {
 async function pushCloudNow(job, options) {
     options = options || {};
     try {
-        if (!moneyDb || !job || !job.year) return false;
+        if (!db || !job || !job.year) return false;
         const year = job.year;
         if (cloudDeleteInProgress) return false;
         if (!options.force) {
@@ -1648,7 +1713,7 @@ async function pushCloudNow(job, options) {
                 renderCloudConflictNotice(conflict);
                 return false;
             }
-            const tombstone = (await moneyDb.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val();
+            const tombstone = (await db.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val();
             if (tombstone && tombstone.deletedAt) {
                 lastCloudPushError = `${year} 年账本已被手动删除，请使用“上传本机到云端”明确重建。`;
                 renderTombstoneNotice(tombstone.deletedAt);
@@ -1764,7 +1829,7 @@ async function forceUploadCloud() {
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(forceJob, { force: true }), () => pushCloudNow(forceJob, { force: true }));
     const pushed = await cloudPushChain;
     if (!pushed) { showToast('上传失败，请检查网络后重试'); return; }
-    try { await moneyDb.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
+    try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
     clearCloudConflict(activeYear);
     clearTombstoneNotice();
     renderYearSummary();
@@ -1804,7 +1869,7 @@ async function deleteCloudData() {
         const deletedAt = Date.now();
         // 先等已经排队的写入结束，再用一次多路径更新完成删除+墓碑，避免中间状态被其他设备看到。
         await cloudPushChain.catch(() => false);
-        await moneyDb.ref().update({
+        await db.ref().update({
             [`years/${activeYear}/feeVault`]: null,
             [`years/${activeYear}/feeVaultDeletedAt`]: { deletedAt }
         });
@@ -1866,7 +1931,7 @@ async function pullCloud(options) {
         if (!vault || !vault.cipher) {
             // 云端还没有该学年账本：先检查是否被手动删除（墓碑），避免其他设备打开时自动重建
             let tombstone = null;
-            try { tombstone = (await moneyDb.ref(`years/${activeYear}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
+            try { tombstone = (await db.ref(`years/${activeYear}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
             if (tombstone && tombstone.deletedAt) {
                 renderTombstoneNotice(tombstone.deletedAt);
                 showFeeLedgerPending(`云端 ${activeYear} 年账本已被删除，本机账本不会显示。如需恢复，请明确上传本机账本。`, { forceUpload: true });
@@ -1897,7 +1962,7 @@ async function pullCloud(options) {
         // 只有成功解密后才确认这个版本可作为本机写入基线；错误口令不能给后续自动上传放行。
         cloudVersionsByYear[activeYear] = remoteVersion;
         // 只有成功解密并完成拉取后，才清理可能残留的墓碑节点。
-        try { await moneyDb.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
+        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
         // 本地比云端新：整体覆盖云端（本地已删的流水、改过的时间得以传播），
         // 不做并集合并——否则云端残留的旧记录会被合并回来，删除被撤销。
         const localUpdatedAt = Number((data.yearUpdatedAt && data.yearUpdatedAt[activeYear]) || 0);
@@ -2195,7 +2260,7 @@ async function refreshPendingList() {
     try {
         const ok = await ensureCloudReady();
         if (!ok) { statusEl.textContent = '无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
-        const snap = await moneyDb.ref(`years/${activeYear}/reservations`).once('value');
+        const snap = await db.ref(`years/${activeYear}/reservations`).once('value');
         const res = snap.val() || {};
         pendingLessons = [];
         const dismissedKeys = new Set((data.dismissedLessons || []).map(d => d.resKey));
@@ -2205,11 +2270,8 @@ async function refreshPendingList() {
         let reconciledImportedCount = 0;
         let reconciledDismissedCount = 0;
         let legacyLinked = false;
-        let autoLedgerCreatedCount = 0;
-        const ledgerMutationTargetKeys = new Set();
-        const autoLedgerTargetKeys = new Set();
-        const queuePostedStatus = (key, lesson, candidate, explicitRecordId) => {
-            const recordId = explicitRecordId || (candidate && candidate.record ? String(candidate.record.id || '') : '');
+        const queuePostedStatus = (key, lesson, candidate) => {
+            const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
             const postedAt = candidate && candidate.record
                 ? Number(candidate.record.postedAt || candidate.record.createdAt || Date.now())
                 : Date.now();
@@ -2329,32 +2391,6 @@ async function refreshPendingList() {
                 return;
             }
 
-            if (feeRecordCandidate) {
-                // 兼容旧数据：有 feeRecordId 但尚未写 feeStatus/sourceId 时，优先关联已有记录，不能再新建一条重复账本记录。
-                const diffs = getReconciliationDiffs(lesson, feeRecordCandidate.record);
-                const recordOwnedByAnotherReservation = feeRecordCandidate.record.sourceId && feeRecordCandidate.record.sourceId !== sourceId;
-                if (diffs.length === 0 && !recordOwnedByAnotherReservation && !consumedRecordIndexes.has(feeRecordCandidate.index)) {
-                    consumedRecordIndexes.add(feeRecordCandidate.index);
-                    if (feeRecordCandidate.record && !feeRecordCandidate.record.sourceId) {
-                        feeRecordCandidate.record.sourceId = sourceId;
-                        legacyLinked = true;
-                        ledgerMutationTargetKeys.add(key);
-                    }
-                    queuePostedStatus(key, lesson, feeRecordCandidate);
-                } else {
-                    addReconciliationCase({
-                        type: 'fieldMismatch',
-                        resKey: key,
-                        sourceId,
-                        reservation: r,
-                        booking: lesson,
-                        candidates,
-                        message: '预约指定的账本记录与课程姓名、日期或课时不一致'
-                    });
-                }
-                return;
-            }
-
             if (legacyCandidates.length === 1 && !consumedRecordIndexes.has(legacyCandidates[0].index)) {
                 // 只有一条 姓名+日期+课时 完全一致的旧记录 → 自动关联为已入账（补齐 sourceId，避免反复人工核对）
                 const legacy = legacyCandidates[0];
@@ -2362,7 +2398,6 @@ async function refreshPendingList() {
                 if (legacy.record && typeof legacy.record === 'object' && !legacy.record.sourceId) {
                     legacy.record.sourceId = sourceId; // 直接改 data.records 中的对象，随后 saveData 持久化
                     legacyLinked = true;
-                    ledgerMutationTargetKeys.add(key);
                 }
                 queuePostedStatus(key, lesson, legacy);
                 return;
@@ -2393,77 +2428,21 @@ async function refreshPendingList() {
                 return;
             }
 
-            // 正常的新完成预约没有任何本地候选时，直接生成账本记录。
-            // 只有日期、姓名、课时均可解析且不存在相近候选才走这里；异常或疑似重复仍交给人工核对。
-            try {
-                const canonical = getReconciliationCanonicalFromBooking({ booking: lesson }, null);
-                const ledgerResult = upsertReconciliationLedgerRecord({ sourceId, booking: lesson }, canonical, null);
-                ledgerMutationTargetKeys.add(key);
-                autoLedgerTargetKeys.add(key);
-                // 本轮新建的记录不能被后面的相同姓名/日期/课时预约误认为是旧账本记录。
-                consumedRecordIndexes.add(data.records.length - 1);
-                autoLedgerCreatedCount++;
-                queuePostedStatus(key, lesson, null, ledgerResult.recordId);
-            } catch (error) {
-                addReconciliationCase({
-                    type: 'autoLedgerFailed',
-                    resKey: key,
-                    sourceId,
-                    reservation: r,
-                    booking: lesson,
-                    candidates,
-                    message: `自动入账失败：${error.message || '账本数据不完整，请人工核对'}`
-                });
-            }
+            lesson.hasProfile = !!data.students.find(s => s.name === lesson.studentName);
+            pendingLessons.push(lesson);
         });
 
-        let ledgerSyncFailed = false;
-        if (legacyLinked || autoLedgerCreatedCount > 0) {
-            // 必须先确认加密账本写入云端成功，再把预约标记为已入账，避免出现“约课端已入账、账本云端没有记录”。
-            saveData();
-            ledgerSyncFailed = !(await cloudPushChain.catch(() => false));
-        }
+        if (legacyLinked) saveData(); // 持久化自动补上的 sourceId（并推送加密账本），避免下次仍要人工核对
 
         let reconciliationSyncFailed = false;
-        if (ledgerSyncFailed) {
-            const failedTargets = autoReconciledTargets.filter(target => ledgerMutationTargetKeys.has(target.key));
-            failedTargets.forEach(target => {
-                if (autoLedgerTargetKeys.has(target.key)) {
-                    // 云端加密账本未确认写入时撤回本轮新建记录，避免本页下一次刷新把本机孤立记录误判为已入账。
-                    data.records = (data.records || []).filter(record => record.sourceId !== target.lesson.sourceId);
-                } else {
-                    // 旧记录只是补 sourceId 的情况下也撤回这次关联，保留原账本内容供下次重试。
-                    const linkedRecord = (data.records || []).find(record => record.sourceId === target.lesson.sourceId);
-                    if (linkedRecord) delete linkedRecord.sourceId;
-                }
-                const prefix = `years/${activeYear}/reservations/${target.key}/`;
-                Object.keys(reconciliationUpdates).forEach(path => {
-                    if (path.startsWith(prefix)) delete reconciliationUpdates[path];
-                });
-                addReconciliationCase({
-                    type: 'syncFailed',
-                    resKey: target.key,
-                    sourceId: target.lesson.sourceId,
-                    reservation: res[target.key],
-                    booking: target.lesson,
-                    candidates: getReconciliationCandidates(target.lesson, target.lesson.sourceId, res[target.key] && res[target.key].feeRecordId),
-                    message: `自动入账已写入本机，但加密账本云端同步失败：${lastCloudPushError || '请重试'}`
-                });
-            });
-            reconciledImportedCount = Math.max(0, reconciledImportedCount - failedTargets.length);
-            autoLedgerCreatedCount = Math.max(0, autoLedgerCreatedCount - failedTargets.filter(target => autoLedgerTargetKeys.has(target.key)).length);
-        }
         if (Object.keys(reconciliationUpdates).length > 0) {
             try {
-                await moneyDb.ref().update(reconciliationUpdates);
+                await db.ref().update(reconciliationUpdates);
             } catch (error) {
                 console.error('历史课时费状态同步失败:', error);
                 reconciliationSyncFailed = true;
                 reconciledImportedCount = 0;
-                autoLedgerCreatedCount = 0;
                 autoReconciledTargets.forEach(target => {
-                    const statusPath = `years/${activeYear}/reservations/${target.key}/feeStatus`;
-                    if (!Object.prototype.hasOwnProperty.call(reconciliationUpdates, statusPath)) return;
                     addReconciliationCase({
                         type: 'syncFailed',
                         resKey: target.key,
@@ -2482,7 +2461,7 @@ async function refreshPendingList() {
         const conflictCount = pendingLessons.filter(p => (p.conflicts || []).length > 0).length;
         renderPendingList();
         renderReconciliationCases();
-        renderReconciliationNotice({ reconciledImportedCount, autoLedgerCreatedCount, reconciledDismissedCount, reconciliationSyncFailed: reconciliationSyncFailed || ledgerSyncFailed });
+        renderReconciliationNotice({ reconciledImportedCount, reconciledDismissedCount, reconciliationSyncFailed });
         statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${reconciliationCases.length ? ` · ${reconciliationCases.length} 条需核对` : ''}${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
         renderYearSummary();
     } catch (e) {
@@ -2492,7 +2471,7 @@ async function refreshPendingList() {
     }
 }
 
-function renderReconciliationNotice({ reconciledImportedCount = 0, autoLedgerCreatedCount = 0, reconciledDismissedCount = 0, reconciliationSyncFailed = false, reset = false } = {}) {
+function renderReconciliationNotice({ reconciledImportedCount = 0, reconciledDismissedCount = 0, reconciliationSyncFailed = false, reset = false } = {}) {
     const noticeEl = document.getElementById('feeReconciliationNotice');
     if (!noticeEl) return;
     if (reset) {
@@ -2501,9 +2480,7 @@ function renderReconciliationNotice({ reconciledImportedCount = 0, autoLedgerCre
         return;
     }
     const messages = [];
-    if (autoLedgerCreatedCount > 0) messages.push(`已自动入账 ${autoLedgerCreatedCount} 条已完成课程`);
-    const linkedCount = reconciledImportedCount - autoLedgerCreatedCount;
-    if (linkedCount > 0) messages.push(`已同步 ${linkedCount} 条历史入账状态`);
+    if (reconciledImportedCount > 0) messages.push(`已同步 ${reconciledImportedCount} 条历史入账状态`);
     if (reconciledDismissedCount > 0) messages.push(`已同步 ${reconciledDismissedCount} 条忽略状态`);
     if (reconciliationCases.length > 0) messages.push(`${reconciliationCases.length} 条记录需要人工核对`);
     if (reconciliationSyncFailed) messages.push('云端状态同步失败，请点击刷新重试');
@@ -2697,7 +2674,7 @@ async function buildReconciliationReservationUpdates(item, canonical, recordId, 
         updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/startTime`] = startTime;
         updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/endTime`] = endTime;
         if (reservation.slotId) {
-            const slotSnapshot = await moneyDb.ref(`years/${activeYear}/slots/${reservation.slotId}`).once('value');
+            const slotSnapshot = await db.ref(`years/${activeYear}/slots/${reservation.slotId}`).once('value');
             const slot = slotSnapshot.val();
             if (slot && slot.reservationId === item.resKey) {
                 updates[`years/${activeYear}/slots/${reservation.slotId}/time`] = formattedTime;
@@ -2771,7 +2748,7 @@ async function commitReconciliation(caseIndex, canonical, candidate, syncBooking
             return;
         }
         try {
-            await moneyDb.ref().update(reservationPlan.updates);
+            await db.ref().update(reservationPlan.updates);
         } catch (error) {
             console.error('人工核对后的预约同步失败:', error);
             renderReconciliationFailure(item, '账本已保存，但约课端同步失败，请重试。');
@@ -2926,12 +2903,12 @@ async function importSelectedPending() {
     saveData();
     const cloudSaved = await cloudPushChain.catch(() => false);
     let statusSynced = false;
-    if (cloudSaved && moneyDb && activeYear) {
+    if (cloudSaved && db && activeYear) {
         const postedAt = Date.now();
         const updates = {};
         // 一次读取预约集合，避免对已删除预约写 feeStatus 产生残缺节点
         let existingRes = {};
-        try { existingRes = (await moneyDb.ref(`years/${activeYear}/reservations`).once('value')).val() || {}; } catch (e) {}
+        try { existingRes = (await db.ref(`years/${activeYear}/reservations`).once('value')).val() || {}; } catch (e) {}
         importedRecords.forEach(({ lesson, recordId }) => {
             const resKey = lesson.resKey;
             if (!existingRes[resKey]) return; // 预约已删除，跳过云端写入
@@ -2941,7 +2918,7 @@ async function importSelectedPending() {
         });
         if (Object.keys(updates).length > 0) {
             try {
-                await moneyDb.ref().update(updates);
+                await db.ref().update(updates);
                 statusSynced = true;
             } catch (error) {
                 console.error('预约入账状态同步失败:', error);
@@ -3000,9 +2977,9 @@ function saveEditPendingLesson(i) {
 // 修改时间段时同步更新约课后台的预约记录（时间、时长），
 // 让学生端历史记录与管理端预约记录都显示修正后的时间，而不是只改了本账本
 async function syncReservationTime(p) {
-    if (!moneyDb || !activeYear || !p.resKey) return;
+    if (!db || !activeYear || !p.resKey) return;
     try {
-        const snap = await moneyDb.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
+        const snap = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
         const r = snap.val();
         if (!r) return;
         // 取原开始时间：优先 slotSnapshot，其次从 time 字符串解析
@@ -3034,7 +3011,7 @@ async function syncReservationTime(p) {
         updates[`years/${activeYear}/reservations/${p.resKey}/slotSnapshot/endTime`] = endTime;
         let slotOwnershipConflict = false;
         if (r.slotId) {
-        const slotSnap = await moneyDb.ref(`years/${activeYear}/slots/${r.slotId}`).once('value');
+            const slotSnap = await db.ref(`years/${activeYear}/slots/${r.slotId}`).once('value');
             const slot = slotSnap.val();
             if (slot && slot.reservationId === p.resKey) {
                 updates[`years/${activeYear}/slots/${r.slotId}/time`] = newTime;
@@ -3042,7 +3019,7 @@ async function syncReservationTime(p) {
                 slotOwnershipConflict = true;
             }
         }
-        await moneyDb.ref().update(updates);
+        await db.ref().update(updates);
         showToast(slotOwnershipConflict
             ? '预约时间已同步；排班所有权冲突，未修改排班，请到管理端检查'
             : '已修改，后台预约时间与排班已同步更新');
@@ -3061,12 +3038,12 @@ async function dismissPendingLesson(i) {
     // 预约可能已被管理端删除：先确认存在，避免凭空写残缺节点
     let reservationStillExists = false;
     try {
-        const rSnap = await moneyDb.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
+        const rSnap = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
         reservationStillExists = rSnap.exists();
     } catch (e) {}
     if (reservationStillExists) {
         try {
-        await moneyDb.ref().update({
+            await db.ref().update({
                 [`years/${activeYear}/reservations/${p.resKey}/feeStatus`]: 'dismissed',
                 [`years/${activeYear}/reservations/${p.resKey}/feeDismissedAt`]: Date.now(),
                 [`years/${activeYear}/reservations/${p.resKey}/feePostedAt`]: null,
@@ -3117,12 +3094,12 @@ async function restoreDismissed(idx) {
     // 预约可能已被管理端删除：先确认存在，避免凭空写残缺节点
     let reservationStillExists = false;
     try {
-        const rSnap = await moneyDb.ref(`years/${activeYear}/reservations/${item.resKey}`).once('value');
+        const rSnap = await db.ref(`years/${activeYear}/reservations/${item.resKey}`).once('value');
         reservationStillExists = rSnap.exists();
     } catch (e) {}
     if (reservationStillExists) {
         try {
-        await moneyDb.ref().update({
+            await db.ref().update({
                 [`years/${activeYear}/reservations/${item.resKey}/feeStatus`]: 'pending',
                 [`years/${activeYear}/reservations/${item.resKey}/feeDismissedAt`]: null,
                 [`years/${activeYear}/reservations/${item.resKey}/feePostedAt`]: null,

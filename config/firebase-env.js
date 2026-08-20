@@ -1,5 +1,4 @@
 // config/firebase-env.js
-// Firebase Web 配置不是服务端密钥；复用本项目时必须替换为部署者自己的项目配置。课时费页面也复用这里的配置。
 const firebaseConfig = {
   apiKey: "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4",
   authDomain: "class-optic.firebaseapp.com",
@@ -10,43 +9,22 @@ const firebaseConfig = {
   databaseURL: "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app" 
 };
 
-window.__FIREBASE_CONFIG__ = firebaseConfig;
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
-// Firebase Console -> App Check -> Web 应用中创建 reCAPTCHA Enterprise/v3 密钥后填入。
-// 学生敏感操作全部通过强制 App Check 的 Cloudflare Worker；缺少地址或密钥时会明确阻止提交，不会退回匿名直写数据库。
-window.__STUDENT_API_CONFIG__ = {
-    apiBaseUrl: "https://tutoring-booking-api.xiasong062.workers.dev",
-    provider: "recaptcha-v3",
-    appCheckSiteKey: "6LdpbY8tAAAAALSPaYpNJJ0NAouRj6tlD2ixCDGd",
-    // Google 验证在大陆网络不可达时，由 Worker 的一次性挑战接管；不退回匿名直写数据库。
-    allowClientChallengeFallback: true,
-    // 临时应急：Worker 域名在大陆不可达时，仅允许通过严格数据库规则创建预约。
-    emergencyDirectBookingFallback: true
+// 顶层解耦数据路径路由器：统一分发多学年分流指针
+const SystemRouter = {
+    activeYear: null,  
+    activeName: "专业课辅导预约系统",
+    
+    system: () => db.ref('system'),
+    yearsRoot: () => db.ref('years'),
+    
+    getSlotsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/slots`),
+    getReservationsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/reservations`),
+    getSettingsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/settings`),
+    getLogsRef: (year) => db.ref(`years/${year || SystemRouter.activeYear}/operationLog`)
 };
-
-// money.html 只需要读取配置并由教师认证模块初始化 Firebase，避免和它自己的 db 变量冲突。
-if (!window.__SKIP_FIREBASE_ENV_INIT__) {
-    firebase.initializeApp(firebaseConfig);
-    const sharedDb = firebase.database();
-
-    // 顶层解耦数据路径路由器：统一分发多学年分流指针
-    const SystemRouter = {
-        activeYear: null,
-        activeName: "专业课辅导预约系统",
-
-        system: () => sharedDb.ref('system'),
-        yearsRoot: () => sharedDb.ref('years'),
-
-        getSlotsRef: (year) => sharedDb.ref(`years/${year || SystemRouter.activeYear}/slots`),
-        getReservationsRef: (year) => sharedDb.ref(`years/${year || SystemRouter.activeYear}/reservations`),
-        getSettingsRef: (year) => sharedDb.ref(`years/${year || SystemRouter.activeYear}/settings`),
-        getLogsRef: (year) => sharedDb.ref(`years/${year || SystemRouter.activeYear}/operationLog`)
-    };
-
-    // 保持旧页面通过全局变量访问数据库路由和转义函数。
-    window.db = sharedDb;
-    window.SystemRouter = SystemRouter;
-}
 
 // 全自动化安全 HTML 实体转义引擎，防止 XSS 注入
 function escapeHtml(unsafe) {
@@ -58,4 +36,3 @@ function escapeHtml(unsafe) {
         .replace(/'/g, "&#039;")
         .replace(/\//g, "&#x2F;");
 }
-window.escapeHtml = escapeHtml;

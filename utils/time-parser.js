@@ -56,6 +56,3 @@ const TimeParser = {
         return diff > 0 ? diff / 60 : 0;
     }
 };
-
-// 同时导出到 window，供隔离封装的学生 API 应急通道调用。
-if (typeof window !== 'undefined') window.TimeParser = TimeParser;

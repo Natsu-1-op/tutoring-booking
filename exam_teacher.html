@@ -5,9 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>命题与评卷</title>
 
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
     <script>
         window.MathJax = {
@@ -25,16 +24,14 @@
     <div id="teacher-gate-login-mask" class="teacher-gate-mask">
         <div class="teacher-gate-card">
             <h3>阅卷工作台</h3>
-            <p class="teacher-gate-hint">仅限已加入教师名单的 Google 账号：</p>
-            <button id="teacher-google-login" type="button" class="teacher-gate-btn">使用 Google 账号登录</button>
+            <p class="teacher-gate-hint">请输入管理员口令：</p>
+            <input type="password" id="gate-pass-input" placeholder="管理员口令" class="teacher-gate-input">
+            <button onclick="executeManualGateAuth()" class="teacher-gate-btn">验证登入</button>
             <p id="gate-error-lbl" class="teacher-gate-error"></p>
         </div>
     </div>
 
     <div class="teacher-container">
-        <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-            <button id="teacher-signout" type="button" class="teacher-btn" hidden>退出账号</button>
-        </div>
         <!-- 导航Tab -->
         <div class="teacher-tabs">
             <button class="teacher-tab active" onclick="switchPane(this, 'pane-make')">出题命卷</button>
@@ -69,7 +66,7 @@
             <div class="teacher-btn-row teacher-btn-row-equal">
                 <button class="teacher-btn teacher-btn-outline" onclick="addQ()">新增试题</button>
                 <button class="teacher-btn teacher-btn-gray" onclick="clearAllQuestions()">清空</button>
-                <button id="export-paper-btn" class="teacher-btn teacher-btn-green" onclick="exportJsonPapers()">生成导出</button>
+                <button class="teacher-btn teacher-btn-green" onclick="exportJsonPapers()">生成导出</button>
             </div>
         </div>
 
@@ -217,7 +214,6 @@
     </div>
 
     <script src="config/firebase-env.js"></script>
-    <script src="teacher-auth.js?v=teacher-auth-bootstrap-20260820"></script>
     <script src="exam_teacher.js"></script>
 </body>
 </html>
