@@ -1,0 +1,10 @@
+name = "tutoring-booking-api"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+
+[vars]
+FIREBASE_PROJECT_ID = "class-optic"
+FIREBASE_PROJECT_NUMBER = "859111669333"
+FIREBASE_APP_ID = "1:859111669333:web:ec5cea5bd22dc0c495dedc"
+FIREBASE_DATABASE_URL = "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"
+ALLOWED_ORIGINS = "https://natsu-1-op.github.io,http://localhost:4173,http://127.0.0.1:4173"
