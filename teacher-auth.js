@@ -152,6 +152,14 @@
             }
         });
 
+        // 显式消费 redirect 登录结果，避免部分移动浏览器只回到页面但没有触发
+        // 可见的错误提示。弹窗登录时该调用会安全地返回空结果。
+        auth.getRedirectResult().catch(error => {
+            console.error('Google redirect 登录失败:', error);
+            setBusy(false);
+            setError(authErrorMessage(error));
+        });
+
         return { auth, database, signOut: () => signOut(config) };
     }
 
