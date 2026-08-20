@@ -959,19 +959,26 @@
 
     function releaseSlotIfOwned(year, slotId, reservationId) {
         if (!slotId) return Promise.resolve({ committed: true, legacy: false });
-        return SystemRouter.getSlotsRef(year).child(slotId).transaction(slot => {
-            // 旧排班没有所有权标记时不自动释放，避免把别人的预约重新开放。
-            if (!slot || !slot.reserved || slot.reservationId !== reservationId) return;
-            slot.reserved = false;
-            delete slot.reservationId;
-            return slot;
-        }).then(result => {
-            // 释放排班的同时清理应急预约占位：否则学生端 emergencyClaims[slotId] 会永久显示"已满"，
-            // 即使教师端已显示空闲，学生端也一直无法看到该时段。
-            if (result.committed) {
-                db.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => {});
-            }
-            return result;
+        return SystemRouter.getSlotsRef(year).child(slotId).once('value').then(snapshot => {
+            const slot = snapshot.val();
+            // 时段不存在或本就空闲：无需释放，视为成功（否则删除记录会误报"所有权异常"）
+            if (!slot) return { committed: true };
+            if (!slot.reserved) return { committed: true };
+            // 所有权不匹配（时段被其他记录占用）：真正的异常，交由调用方提示
+            if (slot.reservationId !== reservationId) return { committed: false };
+            return SystemRouter.getSlotsRef(year).child(slotId).transaction(current => {
+                if (!current || !current.reserved || current.reservationId !== reservationId) return;
+                current.reserved = false;
+                delete current.reservationId;
+                return current;
+            }).then(result => {
+                // 释放排班的同时清理应急预约占位：否则学生端 emergencyClaims[slotId] 会永久显示"已满"，
+                // 即使教师端已显示空闲，学生端也一直无法看到该时段。
+                if (result.committed) {
+                    db.ref(`emergencySlotClaims/${year}/${slotId}`).remove().catch(() => {});
+                }
+                return result;
+            });
         });
     }
 
@@ -1037,6 +1044,87 @@
             return current;
         });
         return { ok: result.committed, changed: result.committed };
+    }
+
+    // 一键修复排班幽灵占用：释放 reserved=true 但无所有权/记录已删的时段，
+    // 清理残留所有权字段与应急占位。用于批量修复历史遗留的"时段显示已满"问题。
+    async function repairSlotOwnership() {
+        if (!confirm('将扫描当前学年全部排班：\n① 释放"显示已满但没有归属记录"的时段\n② 清理已取消/已删除预约的时段占用\n③ 清理残留所有权字段与应急占位\n\n执行后学生端将恢复显示真实空闲时段。继续？')) return;
+        const slotsSnap = await SystemRouter.getSlotsRef(viewingYear).once('value');
+        const slots = slotsSnap.val() || {};
+        const slotIds = Object.keys(slots);
+        let releasedGhost = 0, keptValid = 0, clearedResidue = 0;
+        const resRef = SystemRouter.getReservationsRef(viewingYear);
+        for (const slotId of slotIds) {
+            const slot = slots[slotId];
+            if (!slot || slot.status === 'hidden') continue;
+            if (slot.reserved === true && !slot.reservationId) {
+                // 幽灵占用：reserved=true 但无所有权记录 → 释放
+                await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
+                    if (!s || s.status === 'hidden') return;
+                    if (s.reserved === true && !s.reservationId) {
+                        s.reserved = false;
+                        return s;
+                    }
+                });
+                releasedGhost++;
+            } else if (slot.reserved === true && slot.reservationId) {
+                // 有所有权：验证记录是否仍有效（存在且未取消）
+                let valid = false;
+                try {
+                    const resSnap = await resRef.child(slot.reservationId).once('value');
+                    const res = resSnap.val();
+                    valid = !!res && res.status !== 'canceled';
+                } catch (e) { valid = false; }
+                if (valid) {
+                    keptValid++;
+                } else {
+                    await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
+                        if (!s || s.status === 'hidden') return;
+                        if (s.reserved === true && s.reservationId === slot.reservationId) {
+                            s.reserved = false;
+                            delete s.reservationId;
+                            return s;
+                        }
+                    });
+                    db.ref(`emergencySlotClaims/${viewingYear}/${slotId}`).remove().catch(() => {});
+                    releasedGhost++;
+                }
+            } else if (slot.reserved === false && slot.reservationId) {
+                // 已释放但残留所有权字段 → 清理
+                await SystemRouter.getSlotsRef(viewingYear).child(slotId).transaction(s => {
+                    if (!s || s.status === 'hidden') return;
+                    if (s.reserved === false && s.reservationId) {
+                        delete s.reservationId;
+                        return s;
+                    }
+                });
+                clearedResidue++;
+            }
+        }
+        // 清理应急占位残留（占位对应预约已不存在或已取消）
+        let claimsCleaned = 0;
+        try {
+            const claimsSnap = await db.ref(`emergencySlotClaims/${viewingYear}`).once('value');
+            const claims = claimsSnap.val() || {};
+            for (const slotId of Object.keys(claims)) {
+                const claimResId = claims[slotId];
+                if (!claimResId) continue;
+                let stillValid = false;
+                try {
+                    const resSnap = await resRef.child(claimResId).once('value');
+                    const res = resSnap.val();
+                    stillValid = !!res && res.status !== 'canceled';
+                } catch (e) { stillValid = false; }
+                if (!stillValid) {
+                    await db.ref(`emergencySlotClaims/${viewingYear}/${slotId}`).remove().catch(() => null);
+                    claimsCleaned++;
+                }
+            }
+        } catch (e) { /* 占位清理失败不影响主流程 */ }
+        SystemRouter.getLogsRef(viewingYear).push({ action: `修复排班：释放幽灵时段 ${releasedGhost}，保留有效预约 ${keptValid}，清理残留字段 ${clearedResidue}，清理占位 ${claimsCleaned}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+        alert(`排班修复完成：\n\n释放幽灵占用时段：${releasedGhost} 个\n保留有效预约：${keptValid} 个\n清理残留所有权字段：${clearedResidue} 个\n清理应急占位残留：${claimsCleaned} 个\n\n学生端已恢复显示真实空闲时段。`);
+        handleViewingYearChange();
     }
 
     function deleteSingleReservation(resKey, slotId, nickname) {
@@ -1506,5 +1594,6 @@
     if (newStudentHoursInput) newStudentHoursInput.onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
     document.getElementById('btn-export-all').onclick = exportAllDataJSON;
     document.getElementById('btn-restore-all').onclick = triggerRestoreFile;
+    document.getElementById('btn-repair-slots').onclick = repairSlotOwnership;
 
 })();
