@@ -365,6 +365,7 @@ async function loadMyHistory() {
     if (!isValidStudentName(searchName)) return alert('姓名格式不合法！');
     if (!searchCode) return alert('请输入5位取消凭证码！');
     if (!/^[A-Z2-9]{5}$/.test(searchCode)) return alert('取消凭证码格式不合法！');
+    window.__localHistoryNickname = searchName;
 
     container.innerHTML = '<p class="msg-hint">正在查询...</p>';
 
@@ -389,11 +390,11 @@ async function loadMyHistory() {
                 switch(currentStatus) {
                     case "booked":
                         statusText = "已预约"; badgeClass = "status-pending";
-                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking(${safeJsArg(key)})">取消预约</button>`;
+                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking(${safeJsArg(key)}, ${safeJsArg(r.slotId || '')}, ${safeJsArg(r.cancelCode || '')})">取消预约</button>`;
                         break;
                     case "confirmed":
                         statusText = "已确认"; badgeClass = "status-confirmed";
-                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking(${safeJsArg(key)})">取消预约</button>`;
+                        actionButtonHtml = `<button class="action-btn btn-cancel-booking" onclick="requestCancelBooking(${safeJsArg(key)}, ${safeJsArg(r.slotId || '')}, ${safeJsArg(r.cancelCode || '')})">取消预约</button>`;
                         break;
                     case "completed": statusText = "已完成"; badgeClass = "status-completed"; break;
                     case "canceled": statusText = "已取消"; badgeClass = "status-canceled"; break;
@@ -499,12 +500,19 @@ function downloadICS(parsedTimeObj, cancelCode) {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-async function requestCancelBooking(resKey) {
+async function requestCancelBooking(resKey, slotId, cancelCode) {
     if (!confirm('确定要取消这条预约吗？取消后该时段将重新开放给其他同学。')) return;
     const year = SystemRouter.activeYear;
     try {
-        if (!currentHistorySessionToken && !window.__localHistoryMode) return alert('查询凭证已失效，请重新验证历史记录。');
-        const result = await StudentApi.cancelBooking({ year, reservationId: resKey, sessionToken: currentHistorySessionToken });
+        if (!currentHistorySessionToken && !window.__localHistoryMode && !slotId) return alert('查询凭证已失效，请重新验证历史记录。');
+        const result = await StudentApi.cancelBooking({
+            year,
+            reservationId: resKey,
+            sessionToken: currentHistorySessionToken,
+            nickname: window.__localHistoryNickname || '',
+            cancelCode: cancelCode || '',
+            slotId: slotId || ''
+        });
         if (result.slotReleased === false) {
             alert('预约已取消，但原排班没有可验证的所有权标记，时段暂未自动释放，请联系老师处理。');
         } else {

@@ -366,7 +366,7 @@
         rememberLocalReservation({
             year: String(payload && payload.year || ''),
             reservationId: String(result && result.reservationId || ''),
-            slotId: String(payload && payload.slotId || ''),
+            slotId: String(result && result.slotId || payload && payload.slotId || ''),
             nickname: String(result && result.nickname || ''),
             time: String(result && result.time || ''),
             cancelCode: String(result && result.cancelCode || ''),
@@ -415,6 +415,7 @@
                 time: r.time,
                 status: r.status || 'booked',
                 cancelCode: r.cancelCode,
+                slotId: r.slotId || '',
                 timestamp: Number(r.bookedAt || 0)
             })).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             const usedHours = reservations.filter(r => r.status !== 'canceled').reduce((sum, r) => sum + calcHoursLocal(r.time), 0);
@@ -450,7 +451,11 @@
             if (!current || current === 'canceled') return;
             return 'canceled';
         }, undefined, false);
-        if (!statusResult.committed) throw apiError('该预约已无法取消，请刷新后重试。', 'RESERVATION_NOT_CANCELABLE');
+        if (!statusResult.committed) {
+            // 回滚：删除刚写入的取消请求，避免残留卡死后续取消
+            await database.ref(`emergencyCancelRequests/${year}/${reservationId}`).remove().catch(() => null);
+            throw apiError('该预约已无法取消，请刷新后重试。', 'RESERVATION_NOT_CANCELABLE');
+        }
         // 释放排班（规则校验取消请求 + 预约已取消后放行）
         let slotReleased = false;
         try {
@@ -472,20 +477,33 @@
     async function cancelBooking(payload) {
         const reservationId = String(payload && payload.reservationId || '');
         const year = String(payload && payload.year || '');
+        // 本机记录：直连取消所需的凭证/时段（Worker 失败时的兜底来源）
+        const local = readLocalReservations().find(r => r.reservationId === reservationId && r.year === year);
         if (payload && payload.sessionToken) {
             try {
                 const result = await call('cancelBooking', payload);
                 updateLocalReservationStatus(reservationId, 'canceled');
                 return result;
             } catch (error) {
-                if (!isBackendUnavailable(error)) throw error;
+                // 本机有记录：任何失败都尝试直连取消（大陆主路径）
+                if (local) {
+                    console.warn('Worker 取消失败，切换到直连取消通道。', error);
+                } else if (!isBackendUnavailable(error)) {
+                    // 无本机记录且非后端不可达：抛出原始错误
+                    throw error;
+                }
             }
         }
-        // 后端不可达或无查询会话：凭证码直连取消（本机记录提供 resId/slotId/凭证）
-        const local = readLocalReservations().find(r => r.reservationId === reservationId && r.year === year);
-        if (!local) throw apiError('本机没有这条预约记录，无法直连取消。请稍后重试或联系老师。', 'LOCAL_RECORD_MISSING');
+        // 直连取消：优先用调用方显式传入的凭证/时段，其次从本机记录补全
+        if (!local && !payload.slotId) {
+            throw apiError('本机没有这条预约记录，无法直连取消。请稍后重试或联系老师。', 'LOCAL_RECORD_MISSING');
+        }
         return cancelBookingEmergency({
-            year, reservationId, nickname: local.nickname, cancelCode: local.cancelCode, slotId: local.slotId
+            year,
+            reservationId,
+            nickname: String(payload.nickname || (local && local.nickname) || ''),
+            cancelCode: String(payload.cancelCode || (local && local.cancelCode) || ''),
+            slotId: String(payload.slotId || (local && local.slotId) || '')
         });
     }
 

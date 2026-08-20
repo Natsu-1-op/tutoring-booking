@@ -126,6 +126,7 @@ function publicReservation(id, reservation) {
     time: String(reservation.time || ""),
     status: String(reservation.status || "booked"),
     cancelCode: String(reservation.cancelCode || ""),
+    slotId: String(reservation.slotId || ""),
     timestamp: Number(reservation.timestamp || 0),
   };
 }
