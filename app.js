@@ -425,11 +425,23 @@ async function loadMyHistory() {
             }
             if (list.length === 0) container.innerHTML = `<p class="msg-hint">未找到对应的记录。</p>`;
             else container.innerHTML = summaryHtml + remainingHtml + listHtml;
+            const ghostCount = Number(window.__localHistoryGhostRemoved || 0);
+            if (window.__localHistoryMode) {
+                const notice = ghostCount > 0
+                    ? `（本机记录模式：${ghostCount} 条已被老师删除的预约已自动清理）`
+                    : '（本机记录模式：缓存于本机，可能与云端有出入）';
+                const hint = document.createElement('p');
+                hint.className = 'msg-hint';
+                hint.style.color = '#e6a23c';
+                hint.textContent = notice;
+                container.prepend(hint);
+            }
     } catch (err) {
         currentHistorySessionToken = '';
         console.error('查询历史记录失败:', err);
+        const ghostCount = Number(window.__localHistoryGhostRemoved || 0);
         const message = err.reason === 'HISTORY_AUTH_FAILED'
-            ? '姓名或凭证码错误！'
+            ? (ghostCount > 0 ? `本机有 ${ghostCount} 条预约记录已被老师删除，已自动清理。` : '姓名或凭证码错误！')
             : err.reason === 'RATE_LIMITED'
                 ? '查询过于频繁，请稍后再试。'
                 : (err.message || '查询失败，请检查网络后重试。');
@@ -502,6 +514,16 @@ async function requestCancelBooking(resKey) {
     } catch (error) {
         console.error('取消预约失败:', error);
         if (error.reason === 'HISTORY_SESSION_EXPIRED') currentHistorySessionToken = '';
+        if (error.details && error.details.ghostCandidate) {
+            // 云端记录不存在或凭证有误：询问是否清理本机幽灵记录
+            const clean = confirm('该预约无法取消：云端记录不存在（可能已被老师删除）或凭证码有误。\n\n点击"确定"：从本机记录中移除这条预约；\n点击"取消"：保留记录并重新核对凭证码。');
+            if (clean) {
+                StudentApi.removeLocalReservation(resKey);
+                alert('已从本机记录中移除。');
+                await loadMyHistory();
+            }
+            return;
+        }
         alert(error.message || '操作失败，请检查网络后重试。');
     }
 }

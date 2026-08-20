@@ -387,8 +387,25 @@
             // 后端不可达：用本机记录兜底（只显示本人预约过的记录，凭证码验证后可见）
             const code = normalizeHalfWidth(String(payload && payload.cancelCode || '')).trim().toUpperCase();
             const name = String(payload && payload.nickname || '').trim();
-            const localList = readLocalReservations()
-                .filter(r => r.year === String(payload && payload.year || '') && r.nickname === name);
+            const year = String(payload && payload.year || '');
+            // 云端墓碑过滤：教师删除的预约（本机无法感知云端删除，靠墓碑同步清理幽灵记录）
+            let ghostRemoved = 0;
+            let localList = readLocalReservations().filter(r => r.year === year && r.nickname === name);
+            try {
+                const tombSnap = await firebase.database().ref(`years/${year}/reservationTombstones`).once('value');
+                const tombs = tombSnap.val() || {};
+                const tombKeys = Object.keys(tombs);
+                if (tombKeys.length) {
+                    const before = localList.length;
+                    localList = localList.filter(r => !(tombs[r.reservationId] && (r.status || 'booked') !== 'canceled'));
+                    ghostRemoved = before - localList.length;
+                    if (ghostRemoved > 0) {
+                        const tombsSet = tombKeys.reduce((acc, k) => { acc[k] = true; return acc; }, {});
+                        writeLocalReservations(readLocalReservations().filter(r => !(tombsSet[r.reservationId] && (r.status || 'booked') !== 'canceled')));
+                    }
+                }
+            } catch (e) { /* 墓碑读取失败不影响兜底查询 */ }
+            window.__localHistoryGhostRemoved = ghostRemoved;
             if (!localList.some(r => r.cancelCode === code)) {
                 throw apiError('姓名或凭证码错误。', 'HISTORY_AUTH_FAILED');
             }
@@ -424,7 +441,9 @@
                 reservationId, year, nickname, cancelCode, slotId, timestamp
             });
         } catch (error) {
-            throw apiError('取消凭证校验未通过，请核对凭证码后重试。', 'EMERGENCY_CANCEL_AUTH_FAILED');
+            // 规则拒绝：可能云端记录已被教师删除（幽灵记录），或凭证不匹配。
+            // 客户端无法区分，统一标记候选，由界面提示用户选择是否清理本机记录。
+            throw apiError('该预约无法取消：云端记录不存在或凭证有误。', 'EMERGENCY_CANCEL_AUTH_FAILED', { ghostCandidate: true });
         }
         // 标记取消（规则校验凭证后放行）
         const statusResult = await database.ref(`years/${year}/reservations/${reservationId}/status`).transaction(current => {
@@ -549,13 +568,21 @@
         }
     }
 
+    // 从本机预约记录中移除一条（用于清理"云端已删除"的幽灵记录）
+    function removeLocalReservation(reservationId) {
+        const list = readLocalReservations().filter(r => r.reservationId !== String(reservationId || ''));
+        writeLocalReservations(list);
+        return true;
+    }
+
     global.StudentApi = Object.freeze({
         init,
         createBooking,
         getBookingHistory,
         cancelBooking,
         startExam,
-        submitExam
+        submitExam,
+        removeLocalReservation
     });
 
     // 在学生页面开始读取 Firebase 数据前激活 App Check；这样日后即使同时对 Realtime Database 开启强制校验，公开排班也不会失效。

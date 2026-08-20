@@ -29,8 +29,7 @@
         "slots": {
           ".read": true,
           ".indexOn": ["time", "status"],
-          "$slotId": {
-            ".write": "(auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true) || (auth == null && data.exists() && newData.exists() && data.child('reserved').val() !== true && newData.child('reserved').val() === true && newData.child('time').val() === data.child('time').val() && newData.child('status').val() === data.child('status').val() && newData.child('reservationId').isString() && root.child('emergencySlotClaims').child($year).child($slotId).val() === newData.child('reservationId').val() && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('slotId').val() === $slotId && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('time').val() === newData.child('time').val() && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('status').val() === 'booked') || (auth == null && data.child('reserved').val() === true && newData.child('reserved').val() === false && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).exists() && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).child('timestamp').val() <= now + 900000 && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).child('timestamp').val() >= now - 900000 && root.child('years').child($year).child('reservations').child(data.child('reservationId').val()).child('status').val() === 'canceled')",
+          "$slotId": {            ".write": "(auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true) || (auth == null && data.exists() && newData.exists() && data.child('reserved').val() !== true && newData.child('reserved').val() === true && newData.child('time').val() === data.child('time').val() && newData.child('status').val() === data.child('status').val() && newData.child('reservationId').isString() && root.child('emergencySlotClaims').child($year).child($slotId).val() === newData.child('reservationId').val() && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('slotId').val() === $slotId && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('time').val() === newData.child('time').val() && root.child('years').child($year).child('reservations').child(newData.child('reservationId').val()).child('status').val() === 'booked') || (auth == null && data.child('reserved').val() === true && newData.child('reserved').val() === false && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).exists() && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).child('timestamp').val() <= now + 900000 && root.child('emergencyCancelRequests').child($year).child(data.child('reservationId').val()).child('timestamp').val() >= now - 900000 && root.child('years').child($year).child('reservations').child(data.child('reservationId').val()).child('status').val() === 'canceled')",
             "time": {
               ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
             },
@@ -46,6 +45,17 @@
             "$other": {
               ".validate": false
             }
+          }
+        },
+        "reservationTombstones": {
+          ".read": true,
+          ".write": "auth != null && auth.provider === 'google' && auth.token.email_verified === true && (root.child('teacherAllowlist').child(auth.uid).val() === true || root.child('teacherAllowlist').child(auth.uid).child('enabled').val() === true) && root.child('teacherAllowlist').child(auth.uid).child('canManageSystem').val() === true",
+          "$resId": {
+            ".validate": "newData.hasChildren(['nickname', 'time', 'deletedAt'])",
+            "nickname": { ".validate": "newData.isString() && newData.val().matches(/^[^.#$\\/\\[\\]<>]{1,50}$/)" },
+            "time": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+            "deletedAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+            "$other": { ".validate": false }
           }
         },
         "reservations": {
@@ -375,8 +385,8 @@
       }
     },
     "privateRuntime": {
-      ".read": false,
-      ".write": false,
+      ".read": "auth != null && auth.token.email_verified === true && auth.token.email.endsWith('.gserviceaccount.com')",
+      ".write": "auth != null && auth.token.email_verified === true && auth.token.email.endsWith('.gserviceaccount.com')",
       "historySessions": {
         ".indexOn": ["expiresAt"]
       },

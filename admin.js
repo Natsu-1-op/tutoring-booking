@@ -1041,16 +1041,30 @@
 
     function deleteSingleReservation(resKey, slotId, nickname) {
         if (!confirm(`确定要删除 ${nickname} 的预约记录吗？`)) return;
-        updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
-            if (!result.ok) {
-                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
+        SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snapshot => {
+            const reservation = snapshot.val();
+            if (!reservation) {
+                alert('该记录已不存在。');
                 throw { silent: true };
             }
-            if (result.slotConflict) {
-                alert('预约已标记为取消，但排班所有权异常，记录暂不删除，请先修复排班。');
-                throw { silent: true };
-            }
-            return SystemRouter.getReservationsRef(viewingYear).child(resKey).remove();
+            return updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
+                if (!result.ok) {
+                    alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
+                    throw { silent: true };
+                }
+                if (result.slotConflict) {
+                    alert('预约已标记为取消，但排班所有权异常，记录暂不删除，请先修复排班。');
+                    throw { silent: true };
+                }
+                return SystemRouter.getReservationsRef(viewingYear).child(resKey).remove().then(() => {
+                    // 写墓碑：学生端本机缓存据此自动清理这条已被删除的预约（幽灵记录）
+                    return db.ref(`years/${viewingYear}/reservationTombstones/${resKey}`).set({
+                        nickname,
+                        time: String(reservation.time || ''),
+                        deletedAt: Date.now()
+                    }).catch(() => null);
+                });
+            });
         }).then(() => {
             SystemRouter.getLogsRef(viewingYear).push({ action: `删除了学生的预约记录: [${nickname}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
         }).catch((err) => {
