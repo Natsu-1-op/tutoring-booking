@@ -74,7 +74,6 @@
         const requireManager = Boolean(options && options.requireManager);
         const { auth, database } = ensureFirebase(config);
         let wasAuthorized = false;
-        let preserveAuthorizationError = false;
 
         const setError = message => {
             if (errorElement) errorElement.textContent = message || '';
@@ -115,11 +114,7 @@
                 setBusy(false);
                 if (signOutButton) signOutButton.hidden = true;
                 if (overlay) overlay.style.display = '';
-                if (preserveAuthorizationError) {
-                    preserveAuthorizationError = false;
-                } else {
-                    setError('请使用已加入教师名单的 Google 账号登录。');
-                }
+                setError('请使用已加入教师名单的 Google 账号登录。');
                 if (wasAuthorized && typeof onSignedOut === 'function') onSignedOut();
                 wasAuthorized = false;
                 return;
@@ -131,12 +126,12 @@
                 if (!profile || (requireManager && !profile.canManageSystem)) {
                     const account = user.email ? `账号 ${user.email}` : '该 Google 账号';
                     const uidHint = user.uid ? `，当前 UID：${user.uid}` : '';
-                    preserveAuthorizationError = true;
-                    await auth.signOut();
                     setBusy(false);
                     setError(requireManager && profile
                         ? `${account} 没有系统管理权限，无法进入该页面。${uidHint}`
                         : `${account} 尚未加入教师名单。请将这个 UID 加入 teacherAllowlist：${user.uid || '未知'}`);
+                    // 保留 Firebase 登录状态以便完成首次白名单配置；遮罩仍保持显示，
+                    // 且 enterAdminAfterGoogleAuth 不会被调用，因此不会获得后台数据权限。
                     return;
                 }
                 if (overlay) overlay.style.display = 'none';
