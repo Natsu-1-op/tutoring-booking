@@ -49,8 +49,55 @@
         }
     </style>
     <link rel="stylesheet" href="money.css">
+    <style>
+        html.money-auth-pending body > *:not(#moneyPageGate) { visibility: hidden !important; }
+        html:not(.money-auth-pending) #moneyPageGate { display: none !important; }
+    </style>
+    <script>
+        // 课时费页面只接受 admin.html 发放的一次性通行标记；直接打开页面仍需输入管理员密码。
+        (function () {
+            const handoffKey = 'money_admin_handoff_v1';
+            let granted = false;
+            try {
+                const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+                const token = hash.get('admin-handoff');
+                const handoffs = [];
+                for (const storage of [window.localStorage, window.sessionStorage]) {
+                    try {
+                        const raw = storage.getItem(handoffKey);
+                        if (raw) handoffs.push({ storage, value: JSON.parse(raw) });
+                    } catch (e) {}
+                }
+                const handoff = handoffs.find(item => item.value && item.value.token === token)?.value;
+                if (token && handoff && Number(handoff.expiresAt) > Date.now()) {
+                    granted = true;
+                    handoffs.forEach(item => { try { item.storage.removeItem(handoffKey); } catch (e) {} });
+                } else if (handoffs.some(item => item.value && Number(item.value.expiresAt) <= Date.now())) {
+                    handoffs.forEach(item => { try { item.storage.removeItem(handoffKey); } catch (e) {} });
+                }
+                if (token && window.history && window.history.replaceState) {
+                    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+                }
+            } catch (e) {}
+            window.__moneyPageAccessGranted = granted;
+            window.__moneyPageStarted = false;
+            document.documentElement.classList.add('money-auth-pending');
+            if (granted) document.documentElement.classList.remove('money-auth-pending');
+        })();
+    </script>
 </head>
 <body class="money-page bg-gray-50 h-screen flex flex-col overflow-hidden text-slate-800">
+
+    <div id="moneyPageGate" class="fixed inset-0 z-[100] bg-slate-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+            <h1 class="text-lg font-semibold text-slate-800 mb-2">课时费管家</h1>
+            <p class="text-sm text-slate-500 mb-4">请输入管理员密码后进入教师端。</p>
+            <label for="moneyPageGatePassword" class="sr-only">管理员密码</label>
+            <input id="moneyPageGatePassword" type="password" autocomplete="current-password" placeholder="管理员密码" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <button id="moneyPageGateSubmit" type="button" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">进入</button>
+            <p id="moneyPageGateError" class="text-sm text-red-600 mt-3 min-h-[1.25rem]" role="alert"></p>
+        </div>
+    </div>
 
     <header class="money-header bg-white shadow-sm z-10 flex-none">
         <div class="max-w-3xl mx-auto px-4 py-3">
@@ -187,6 +234,13 @@
                 <p class="text-xs text-gray-500 mb-3">自动读取约课系统中「已完成」的预约，按预约ID去重。时间填错可修改后导入或忽略（可恢复）；与已入账课时时间重合会标红提示并默认跳过（防重复计费）。课时数据加密同步到云端，按学年独立存放。</p>
                 <div id="feeYearSummary" class="text-xs text-gray-500 mb-2"></div>
                 <div id="feeTombstoneNotice" class="hidden mb-2 text-xs font-medium p-2 rounded-lg bg-red-50 border border-red-200 text-red-700" role="status"></div>
+                <div id="feeCloudConflictNotice" class="hidden mb-2 text-xs p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800" role="alert">
+                    <div id="feeCloudConflictText" class="mb-2"></div>
+                    <div class="flex gap-2 flex-wrap">
+                        <button type="button" onclick="resolveCloudConflict('remote')" class="text-xs bg-white border border-amber-300 rounded px-2 py-1">采用云端版本</button>
+                        <button type="button" onclick="resolveCloudConflict('local')" class="text-xs bg-amber-600 text-white rounded px-2 py-1">保留本机并上传</button>
+                    </div>
+                </div>
                 <div id="feeSyncStatus" class="text-xs text-gray-400 mb-2">正在连接云端…</div>
                 <div id="feeReconciliationNotice" class="fee-reconciliation-notice hidden" role="status"></div>
                 <section id="feeMismatchSection" class="fee-mismatch-section hidden" aria-labelledby="feeMismatchTitle">
@@ -1178,10 +1232,16 @@
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
+    function startMoneyPage() {
+        if (!window.__moneyPageAccessGranted || window.__moneyPageStarted) return;
+        window.__moneyPageStarted = true;
         init();
+    }
+    window.startMoneyPage = startMoneyPage;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startMoneyPage);
+    } else {
+        startMoneyPage();
     }
 </script>
 <script>
@@ -1200,6 +1260,69 @@ const FEE_FIREBASE_CONFIG = {
   databaseURL: "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"
 };
 
+let moneyGateLoginFailures = 0;
+let moneyGateBlockedUntil = 0;
+let moneyCloudStarted = false;
+
+function setMoneyGateError(message) {
+    const errorEl = document.getElementById('moneyPageGateError');
+    if (errorEl) errorEl.textContent = message || '';
+}
+
+async function verifyMoneyPageAccess() {
+    const input = document.getElementById('moneyPageGatePassword');
+    const button = document.getElementById('moneyPageGateSubmit');
+    const pass = input ? input.value.trim() : '';
+    if (Date.now() < moneyGateBlockedUntil) {
+        setMoneyGateError(`尝试过多，请 ${Math.ceil((moneyGateBlockedUntil - Date.now()) / 1000)} 秒后重试。`);
+        return;
+    }
+    if (!pass) { setMoneyGateError('请输入管理员密码。'); return; }
+    if (pass.length > 128 || /[.#$\/\[\]<>\u0000-\u001F\u007F]/.test(pass)) {
+        setMoneyGateError('密码格式不合法。');
+        return;
+    }
+    if (button) button.disabled = true;
+    setMoneyGateError('正在验证…');
+    try {
+        if (!window.firebase) throw new Error('认证服务尚未加载');
+        if (!firebase.apps.length) firebase.initializeApp(FEE_FIREBASE_CONFIG);
+        const snapshot = await firebase.database().ref(`admin_auth/${pass}`).once('value');
+        if (!snapshot.exists() || snapshot.val() !== true) {
+            moneyGateLoginFailures++;
+            if (moneyGateLoginFailures >= 5) {
+                moneyGateLoginFailures = 0;
+                moneyGateBlockedUntil = Date.now() + 30 * 1000;
+                setMoneyGateError('尝试过多，请 30 秒后重试。');
+            } else {
+                setMoneyGateError('密码错误。');
+            }
+            return;
+        }
+        moneyGateLoginFailures = 0;
+        window.__moneyPageAccessGranted = true;
+        document.documentElement.classList.remove('money-auth-pending');
+        const gate = document.getElementById('moneyPageGate');
+        if (gate) gate.remove();
+        if (input) input.value = '';
+        window.startMoneyPage();
+        onReady();
+    } catch (e) {
+        console.error('课时费页面认证失败', e);
+        setMoneyGateError('认证服务暂时不可用，请检查网络后重试。');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function setupMoneyPageGate() {
+    const input = document.getElementById('moneyPageGatePassword');
+    const button = document.getElementById('moneyPageGateSubmit');
+    if (button) button.onclick = verifyMoneyPageAccess;
+    if (input) input.onkeypress = event => { if (event.key === 'Enter') verifyMoneyPageAccess(); };
+    if (!window.__moneyPageAccessGranted && input) input.focus();
+}
+
 let db = null;
 let activeYear = null;
 let pendingLessons = [];
@@ -1212,8 +1335,13 @@ const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
 const FEE_APP_VERSION = '2026-08-22a'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
+const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
+const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
+const FEE_PASSPHRASE_STORE = 'device-secrets';
 let cloudVersionsByYear = {};
 let feePassphraseChanging = false;
+let feePassphrasePromise = null;
 
 async function ensureCloudReady() {
     if (db) return true;
@@ -1231,39 +1359,141 @@ async function ensureCloudReady() {
 }
 
 // ---- 加密（AES-GCM + PBKDF2，口令仅存本机）----
-function ensureFeePassphrase() {
-    // 优先本标签页；其次"记住口令"（localStorage，跨标签页/重启仍可用）。
-    // 注意：这是教师私有工具的便利取舍——口令保存在本机浏览器，换设备仍需输入。
-    let pass = sessionStorage.getItem(FEE_PASSPHRASE_KEY);
-    if (pass) return pass;
+// 口令不再以明文放进 localStorage：localStorage 只保存密文，解密密钥是
+// IndexedDB 中不可导出的 CryptoKey。这样保留刷新后的自动同步，同时避免
+// 直接读取 localStorage 就得到课时费口令。
+function openFeePassphraseDb() {
+    return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('当前浏览器不支持本机安全口令存储')); return; }
+        const request = indexedDB.open(FEE_PASSPHRASE_DB, 1);
+        request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains(FEE_PASSPHRASE_STORE)) request.result.createObjectStore(FEE_PASSPHRASE_STORE);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('本机安全口令存储初始化失败'));
+    });
+}
+
+function readFeeDeviceKey(dbHandle) {
+    return new Promise((resolve, reject) => {
+        const request = dbHandle.transaction(FEE_PASSPHRASE_STORE, 'readonly').objectStore(FEE_PASSPHRASE_STORE).get('deviceKey');
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error || new Error('读取本机安全口令密钥失败'));
+    });
+}
+
+function saveFeeDeviceKey(dbHandle, key) {
+    return new Promise((resolve, reject) => {
+        const tx = dbHandle.transaction(FEE_PASSPHRASE_STORE, 'readwrite');
+        tx.objectStore(FEE_PASSPHRASE_STORE).put(key, 'deviceKey');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('保存本机安全口令密钥失败'));
+    });
+}
+
+async function getFeeDeviceKey() {
+    const dbHandle = await openFeePassphraseDb();
+    let key = await readFeeDeviceKey(dbHandle);
+    if (!key) {
+        key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+        await saveFeeDeviceKey(dbHandle, key);
+    }
+    dbHandle.close();
+    return key;
+}
+
+async function wrapRememberedFeePassphrase(pass) {
+    const key = await getFeeDeviceKey();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plain = new TextEncoder().encode(pass);
+    const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+    return JSON.stringify({ v: 1, iv: bufToB64(iv), data: bufToB64(new Uint8Array(cipher)) });
+}
+
+async function unwrapRememberedFeePassphrase(payload) {
+    const parsed = JSON.parse(payload);
+    if (!parsed || parsed.v !== 1 || !parsed.iv || !parsed.data) return null;
+    const key = await getFeeDeviceKey();
+    const iv = Uint8Array.from(atob(parsed.iv), c => c.charCodeAt(0));
+    const cipher = Uint8Array.from(atob(parsed.data), c => c.charCodeAt(0));
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher);
+    return new TextDecoder().decode(plain);
+}
+
+async function rememberFeePassphrase(pass) {
     try {
-        const remembered = localStorage.getItem('fee_vault_pass_remembered');
+        const wrapped = await wrapRememberedFeePassphrase(pass);
+        localStorage.setItem(FEE_REMEMBERED_CIPHER_KEY, wrapped);
+        localStorage.removeItem(FEE_REMEMBERED_LEGACY_KEY);
+        localStorage.removeItem('fee_vault_pass');
+        return true;
+    } catch (e) {
+        console.warn('本机口令未能安全记住，下次打开时需要重新输入', e);
+        return false;
+    }
+}
+
+function clearRememberedFeePassphrase() {
+    try {
+        localStorage.removeItem(FEE_REMEMBERED_CIPHER_KEY);
+        localStorage.removeItem(FEE_REMEMBERED_LEGACY_KEY);
+        localStorage.removeItem('fee_vault_pass');
+    } catch (e) {}
+}
+
+async function readRememberedFeePassphrase() {
+    try {
+        const wrapped = localStorage.getItem(FEE_REMEMBERED_CIPHER_KEY);
+        if (wrapped) {
+            const pass = await unwrapRememberedFeePassphrase(wrapped);
+            if (pass) return pass;
+        }
+    } catch (e) {}
+
+    // 兼容上一轮版本的明文口令：当前标签页迁移后立即删除明文副本。
+    let legacyPass = null;
+    try {
+        legacyPass = localStorage.getItem(FEE_REMEMBERED_LEGACY_KEY) || localStorage.getItem('fee_vault_pass');
+    } catch (e) {}
+    if (legacyPass) {
+        const migrated = await rememberFeePassphrase(legacyPass);
+        // 即使当前浏览器无法提供安全存储，也不继续保留旧的明文副本；本次标签页仍可正常使用。
+        if (!migrated) clearRememberedFeePassphrase();
+        return legacyPass;
+    }
+    return null;
+}
+
+async function ensureFeePassphrase() {
+    let pass = null;
+    try { pass = sessionStorage.getItem(FEE_PASSPHRASE_KEY); } catch (e) {}
+    if (pass) return pass;
+    if (feePassphrasePromise) return feePassphrasePromise;
+
+    feePassphrasePromise = (async () => {
+        const remembered = await readRememberedFeePassphrase();
         if (remembered) {
-            sessionStorage.setItem(FEE_PASSPHRASE_KEY, remembered);
+            try { sessionStorage.setItem(FEE_PASSPHRASE_KEY, remembered); } catch (e) {}
             return remembered;
         }
-    } catch (e) {}
-    // 旧版本曾把口令存在 localStorage('fee_vault_pass')，迁入"记住"并清除旧键
-    try {
-        const legacyPass = localStorage.getItem('fee_vault_pass');
-        localStorage.removeItem('fee_vault_pass');
-        if (legacyPass) {
-            sessionStorage.setItem(FEE_PASSPHRASE_KEY, legacyPass);
-            localStorage.setItem('fee_vault_pass_remembered', legacyPass);
-            return legacyPass;
+        let entered = null;
+        try {
+            entered = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n口令会以本机加密形式保存，换设备同步时需输入同一口令。');
+        } catch (e) {
+            showToast('当前环境无法弹出口令框，请点击“云端口令”后重试。');
+            return null;
         }
-    } catch (e) {}
+        if (entered === null || !entered.trim()) return null;
+        const clean = entered.trim();
+        try { sessionStorage.setItem(FEE_PASSPHRASE_KEY, clean); } catch (e) {}
+        await rememberFeePassphrase(clean);
+        return clean;
+    })();
     try {
-        pass = prompt('设置课时费云端加密口令：\n数据将用此口令加密后存到约课系统数据库（学生只能看到密文）。\n口令会保存在本机浏览器，换设备同步时需输入同一口令。');
-    } catch (e) {
-        showToast('当前环境无法弹出口令框，请点击“云端口令”后重试。');
-        return null;
+        return await feePassphrasePromise;
+    } finally {
+        feePassphrasePromise = null;
     }
-    if (pass === null || !pass.trim()) return null;
-    const clean = pass.trim();
-    sessionStorage.setItem(FEE_PASSPHRASE_KEY, clean);
-    try { localStorage.setItem('fee_vault_pass_remembered', clean); } catch (e) {}
-    return clean;
 }
 
 async function deriveFeeKey(pass, saltBytes, iterations) {
@@ -1284,7 +1514,7 @@ function bufToB64(buf) {
     return btoa(bin);
 }
 async function encryptFeeData(obj) {
-    const pass = ensureFeePassphrase();
+    const pass = await ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const key = await deriveFeeKey(pass, salt, FEE_KDF_ITERATIONS);
@@ -1297,7 +1527,7 @@ async function encryptFeeData(obj) {
     return { cipher: bufToB64(combined), salt: bufToB64(salt), kdfIterations: FEE_KDF_ITERATIONS };
 }
 async function decryptFeeData(b64, saltB64, iterationValue) {
-    const pass = ensureFeePassphrase();
+    const pass = await ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
     const iterations = saltB64 ? Number(iterationValue) : 100000;
     if (!Number.isInteger(iterations) || iterations < 100000 || iterations > 1000000) throw new Error('云端加密参数不合法');
@@ -1346,41 +1576,153 @@ function getYearSlice(year) {
 
 let cloudPushChain = Promise.resolve(true);
 let lastCloudPushError = ''; // 最近一次云端推送失败原因，供对账等流程展示
+let cloudDeleteInProgress = false;
+const FEE_CONFLICT_STORAGE_PREFIX = 'fee_vault_conflict_v1_';
+
+function cloudConflictStorageKey(year) {
+    return FEE_CONFLICT_STORAGE_PREFIX + String(year || '');
+}
+
+function getCloudConflict(year) {
+    try {
+        const raw = localStorage.getItem(cloudConflictStorageKey(year));
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+}
+
+function setCloudConflict(year, conflict) {
+    try { localStorage.setItem(cloudConflictStorageKey(year), JSON.stringify(conflict)); } catch (e) {}
+    renderCloudConflictNotice(conflict);
+}
+
+function clearCloudConflict(year) {
+    try { localStorage.removeItem(cloudConflictStorageKey(year)); } catch (e) {}
+    clearCloudConflictNotice();
+}
+
+function renderCloudConflictNotice(conflict) {
+    const el = document.getElementById('feeCloudConflictNotice');
+    const text = document.getElementById('feeCloudConflictText');
+    if (!el || !text) return;
+    if (!conflict) { el.classList.add('hidden'); text.textContent = ''; return; }
+    const remoteRevision = Number(conflict.remoteRevision);
+    const revision = conflict.remoteRevision !== null && Number.isFinite(remoteRevision) ? `云端版本 ${remoteRevision}` : '云端版本已变化';
+    text.textContent = `${activeYear || ''} 年账本在其他设备上发生了修改（${revision}）。请选择采用云端版本，或保留本机版本并覆盖上传；当前不会自动覆盖。`;
+    el.classList.remove('hidden');
+}
+
+function clearCloudConflictNotice() {
+    const el = document.getElementById('feeCloudConflictNotice');
+    const text = document.getElementById('feeCloudConflictText');
+    if (el) el.classList.add('hidden');
+    if (text) text.textContent = '';
+}
+
+async function resolveCloudConflict(mode) {
+    if (!activeYear) return;
+    if (mode === 'local') {
+        await forceUploadCloud();
+        return;
+    }
+    if (mode === 'remote') {
+        await pullCloud({ acceptRemote: true });
+    }
+}
 
 async function pushCloudNow(job, options) {
     options = options || {};
     try {
         if (!db || !job || !job.year) return false;
         const year = job.year;
+        if (cloudDeleteInProgress) return false;
+        if (!options.force) {
+            const conflict = getCloudConflict(year);
+            if (conflict) {
+                lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
+                renderCloudConflictNotice(conflict);
+                return false;
+            }
+            const tombstone = (await db.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val();
+            if (tombstone && tombstone.deletedAt) {
+                lastCloudPushError = `${year} 年账本已被手动删除，请使用“上传本机到云端”明确重建。`;
+                renderTombstoneNotice(tombstone.deletedAt);
+                showToast(lastCloudPushError);
+                return false;
+            }
+        }
         const slice = job.slice;
+        const ref = vaultRefFor(year);
+        let known = cloudVersionsByYear[year];
+        const remote = (await ref.once('value')).val();
+        const knownRevision = known ? Number(known.revision || 0) : null;
+        if (!options.force && remote && known && Number(remote.revision || 0) !== knownRevision) {
+            const conflict = { reason: 'remote-changed', remoteRevision: Number(remote.revision || 0), localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            setCloudConflict(year, conflict);
+            lastCloudPushError = `${year} 年云端账本已被其他设备修改，请选择保留哪一份。`;
+            showToast(lastCloudPushError);
+            return false;
+        }
+        // 页面刚打开、初始拉取尚未完成时，以当前服务器版本建立基线，避免无意义的 unknown-version 失败。
+        if (!options.force && remote && !known) {
+            known = { revision: Number(remote.revision || 0), updatedAt: Number(remote.updatedAt || 0) };
+            cloudVersionsByYear[year] = known;
+        }
+        if (!options.force && known && !remote) {
+            const conflict = { reason: 'remote-deleted', remoteRevision: null, localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            setCloudConflict(year, conflict);
+            lastCloudPushError = `${year} 年云端账本刚被删除，请确认后手动重建。`;
+            showToast(lastCloudPushError);
+            return false;
+        }
         const encrypted = await encryptFeeData({
             students: slice.students,
             records: slice.records,
             lessonOverrides: slice.lessonOverrides || {},
             dismissedLessons: slice.dismissedLessons || []
         });
-        const ref = vaultRefFor(year);
         const updatedAt = Date.now();
-        // last-write-wins：直接覆盖写入。原版本守卫(unknown-version/remote-changed/remote-deleted)
-        // 在单人使用场景下只会造成"推送被拒、对账报同步失败"，此处全部移除；
-        // 多设备并发写由 Firebase 事务本身保证原子性，删除保护由墓碑负责。
-        const result = await ref.transaction(existing => {
-            return {
-                schemaVersion: 3,
-                revision: Number(existing && existing.revision || 0) + 1,
-                updatedAt,
-                cipher: encrypted.cipher,
-                salt: encrypted.salt,
-                kdfIterations: encrypted.kdfIterations
-            };
-        });
+        const payload = { schemaVersion: 3, updatedAt, cipher: encrypted.cipher, salt: encrypted.salt, kdfIterations: encrypted.kdfIterations };
+        const runTransaction = async () => {
+            let conflictReason = '';
+            const result = await ref.transaction(existing => {
+                conflictReason = '';
+                if (!options.force && existing && known && Number(existing.revision || 0) !== Number(known.revision || 0)) {
+                    conflictReason = 'remote-changed';
+                    return;
+                }
+                if (!options.force && known && !existing) {
+                    conflictReason = 'remote-deleted';
+                    return;
+                }
+                return { ...payload, revision: Number(existing && existing.revision || 0) + 1 };
+            });
+            return { result, conflictReason };
+        };
+        let transaction = await runTransaction();
+        // Firebase 事务第一次可能只拿到本地空缓存；重新读取后仍存在才重试，避免误报删除。
+        if (!transaction.result.committed && transaction.conflictReason === 'remote-deleted' && !options.force) {
+            const retryRemote = (await ref.once('value')).val();
+            if (retryRemote && known && Number(retryRemote.revision || 0) === Number(known.revision || 0)) {
+                transaction = await runTransaction();
+            } else if (retryRemote) {
+                const conflict = { reason: 'remote-changed', remoteRevision: Number(retryRemote.revision || 0), localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+                setCloudConflict(year, conflict);
+                lastCloudPushError = `${year} 年云端账本已被其他设备修改，请选择保留哪一份。`;
+                showToast(lastCloudPushError);
+                return false;
+            }
+        }
+        const result = transaction.result;
         if (!result.committed) {
-            lastCloudPushError = `${year} 年云端账本写入未完成（事务未提交），请重试。`;
+            const conflict = { reason: transaction.conflictReason || 'remote-changed', remoteRevision: null, localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            setCloudConflict(year, conflict);
+            lastCloudPushError = `${year} 年云端账本写入未完成，请选择保留哪一份后重试。`;
             showToast(lastCloudPushError);
             return false;
         }
         const committedVault = result.snapshot.val() || {};
         cloudVersionsByYear[year] = { revision: Number(committedVault.revision || 0), updatedAt: Number(committedVault.updatedAt || updatedAt) };
+        clearCloudConflict(year);
         lastCloudPushError = '';
         return true;
     } catch (e) {
@@ -1393,6 +1735,8 @@ async function pushCloudNow(job, options) {
 
 function pushCloud() {
     if (feePassphraseChanging) return cloudPushChain;
+    // 删除流程需要先排空已有写入，再原子删除并写墓碑；此期间不应把新本地修改误报为已同步。
+    if (cloudDeleteInProgress) return Promise.resolve(false);
     const year = activeYear;
     const slice = getYearSlice(year);
     const job = { year, slice: cloneForCloud(slice), localUpdatedAt: data.yearUpdatedAt && data.yearUpdatedAt[year] || data.updatedAt || 0 };
@@ -1415,6 +1759,7 @@ async function forceUploadCloud() {
     const pushed = await cloudPushChain;
     if (!pushed) { showToast('上传失败，请检查网络后重试'); return; }
     try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
+    clearCloudConflict(activeYear);
     clearTombstoneNotice();
     renderYearSummary();
     alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
@@ -1448,16 +1793,24 @@ async function deleteCloudData() {
     const ok = await ensureCloudReady();
     if (!ok) return;
     if (!confirm(`确定删除云端 ${activeYear} 年的课时费数据吗？\n\n本机数据不会受影响（所有数据仍保留在本地）。\n删除后其他设备不会自动重新上传；如需重新上传请点「上传本机到云端」。`)) return;
+    cloudDeleteInProgress = true;
     try {
-        await vaultRef().remove();
         const deletedAt = Date.now();
-        await db.ref(`years/${activeYear}/feeVaultDeletedAt`).set({ deletedAt });
+        // 先等已经排队的写入结束，再用一次多路径更新完成删除+墓碑，避免中间状态被其他设备看到。
+        await cloudPushChain.catch(() => false);
+        await db.ref().update({
+            [`years/${activeYear}/feeVault`]: null,
+            [`years/${activeYear}/feeVaultDeletedAt`]: { deletedAt }
+        });
         delete cloudVersionsByYear[activeYear];
+        clearCloudConflict(activeYear);
         renderTombstoneNotice(deletedAt);
         showToast(`已删除云端 ${activeYear} 年数据，本地保留`);
         renderYearSummary();
     } catch (e) {
         showToast('删除失败：' + (e.message || e));
+    } finally {
+        cloudDeleteInProgress = false;
     }
 }
 
@@ -1486,7 +1839,9 @@ function renderYearSummary() {
     el.innerHTML = '本机账本涵盖年份：' + years.map(y => y === activeYear ? `<b>${y}（当前同步年）</b>` : y).join('、') + ' · 云端仅同步当前学年，其他年份只留本地';
 }
 
-async function pullCloud() {
+async function pullCloud(options) {
+    options = options || {};
+    const acceptRemote = options.acceptRemote === true;
     try {
         const ok = await ensureCloudReady();
         if (!ok) return;
@@ -1513,15 +1868,23 @@ async function pullCloud() {
             return;
         }
         clearTombstoneNotice();
-        // 云端有账本：清理可能残留的墓碑节点（防御性，避免旧墓碑导致误判）
-        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
-        cloudVersionsByYear[activeYear] = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
-        if (!ensureFeePassphrase()) return;
+        const remoteVersion = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
+        if (!await ensureFeePassphrase()) return;
         const cloudData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
+        // 只有成功解密后才确认这个版本可作为本机写入基线；错误口令不能给后续自动上传放行。
+        cloudVersionsByYear[activeYear] = remoteVersion;
+        // 只有成功解密并完成拉取后，才清理可能残留的墓碑节点。
+        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
         // 本地比云端新：整体覆盖云端（本地已删的流水、改过的时间得以传播），
         // 不做并集合并——否则云端残留的旧记录会被合并回来，删除被撤销。
         const localUpdatedAt = Number((data.yearUpdatedAt && data.yearUpdatedAt[activeYear]) || 0);
-        if (localUpdatedAt > Number(vault.updatedAt || 0)) {
+        const pendingConflict = getCloudConflict(activeYear);
+        if (localUpdatedAt > Number(vault.updatedAt || 0) && !acceptRemote) {
+            if (pendingConflict) {
+                renderCloudConflictNotice(pendingConflict);
+                renderYearSummary();
+                return;
+            }
             await pushCloud();
             renderYearSummary();
             return;
@@ -1536,7 +1899,9 @@ async function pullCloud() {
         const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
         if (recordsChanged) {
             // 本机独有（云端没有）的记录：并集保留，防止覆盖丢数据；云端独有的记录与删除照常传播。
-            const localOnlyRecords = localActiveRecords.filter(lr => !cloudRecords.some(cr => sameRecordIdentity(lr, cr)));
+            const localOnlyRecords = acceptRemote
+                ? []
+                : localActiveRecords.filter(lr => !cloudRecords.some(cr => sameRecordIdentity(lr, cr)));
             if (localOnlyRecords.length > 0) {
                 localOnlyNames = new Set(localOnlyRecords.map(r => r.studentName));
                 data.records = localOtherYearRecords.concat(mergeRecordLists(cloudRecords, localOnlyRecords));
@@ -1575,6 +1940,7 @@ async function pullCloud() {
             _applyingCloud = false;
             showToast(`已合并云端 ${activeYear} 年账本到本地${mergedLocalOnlyCount ? `，并保留本机 ${mergedLocalOnlyCount} 条云端没有的记录` : ''}`);
         }
+        if (pendingConflict || acceptRemote) clearCloudConflict(activeYear);
         renderYearSummary();
     } catch (e) {
         console.error('云端拉取失败', e);
@@ -2645,25 +3011,32 @@ async function restoreDismissed(idx) {
 }
 
 async function changeFeePassphrase() {
+    const oldPass = await ensureFeePassphrase();
+    if (!oldPass) return;
+    let oldRememberedCipher = null;
+    try { oldRememberedCipher = localStorage.getItem(FEE_REMEMBERED_CIPHER_KEY); } catch (e) {}
     const pass = prompt('输入新的云端加密口令（留空 = 取消）：');
     if (pass === null) return;
     if (!pass.trim()) { showToast('已取消'); return; }
-    const oldPass = sessionStorage.getItem(FEE_PASSPHRASE_KEY);
     const newPass = pass.trim();
     feePassphraseChanging = true;
     try {
         // 先等待旧口令的排队上传完成，避免旧任务在新口令下重新加密。
         await cloudPushChain.catch(() => false);
         sessionStorage.setItem(FEE_PASSPHRASE_KEY, newPass);
-        try { localStorage.setItem('fee_vault_pass_remembered', newPass); } catch (e) {}
+        const remembered = await rememberFeePassphrase(newPass);
+        if (!remembered) clearRememberedFeePassphrase();
         showToast('口令已更新，正在重新加密上传…');
         const rotationJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
         cloudPushChain = cloudPushChain.then(() => pushCloudNow(rotationJob, { force: true }), () => pushCloudNow(rotationJob, { force: true }));
         const ok = await cloudPushChain;
         if (!ok) throw new Error('云端重新加密失败');
     } catch (e) {
-        if (oldPass === null) sessionStorage.removeItem(FEE_PASSPHRASE_KEY);
-        else sessionStorage.setItem(FEE_PASSPHRASE_KEY, oldPass);
+        sessionStorage.setItem(FEE_PASSPHRASE_KEY, oldPass);
+        try {
+            if (oldRememberedCipher) localStorage.setItem(FEE_REMEMBERED_CIPHER_KEY, oldRememberedCipher);
+            else clearRememberedFeePassphrase();
+        } catch (restoreError) {}
         showToast('新口令上传失败，已恢复原口令');
     } finally {
         feePassphraseChanging = false;
@@ -2692,6 +3065,8 @@ switchTab = function(view) {
 
 // ---- 启动时：本地数据就绪后拉云端（含 updatedAt 初始化）----
 function onReady() {
+    if (!window.__moneyPageAccessGranted || moneyCloudStarted) return;
+    moneyCloudStarted = true;
     const versionTag = document.getElementById('feeVersionTag');
     if (versionTag) versionTag.textContent = 'v' + FEE_APP_VERSION;
     console.log('[课时费管家] 版本 ' + FEE_APP_VERSION);
@@ -2700,10 +3075,14 @@ function onReady() {
     data.dismissedLessons = data.dismissedLessons || [];
     pullCloud();
 }
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', onReady);
-} else {
+function initializeMoneyPageAccess() {
+    setupMoneyPageGate();
     onReady();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeMoneyPageAccess);
+} else {
+    initializeMoneyPageAccess();
 }
 </script>
 </body>

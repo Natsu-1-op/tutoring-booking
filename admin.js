@@ -12,6 +12,8 @@
     let viewingYear = "2026";
     const ADMIN_SESSION_KEY = 'admin_session_auth_v2';
     const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
+    const MONEY_HANDOFF_KEY = 'money_admin_handoff_v1';
+    const MONEY_HANDOFF_TTL_MS = 60 * 1000;
     const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
     let adminLoginFailures = 0;
     let adminLoginBlockedUntil = 0;
@@ -175,6 +177,26 @@
         crypto.getRandomValues(bytes);
         return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
     }
+
+    // 课时费页面使用一次性短时通行标记，避免从管理员工作台进入时再次输入密码。
+    // 直接访问 money.html 没有这个标记，仍会显示管理员密码验证。
+    window.openMoneyFromAdmin = function(event) {
+        if (!isAdminAuthenticated) return true;
+        if (event) event.preventDefault();
+        const link = event && event.currentTarget;
+        const targetUrl = new URL(link && link.href ? link.href : 'money.html', window.location.href);
+        let token = '';
+        try {
+            token = generateSecureCode(48);
+            const payload = JSON.stringify({ token, expiresAt: Date.now() + MONEY_HANDOFF_TTL_MS });
+            try { localStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
+            try { sessionStorage.setItem(MONEY_HANDOFF_KEY, payload); } catch (e) {}
+        } catch (e) { token = ''; }
+        if (token) targetUrl.hash = `admin-handoff=${encodeURIComponent(token)}`;
+        const opened = window.open(targetUrl.toString(), '_blank');
+        if (!opened) window.location.assign(targetUrl.toString());
+        return false;
+    };
 
     function inlineArg(value) {
         return escapeHtml(JSON.stringify(String(value ?? '')));
