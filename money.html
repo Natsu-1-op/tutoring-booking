@@ -51,7 +51,9 @@
     <link rel="stylesheet" href="money.css">
     <style>
         html.money-auth-pending body > *:not(#moneyPageGate) { visibility: hidden !important; }
+        html.fee-ledger-pending body > *:not(#moneyPageGate):not(#feeLedgerGate) { visibility: hidden !important; }
         html:not(.money-auth-pending) #moneyPageGate { display: none !important; }
+        html:not(.fee-ledger-pending) #feeLedgerGate { display: none !important; }
     </style>
     <script>
         // 课时费页面只接受 admin.html 发放的一次性通行标记；直接打开页面仍需输入管理员密码。
@@ -81,7 +83,9 @@
             } catch (e) {}
             window.__moneyPageAccessGranted = granted;
             window.__moneyPageStarted = false;
+            window.__feeLedgerReady = false;
             document.documentElement.classList.add('money-auth-pending');
+            document.documentElement.classList.add('fee-ledger-pending');
             if (granted) document.documentElement.classList.remove('money-auth-pending');
         })();
     </script>
@@ -96,6 +100,20 @@
             <input id="moneyPageGatePassword" type="password" autocomplete="current-password" placeholder="管理员密码" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
             <button id="moneyPageGateSubmit" type="button" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">进入</button>
             <p id="moneyPageGateError" class="text-sm text-red-600 mt-3 min-h-[1.25rem]" role="alert"></p>
+        </div>
+    </div>
+    <div id="feeLedgerGate" class="fixed inset-0 z-[90] bg-slate-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+            <h1 class="text-lg font-semibold text-slate-800 mb-2">正在读取云端账本</h1>
+            <p id="feeLedgerGateText" class="text-sm text-slate-500 mb-4">课时费数据只从云端读取，读取完成前不会显示本机账本。</p>
+            <div class="flex gap-2 flex-wrap">
+                <button id="feeLedgerRetryButton" type="button" onclick="retryCloudLedgerLoad()" class="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">刷新重试</button>
+                <button id="feeLedgerForceUploadButton" type="button" onclick="forceUploadCloud()" class="hidden bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-2 text-sm font-medium">明确上传本机账本</button>
+            </div>
+            <div id="feeLedgerConflictActions" class="hidden mt-3 flex gap-2 flex-wrap">
+                <button type="button" onclick="resolveCloudConflict('remote')" class="text-xs bg-white border border-amber-300 rounded px-2 py-1">采用云端版本</button>
+                <button type="button" onclick="resolveCloudConflict('local')" class="text-xs bg-amber-600 text-white rounded px-2 py-1">保留本机并上传</button>
+            </div>
         </div>
     </div>
 
@@ -407,34 +425,35 @@
     }
 
     function init() {
-        try {
-            const stored = localStorage.getItem(DB_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed.students)) data.students = parsed.students.map(normalizeStudent).filter(Boolean);
-                if (Array.isArray(parsed.records)) data.records = parsed.records.map(normalizeRecord).filter(Boolean);
-                if (Number.isFinite(Number(parsed.updatedAt))) data.updatedAt = Number(parsed.updatedAt);
-                // 时间修改记录与已忽略时间段也要从本地恢复，否则刷新即丢（云端只兜底）
-                if (parsed.lessonOverrides && typeof parsed.lessonOverrides === 'object') data.lessonOverrides = parsed.lessonOverrides;
-                if (Array.isArray(parsed.dismissedLessons)) data.dismissedLessons = parsed.dismissedLessons;
-                if (parsed.yearUpdatedAt && typeof parsed.yearUpdatedAt === 'object') data.yearUpdatedAt = parsed.yearUpdatedAt;
-                if (parsed.lessonOverridesByYear && typeof parsed.lessonOverridesByYear === 'object') data.lessonOverridesByYear = parsed.lessonOverridesByYear;
-                if (parsed.dismissedLessonsByYear && typeof parsed.dismissedLessonsByYear === 'object') data.dismissedLessonsByYear = parsed.dismissedLessonsByYear;
+        if (!window.__moneyDataLoaded) {
+            try {
+                const stored = localStorage.getItem(DB_KEY);
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed.students)) data.students = parsed.students.map(normalizeStudent).filter(Boolean);
+                    if (Array.isArray(parsed.records)) data.records = parsed.records.map(normalizeRecord).filter(Boolean);
+                    if (Number.isFinite(Number(parsed.updatedAt))) data.updatedAt = Number(parsed.updatedAt);
+                    // 旧版本本地账本只用于首次云端迁移，迁移完成后会立即删除。
+                    if (parsed.lessonOverrides && typeof parsed.lessonOverrides === 'object') data.lessonOverrides = parsed.lessonOverrides;
+                    if (Array.isArray(parsed.dismissedLessons)) data.dismissedLessons = parsed.dismissedLessons;
+                    if (parsed.yearUpdatedAt && typeof parsed.yearUpdatedAt === 'object') data.yearUpdatedAt = parsed.yearUpdatedAt;
+                    if (parsed.lessonOverridesByYear && typeof parsed.lessonOverridesByYear === 'object') data.lessonOverridesByYear = parsed.lessonOverridesByYear;
+                    if (parsed.dismissedLessonsByYear && typeof parsed.dismissedLessonsByYear === 'object') data.dismissedLessonsByYear = parsed.dismissedLessonsByYear;
+                }
+            } catch (e) {
+                console.error("Data corruption detected, resetting data to prevent crash.", e);
             }
-        } catch (e) {
-            console.error("Data corruption detected, resetting data to prevent crash.", e);
+            const today = new Date().toISOString().split('T')[0];
+            const dateInput = document.getElementById('recordDate');
+            if (dateInput) dateInput.value = today;
+            const monthEl = document.getElementById('statsMonthFilter');
+            if (monthEl) monthEl.value = String(new Date().getMonth() + 1).padStart(2, '0');
+            selectedDate = today;
+            window.__moneyLoadedLedgerYears = [...new Set((data.records || []).map(record => String(record.date || '').slice(0, 4)).filter(year => /^\d{4}$/.test(year)))];
+            window.__moneyDataLoaded = true;
         }
-        
-        const today = new Date().toISOString().split('T')[0];
-        const dateInput = document.getElementById('recordDate');
-
-        if(dateInput) dateInput.value = today;
-        // 统计页月份下拉默认当月（年份选项随数据由 populateStatsYearSelect 动态刷新）
-        const monthEl = document.getElementById('statsMonthFilter');
-        if (monthEl) monthEl.value = String(new Date().getMonth() + 1).padStart(2, '0');
-        
-        selectedDate = today;
-        
+        // 云端账本未完成读取前，不渲染任何本地账本数据。
+        if (!window.__feeLedgerReady) return;
         try {
             renderCalendar();
             renderStudentList();
@@ -446,14 +465,14 @@
     }
 
     function saveData() {
+        if (!window.__feeLedgerReady) return;
         try {
-            localStorage.setItem(DB_KEY, JSON.stringify(data));
             renderCalendar();
             updateSelectedDateView();
             renderStats();
             triggerSaveAnimation();
         } catch (e) {
-            showToast("保存失败，存储空间可能已满");
+            showToast("页面更新失败，请刷新重试");
         }
     }
 
@@ -1577,7 +1596,59 @@ function getYearSlice(year) {
 let cloudPushChain = Promise.resolve(true);
 let lastCloudPushError = ''; // 最近一次云端推送失败原因，供对账等流程展示
 let cloudDeleteInProgress = false;
+let cloudLedgerLoading = false;
 const FEE_CONFLICT_STORAGE_PREFIX = 'fee_vault_conflict_v1_';
+
+function clearLocalLedgerCache() {
+    try { localStorage.removeItem(DB_KEY); } catch (e) {}
+}
+
+function getUnmigratedLocalLedgerYears() {
+    const active = String(activeYear || '');
+    return (window.__moneyLoadedLedgerYears || []).filter(year => year !== active);
+}
+
+function keepOnlyActiveYearInMemory() {
+    const active = String(activeYear || '');
+    data.records = (data.records || []).filter(record => String(record.date || '').slice(0, 4) === active);
+}
+
+function showFeeLedgerPending(message, options) {
+    options = options || {};
+    window.__feeLedgerReady = false;
+    document.documentElement.classList.add('fee-ledger-pending');
+    const text = document.getElementById('feeLedgerGateText');
+    const retry = document.getElementById('feeLedgerRetryButton');
+    const force = document.getElementById('feeLedgerForceUploadButton');
+    const conflict = document.getElementById('feeLedgerConflictActions');
+    if (text) text.textContent = message || '课时费数据只从云端读取，读取完成前不会显示本机账本。';
+    if (retry) retry.classList.toggle('hidden', options.hideRetry === true);
+    if (force) force.classList.toggle('hidden', options.forceUpload !== true);
+    if (conflict) conflict.classList.toggle('hidden', options.conflict !== true);
+}
+
+function finishFeeLedgerLoad() {
+    const legacyYears = getUnmigratedLocalLedgerYears();
+    if (legacyYears.length === 0) {
+        clearLocalLedgerCache();
+    } else {
+        showToast(`当前学年已从云端读取；历史年份 ${legacyYears.join('、')} 尚未迁移，暂保留本机备份`);
+    }
+    window.__feeLedgerReady = true;
+    document.documentElement.classList.remove('fee-ledger-pending');
+    const force = document.getElementById('feeLedgerForceUploadButton');
+    const conflict = document.getElementById('feeLedgerConflictActions');
+    if (force) force.classList.add('hidden');
+    if (conflict) conflict.classList.add('hidden');
+    if (typeof init === 'function') init();
+    renderYearSummary();
+}
+
+async function retryCloudLedgerLoad() {
+    if (!window.__moneyPageAccessGranted || cloudLedgerLoading) return;
+    showFeeLedgerPending('正在重新读取云端账本…');
+    await pullCloud({ retry: true });
+}
 
 function cloudConflictStorageKey(year) {
     return FEE_CONFLICT_STORAGE_PREFIX + String(year || '');
@@ -1833,18 +1904,27 @@ function clearTombstoneNotice() {
 function renderYearSummary() {
     const el = document.getElementById('feeYearSummary');
     if (!el) return;
+    const legacyYears = getUnmigratedLocalLedgerYears();
     const yearsSet = new Set((data.records || []).map(r => String(r.date || '').slice(0, 4)).filter(y => /^\d{4}$/.test(y)));
-    if (yearsSet.size === 0) { el.innerHTML = ''; return; }
+    if (yearsSet.size === 0 && legacyYears.length === 0) { el.innerHTML = ''; return; }
     const years = [...yearsSet].sort();
-    el.innerHTML = '本机账本涵盖年份：' + years.map(y => y === activeYear ? `<b>${y}（当前同步年）</b>` : y).join('、') + ' · 云端仅同步当前学年，其他年份只留本地';
+    const cloudText = years.length ? `当前显示 ${years.map(y => y === activeYear ? `<b>${y}（云端）</b>` : y).join('、')} 年云端账本` : '当前已显示云端账本';
+    const legacyText = legacyYears.length ? `；历史年份 ${legacyYears.join('、')} 尚未迁移，仍保留本机备份` : '';
+    el.innerHTML = cloudText + legacyText;
 }
 
 async function pullCloud(options) {
     options = options || {};
     const acceptRemote = options.acceptRemote === true;
+    if (cloudLedgerLoading) return false;
+    cloudLedgerLoading = true;
+    showFeeLedgerPending(options.retry ? '正在重新读取云端账本…' : '正在读取云端账本…');
     try {
         const ok = await ensureCloudReady();
-        if (!ok) return;
+        if (!ok) {
+            showFeeLedgerPending('云端暂时无法连接，账本未显示。请检查网络后重试。');
+            return false;
+        }
         hydrateYearScopedFields(activeYear);
         const snap = await vaultRef().once('value');
         const vault = snap.val();
@@ -1854,22 +1934,30 @@ async function pullCloud(options) {
             try { tombstone = (await db.ref(`years/${activeYear}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
             if (tombstone && tombstone.deletedAt) {
                 renderTombstoneNotice(tombstone.deletedAt);
-                renderYearSummary();
-                return;
+                showFeeLedgerPending(`云端 ${activeYear} 年账本已被删除，本机账本不会显示。如需恢复，请明确上传本机账本。`, { forceUpload: true });
+                return false;
             }
             clearTombstoneNotice();
             // 本机有该年数据则自动一键上传（本地 → 云端迁移）
             const slice = getYearSlice(activeYear);
             if (slice.records.length || slice.students.length) {
                 const up = await pushCloud();
-                if (up) showToast(`本机 ${activeYear} 年账本已自动上传云端（${slice.students.length} 名学生、${slice.records.length} 条记录）`);
+                if (!up) {
+                    showFeeLedgerPending(`本机账本尚未成功上传云端：${lastCloudPushError || '请检查网络后重试。'}`);
+                    return false;
+                }
+                showToast(`本机 ${activeYear} 年账本已自动上传云端（${slice.students.length} 名学生、${slice.records.length} 条记录）`);
             }
-            renderYearSummary();
-            return;
+            keepOnlyActiveYearInMemory();
+            finishFeeLedgerLoad();
+            return true;
         }
         clearTombstoneNotice();
         const remoteVersion = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
-        if (!await ensureFeePassphrase()) return;
+        if (!await ensureFeePassphrase()) {
+            showFeeLedgerPending('需要云端加密口令才能读取账本。请完成口令输入后重试。');
+            return false;
+        }
         const cloudData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
         // 只有成功解密后才确认这个版本可作为本机写入基线；错误口令不能给后续自动上传放行。
         cloudVersionsByYear[activeYear] = remoteVersion;
@@ -1882,19 +1970,23 @@ async function pullCloud(options) {
         if (localUpdatedAt > Number(vault.updatedAt || 0) && !acceptRemote) {
             if (pendingConflict) {
                 renderCloudConflictNotice(pendingConflict);
-                renderYearSummary();
-                return;
+                showFeeLedgerPending('本机与云端账本存在待确认的多设备冲突，请选择保留哪一份。', { conflict: true });
+                return false;
             }
-            await pushCloud();
-            renderYearSummary();
-            return;
+            const up = await pushCloud();
+            if (up) {
+                finishFeeLedgerLoad();
+                return true;
+            }
+            const conflict = getCloudConflict(activeYear);
+            showFeeLedgerPending(conflict ? '本机与云端账本发生冲突，请选择保留哪一份。' : `云端账本尚未更新：${lastCloudPushError || '请重试。'}`, conflict ? { conflict: true } : {});
+            return false;
         }
         // 云端较新或相同：以云端当前学年切片为准，传播同 ID 修改和删除；其他年份仍保留在本机。
         let changed = false;
         let mergedLocalOnlyCount = 0;
         let localOnlyNames = new Set();
         const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : []).map(normalizeRecord).filter(Boolean);
-        const localOtherYearRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) !== String(activeYear));
         const localActiveRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === String(activeYear));
         const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
         if (recordsChanged) {
@@ -1904,18 +1996,20 @@ async function pullCloud(options) {
                 : localActiveRecords.filter(lr => !cloudRecords.some(cr => sameRecordIdentity(lr, cr)));
             if (localOnlyRecords.length > 0) {
                 localOnlyNames = new Set(localOnlyRecords.map(r => r.studentName));
-                data.records = localOtherYearRecords.concat(mergeRecordLists(cloudRecords, localOnlyRecords));
+                data.records = mergeRecordLists(cloudRecords, localOnlyRecords);
                 mergedLocalOnlyCount = localOnlyRecords.length;
             } else {
-                data.records = localOtherYearRecords.concat(cloudRecords);
+                data.records = cloudRecords;
             }
             changed = true;
+        } else {
+            // 即使当前学年内容相同，也不要把未迁移的历史年份本机记录带到页面上。
+            data.records = cloudRecords;
         }
 
         const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : []).map(normalizeStudent).filter(Boolean);
-        const otherYearStudentNames = new Set(localOtherYearRecords.map(r => r.studentName));
-        // 本机独有记录的姓名也保留学生档案，避免覆盖后档案丢失
-        const preservedStudents = data.students.filter(s => otherYearStudentNames.has(s.name) || localOnlyNames.has(s.name));
+        // 只保留云端学生档案和当前学年本机独有记录对应的档案，不显示未迁移的历史年份本机档案。
+        const preservedStudents = data.students.filter(s => localOnlyNames.has(s.name));
         const mergedStudents = [];
         [...cloudStudents, ...preservedStudents].forEach(s => {
             if (!mergedStudents.some(existing => existing.name === s.name)) mergedStudents.push(s);
@@ -1940,11 +2034,26 @@ async function pullCloud(options) {
             _applyingCloud = false;
             showToast(`已合并云端 ${activeYear} 年账本到本地${mergedLocalOnlyCount ? `，并保留本机 ${mergedLocalOnlyCount} 条云端没有的记录` : ''}`);
         }
+        // 旧本机缓存中若有云端没有的当前学年记录，必须先补推成功，再删除本地缓存。
+        if (mergedLocalOnlyCount > 0 && !acceptRemote) {
+            const up = await pushCloud();
+            if (!up) {
+                const conflict = getCloudConflict(activeYear);
+                showFeeLedgerPending(conflict ? '本机独有记录尚未完成云端合并，请选择保留哪一份。' : `本机记录尚未完成云端合并：${lastCloudPushError || '请重试。'}`, conflict ? { conflict: true } : {});
+                return false;
+            }
+        }
         if (pendingConflict || acceptRemote) clearCloudConflict(activeYear);
-        renderYearSummary();
+        finishFeeLedgerLoad();
+        return true;
     } catch (e) {
         console.error('云端拉取失败', e);
-        showToast('云端拉取失败：' + (e.message || e) + '（口令不一致或网络异常）');
+        const message = '云端账本读取失败：' + (e.message || e) + '（可能是口令不一致或网络异常）';
+        showFeeLedgerPending(message);
+        showToast(message);
+        return false;
+    } finally {
+        cloudLedgerLoading = false;
     }
 }
 
@@ -1963,7 +2072,7 @@ saveData = function() {
         }
     }
     _origSaveData();
-    if (!_applyingCloud) pushCloud();
+    if (!_applyingCloud && window.__feeLedgerReady) pushCloud();
 };
 
 // ---- 约课对接：拉取已完成预约 → 待入账 ----
