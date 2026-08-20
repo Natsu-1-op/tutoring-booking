@@ -37,7 +37,25 @@
         provider.setCustomParameters({ prompt: 'select_account' });
         // LOCAL 让从 admin.html 打开的 money.html / exam_teacher.html 共用登录状态。
         await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-        return auth.signInWithRedirect(provider);
+        // GitHub Pages 不是 Firebase Hosting，优先使用用户点击触发的弹窗，
+        // 避免部分浏览器阻止跨域 redirect helper 的第三方存储访问。
+        try {
+            return await auth.signInWithPopup(provider);
+        } catch (error) {
+            if (error && error.code === 'auth/popup-blocked') {
+                return auth.signInWithRedirect(provider);
+            }
+            throw error;
+        }
+    }
+
+    function authErrorMessage(error) {
+        const code = error && error.code;
+        if (code === 'auth/unauthorized-domain') return '当前网页域名未加入 Firebase Authentication 授权域名。';
+        if (code === 'auth/popup-blocked') return '浏览器拦截了登录弹窗，请允许本站弹窗后重试。';
+        if (code === 'auth/popup-closed-by-user') return '登录窗口已关闭，请重试。';
+        if (code === 'auth/operation-not-supported-in-this-environment') return '当前页面必须通过 HTTPS 打开，不能直接从本地文件打开。';
+        return 'Google 登录失败，请检查网络和 Firebase Authentication 设置后重试。';
     }
 
     async function signOut(config) {
@@ -72,7 +90,7 @@
             signIn(config).catch(error => {
                 console.error('Google 登录失败:', error);
                 setBusy(false);
-                setError('Google 登录未完成，请重试。');
+                setError(authErrorMessage(error));
             });
         };
         if (signInButton) signInButton.onclick = startLogin;
