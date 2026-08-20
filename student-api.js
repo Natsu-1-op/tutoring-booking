@@ -112,6 +112,29 @@
         if (item) { item.status = status; writeLocalReservations(list); }
     }
 
+    // ---- 考试直连会话（后端不可达时的兜底）----
+    const LOCAL_EXAM_SESSIONS_KEY = 'tutoring_local_exam_sessions_v1';
+
+    function readLocalExamSessions() {
+        try { return JSON.parse(localStorage.getItem(LOCAL_EXAM_SESSIONS_KEY) || '[]'); } catch (e) { return []; }
+    }
+
+    function rememberEmergencyExamSession(record) {
+        if (!record || !record.sessionId) return;
+        const list = readLocalExamSessions();
+        list.push(record);
+        try { localStorage.setItem(LOCAL_EXAM_SESSIONS_KEY, JSON.stringify(list.slice(-10))); } catch (e) {}
+    }
+
+    function findEmergencyExamSession(sessionToken) {
+        return readLocalExamSessions().find(item => item.sessionId === String(sessionToken || ''));
+    }
+
+    function removeEmergencyExamSession(sessionToken) {
+        const list = readLocalExamSessions().filter(item => item.sessionId !== String(sessionToken || ''));
+        try { localStorage.setItem(LOCAL_EXAM_SESSIONS_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+
     function calcHoursLocal(timeStr) {
         try {
             if (global.TimeParser && typeof global.TimeParser.calcHours === 'function') return global.TimeParser.calcHours(timeStr);
@@ -430,13 +453,92 @@
         });
     }
 
+    // 考试直连通道：规则校验口令/名单/试卷登记/票据/时间窗后放行（大陆后端不可达时的兜底）
+    async function startExamEmergency(payload) {
+        const year = String(payload && payload.year || '');
+        const studentName = String(payload && payload.studentName || '').trim();
+        const examId = String(payload && payload.examId || '');
+        const examTicket = String(payload && payload.examTicket || '');
+        const accessCode = String(payload && payload.accessCode || '');
+        if (!/^\d{4}$/.test(year) || !/^[A-Za-z0-9_-]{20,100}$/.test(examId) || !studentName ||
+            examTicket.length < 32 || examTicket.length > 200 || !accessCode) {
+            throw apiError('考试信息格式不完整，请重新导入试卷。', 'INVALID_ARGUMENT');
+        }
+        const sessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+        const timestamp = Date.now();
+        const sessionData = {
+            sessionId,
+            year,
+            studentName,
+            studentKey: studentIndexKey(studentName),
+            examId,
+            paperTitle: String(payload && payload.paperTitle || ''),
+            ticket: examTicket,
+            accessCode,
+            timestamp
+        };
+        try {
+            await firebase.database().ref(`emergencyExamSessions/${year}/${sessionId}`).set(sessionData);
+        } catch (error) {
+            throw apiError('考试验证未通过（口令、名单或试卷登记不正确，或不在考试时段内），请重试或联系老师。', 'EMERGENCY_EXAM_AUTH_FAILED');
+        }
+        rememberEmergencyExamSession({ sessionId, year, examId, studentName });
+        return { status: 'ready', sessionToken: sessionId, startTime: payload && payload.startTime, endTime: payload && payload.endTime };
+    }
+
+    // 考试直连交卷：规则校验会话后写入交卷锁（仅一次）
+    async function submitExamEmergency(payload) {
+        const sessionToken = String(payload && payload.sessionToken || '');
+        const session = findEmergencyExamSession(sessionToken);
+        if (!session) throw apiError('考试会话已失效，请保留答案并重新验证。', 'EXAM_SESSION_EXPIRED');
+        const receiptId = `EX-${randomCancelCode()}-${randomCancelCode()}`;
+        const submittedAt = Date.now();
+        const database = firebase.database();
+        try {
+            await database.ref(`submittedExamLocks/${session.examId}/${session.studentName}`).set({
+                status: 'submitted',
+                receiptId,
+                submittedAt,
+                clientToken: sessionToken,
+                createdAt: submittedAt,
+                emergencySession: sessionToken,
+                year: session.year
+            });
+        } catch (error) {
+            throw apiError('该试卷已经交卷。', 'EXAM_ALREADY_SUBMITTED');
+        }
+        await database.ref(`emergencyExamSessions/${session.year}/${sessionToken}`).remove().catch(() => null);
+        removeEmergencyExamSession(sessionToken);
+        return { receiptId, submittedAt };
+    }
+
+    async function startExam(payload) {
+        try {
+            return await call('startExam', payload);
+        } catch (error) {
+            if (!isBackendUnavailable(error)) throw error;
+            console.warn('后端当前不可达，切换到考试直连通道。', error);
+            return startExamEmergency(payload);
+        }
+    }
+
+    async function submitExam(payload) {
+        try {
+            return await call('submitExam', payload);
+        } catch (error) {
+            if (!isBackendUnavailable(error)) throw error;
+            console.warn('后端当前不可达，切换到考试直连交卷。', error);
+            return submitExamEmergency(payload);
+        }
+    }
+
     global.StudentApi = Object.freeze({
         init,
         createBooking,
         getBookingHistory,
         cancelBooking,
-        startExam: payload => call('startExam', payload),
-        submitExam: payload => call('submitExam', payload)
+        startExam,
+        submitExam
     });
 
     // 在学生页面开始读取 Firebase 数据前激活 App Check；这样日后即使同时对 Realtime Database 开启强制校验，公开排班也不会失效。

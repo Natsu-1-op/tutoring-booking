@@ -496,11 +496,21 @@ async function exportJsonPapers() {
         const examId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `exam_${randomExamToken().slice(0, 48)}`;
         const examTicket = randomExamToken();
         const ticketHash = await sha256Hex(examTicket);
+        // 数值时间窗（+08:00）供数据库规则在学生直连通道校验考试时段；票据明文仅存教师只读节点，
+        // 规则无法计算 sha256，但票据本就随学生试卷文件分发，存储明文不降低安全性。
+        const startMs = new Date(String(start) + '+08:00').getTime();
+        const endMs = new Date(String(end) + '+08:00').getTime();
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+            return alert('考试时间格式不正确，无法登记。');
+        }
         await db.ref(`examDefinitions/${examId}`).set({
             paperTitle: title,
             startTime: start,
             endTime: end,
+            startTimeMs: startMs,
+            endTimeMs: endMs,
             ticketHash,
+            ticket: examTicket,
             active: true,
             createdBy: currentUser.uid,
             createdAt: firebase.database.ServerValue.TIMESTAMP
