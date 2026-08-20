@@ -988,12 +988,19 @@
 
     function releaseSlotIfOwned(year, slotId, reservationId) {
         if (!slotId) return Promise.resolve({ committed: true, legacy: false });
-        return SystemRouter.getSlotsRef(year).child(slotId).transaction(slot => {
-            // 旧排班没有所有权标记时不自动释放，避免把别人的预约重新开放。
-            if (!slot || !slot.reserved || slot.reservationId !== reservationId) return;
-            slot.reserved = false;
-            delete slot.reservationId;
-            return slot;
+        return SystemRouter.getSlotsRef(year).child(slotId).once('value').then(snapshot => {
+            const slot = snapshot.val();
+            // 时段不存在或已空闲：无需释放，视为成功（否则删除记录会误报"所有权异常"）
+            if (!slot || !slot.reserved) return { committed: true };
+            // 时段被其他记录占用（如学生取消后又重新预约同一时段）：
+            // 不释放（保护新预约），但视为无需处理，不拦截删除旧记录
+            if (slot.reservationId !== reservationId) return { committed: true, slotOwnedByOther: true };
+            return SystemRouter.getSlotsRef(year).child(slotId).transaction(current => {
+                if (!current || !current.reserved || current.reservationId !== reservationId) return;
+                current.reserved = false;
+                delete current.reservationId;
+                return current;
+            });
         });
     }
 
