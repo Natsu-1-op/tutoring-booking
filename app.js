@@ -20,6 +20,34 @@ function safeJsArg(value) {
     return escapeHtml(JSON.stringify(String(value ?? '')));
 }
 
+async function releaseSlotAfterFailedBooking(year, slotId, reservationId) {
+    if (!slotId || !reservationId) return true;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const result = await new Promise((resolve, reject) => {
+                SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
+                    // 只回滚本次预约占用的排班，不能误释放后来者。
+                    if (!slot || slot.reservationId !== reservationId) return;
+                    slot.reserved = false;
+                    delete slot.reservationId;
+                    return slot;
+                }, (error, committed, snapshot) => {
+                    if (error) reject(error);
+                    else resolve({ committed, snapshot });
+                });
+            });
+            const latest = result.snapshot && result.snapshot.val();
+            if (result.committed || !latest || latest.reservationId !== reservationId) return true;
+        } catch (error) {
+            if (attempt === 2) {
+                console.error('预约失败后的排班回滚失败:', error);
+            }
+        }
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+    return false;
+}
+
 // 仅记住姓名；预约口令属于准入凭证，不落盘保存。
 (function restoreSavedInputs() {
     const saved = localStorage.getItem('booking_last_inputs');
@@ -178,7 +206,15 @@ function bindActiveYearListeners() {
             else availableSlots.push({ id: slotId, data: slot });
         });
 
-        const sortedSlots = [...availableSlots, ...reservedSlots];
+        const byLessonTime = (a, b) => {
+            const pa = TimeParser.parseRawText(a.data.time, SystemRouter.activeYear);
+            const pb = TimeParser.parseRawText(b.data.time, SystemRouter.activeYear);
+            const ka = pa ? `${pa.date}T${pa.startTime}` : String(a.data.time);
+            const kb = pb ? `${pb.date}T${pb.startTime}` : String(b.data.time);
+            return ka.localeCompare(kb);
+        };
+        // 可预约时段优先显示，并在各自分组内按实际日期时间排序。
+        const sortedSlots = [...availableSlots.sort(byLessonTime), ...reservedSlots.sort(byLessonTime)];
         if (sortedSlots.length === 0) { container.innerHTML = '<p>暂无开放的时间段。</p>'; return; }
 
         sortedSlots.forEach(item => {
@@ -280,6 +316,8 @@ async function submitBooking() {
     const btn = document.getElementById('submit-btn');
     isSubmitting = true; btn.disabled = true; btn.textContent = '提交中...';
     function resetBtn() { isSubmitting = false; btn.disabled = false; btn.textContent = '提交预约申请'; }
+    let bookingLockRef = null;
+    let bookingLockToken = '';
 
     try {
         const dlVal = (await SystemRouter.getSettingsRef(year).child('deadline').once('value')).val();
@@ -320,6 +358,10 @@ async function submitBooking() {
             });
         }
         const slotHours = TimeParser.calcHours(parsedTimeObj.formattedSlotText);
+        if (!(slotHours > 0)) {
+            showMessage('该排班的课时无法计算，请联系老师检查时间。', false);
+            return;
+        }
         const total = (await db.ref(`years/${year}/studentHours/${nickname}`).once('value')).val();
         if (total !== null && total !== undefined && Number(total) > 0 && usedHours + slotHours > Number(total)) {
             showMessage(`预约拦截：该时段为 ${slotHours.toFixed(2)} 小时，您当前剩余课时仅 ${Math.max(0, Number(total) - usedHours).toFixed(2)} 小时，无法预约。`, false);
@@ -332,19 +374,65 @@ async function submitBooking() {
             return;
         }
 
+        // 名单、课时等检查期间教师可能刚好关闭预约，正式占用排班前再确认一次。
+        const latestDeadline = (await SystemRouter.getSettingsRef(year).child('deadline').once('value')).val();
+        const latestDeadlineTime = latestDeadline ? new Date(latestDeadline).getTime() : NaN;
+        if (Number.isFinite(latestDeadlineTime) && Date.now() >= latestDeadlineTime) {
+            showMessage('抱歉，本轮预约已截止！', false);
+            return;
+        }
+
+        // 同一姓名的两个页面同时提交时，先用短时事务锁串行化最终复核，
+        // 否则两边都可能读到相同的剩余课时并同时成功。
+        bookingLockToken = generateSecureCode(16);
+        bookingLockRef = db.ref(`years/${year}/dailyLocks/${nickname}`);
+        const lockResult = await bookingLockRef.transaction(current => {
+            const now = Date.now();
+            const currentExpiry = Number(current && current.expiresAt);
+            if (current && current.token !== bookingLockToken && currentExpiry > now && currentExpiry <= now + 3 * 60 * 1000) return;
+            return { token: bookingLockToken, expiresAt: now + 2 * 60 * 1000 };
+        });
+        if (!lockResult.committed) {
+            showMessage('同一姓名正在提交另一项预约，请稍等几秒后重试。', false);
+            return;
+        }
+
+        // 获得锁后重新统计一次，确保等待期间新增的预约也计入总课时。
+        const latestExisting = (await SystemRouter.getReservationsRef(year)
+            .orderByChild('nickname').equalTo(nickname).once('value')).val();
+        let latestUsedHours = 0;
+        Object.values(latestExisting || {}).forEach(reservation => {
+            if (reservation && reservation.status !== 'canceled') latestUsedHours += TimeParser.calcHours(reservation.time);
+        });
+        const latestTotal = (await db.ref(`years/${year}/studentHours/${nickname}`).once('value')).val();
+        if (latestTotal !== null && latestTotal !== undefined && Number(latestTotal) > 0
+            && latestUsedHours + slotHours > Number(latestTotal)) {
+            showMessage(`预约拦截：等待期间课时已发生变化，当前剩余 ${Math.max(0, Number(latestTotal) - latestUsedHours).toFixed(2)} 小时。`, false);
+            return;
+        }
+
         const resKey = SystemRouter.getReservationsRef(year).push().key;
+        let slotFailureReason = 'unavailable';
         const committed = await new Promise((resolve, reject) => {
             SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
-                if (slot && !slot.reserved && slot.status !== "hidden") {
-                    slot.reserved = true;
-                    slot.reservationId = resKey;
-                    return slot;
+                if (!slot || slot.reserved || slot.status === 'hidden') {
+                    slotFailureReason = 'unavailable';
+                    return;
                 }
-                return;
+                const latestSlotTime = TimeParser.parseRawText(slot.time, year);
+                if (!latestSlotTime || latestSlotTime.formattedSlotText !== parsedTimeObj.formattedSlotText) {
+                    slotFailureReason = 'changed';
+                    return;
+                }
+                slot.reserved = true;
+                slot.reservationId = resKey;
+                return slot;
             }, (err, didCommit) => err ? reject(err) : resolve(didCommit));
         });
         if (!committed) {
-            showMessage('手慢了，该时间段已被约满！', false);
+            showMessage(slotFailureReason === 'changed'
+                ? '该排班时间刚刚发生变化，请重新选择后提交。'
+                : '手慢了，该时间段已被约满或已关闭！', false);
             return;
         }
 
@@ -355,18 +443,8 @@ async function submitBooking() {
                 slotSnapshot: parsedTimeObj, timestamp: firebase.database.ServerValue.TIMESTAMP
             });
         } catch (reservationError) {
-            try {
-                await new Promise((resolve, reject) => {
-                    SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
-                        // 只回滚本次事务占用的时段，避免误释放后来者的预约。
-                        if (!slot || slot.reservationId !== resKey) return;
-                        slot.reserved = false;
-                        delete slot.reservationId;
-                        return slot;
-                    }, (rollbackError) => rollbackError ? reject(rollbackError) : resolve());
-                });
-            }
-            catch (rollbackError) { console.error('预约失败后的排班回滚失败:', rollbackError); }
+            const rolledBack = await releaseSlotAfterFailedBooking(year, slotId, resKey);
+            if (!rolledBack) reservationError.bookingRollbackFailed = true;
             throw reservationError;
         }
 
@@ -378,8 +456,20 @@ async function submitBooking() {
         downloadICS(parsedTimeObj, cancelSecureCode);
     } catch (err) {
         console.error('提交预约失败:', err);
-        showMessage('操作失败，请检查网络后重试！', false);
+        showMessage(err && err.bookingRollbackFailed
+            ? '预约记录写入失败，排班暂未成功释放，请联系老师检查该时段。'
+            : '操作失败，请检查网络后重试！', false);
     } finally {
+        if (bookingLockRef && bookingLockToken) {
+            try {
+                await bookingLockRef.transaction(current => {
+                    if (!current || current.token !== bookingLockToken) return;
+                    return null;
+                });
+            } catch (error) {
+                console.error('预约提交锁释放失败，将在短时超时后自动失效:', error);
+            }
+        }
         resetBtn();
     }
 }
@@ -571,17 +661,24 @@ async function requestCancelBooking(resKey) {
 
         const reservationRef = SystemRouter.getReservationsRef(year).child(resKey);
         const cancelResult = await reservationRef.transaction(current => {
-            if (!current || current.status === 'canceled') return;
+            // 学生端只允许取消仍在进行中的预约；已完成课程不能通过旧页面
+            // 或重复点击被改回取消，避免影响课时统计和账本。
+            if (!current || !['booked', 'confirmed'].includes(current.status || 'booked')) return;
             current.status = 'canceled';
+            current.feeStatus = 'pending';
+            current.feePostedAt = null;
+            current.feeDismissedAt = null;
+            current.feeRecordId = null;
             return current;
         });
-        if (!cancelResult.committed) return alert('这条预约已经取消或不存在。');
+        if (!cancelResult.committed) return alert('这条预约已经取消、完成或不存在。');
         reservationCanceled = true;
+        const canceledReservation = cancelResult.snapshot && cancelResult.snapshot.val() || r;
 
         let slotReleased = null;
-        if (r.slotId) {
+        if (canceledReservation.slotId) {
             slotReleased = await new Promise((resolve, reject) => {
-                SystemRouter.getSlotsRef(year).child(r.slotId).transaction(slot => {
+                SystemRouter.getSlotsRef(year).child(canceledReservation.slotId).transaction(slot => {
                     // 旧数据没有 reservationId 时不自动释放，避免误开放已被其他预约占用的时段。
                     if (!slot || !slot.reserved || slot.reservationId !== resKey) return;
                     slot.reserved = false;
@@ -592,7 +689,7 @@ async function requestCancelBooking(resKey) {
         }
 
         SystemRouter.getLogsRef(year).push({
-            action: `学生 [${r.nickname}] 自行取消了预约: [${r.time}]`,
+            action: `学生 [${canceledReservation.nickname || r.nickname}] 自行取消了预约: [${canceledReservation.time || r.time}]`,
             timestamp: firebase.database.ServerValue.TIMESTAMP
         }).catch(err => console.error('取消预约日志写入失败:', err));
         document.getElementById('history-container').innerHTML = '';

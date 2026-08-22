@@ -44,6 +44,36 @@ const TimeParser = {
         return true;
     },
 
+    // 校验 YYYY-MM-DD，并可限定必须属于指定学年。
+    // input[type=date] 只保证输入格式，不保证调用方手动填入的字符串是真实日期。
+    isValidDateString: (value, expectedYear) => {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return false;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        if (expectedYear !== undefined && expectedYear !== null && String(expectedYear) !== String(year)) return false;
+        return TimeParser.isValidCalendarDate(month, day, year);
+    },
+
+    clockToMinutes: (value) => {
+        const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+        if (!match) return -1;
+        const hour = Number(match[1]);
+        const minute = Number(match[2]);
+        if (hour > 23 || minute > 59) return -1;
+        return hour * 60 + minute;
+    },
+
+    rangesOverlap: (startA, endA, startB, endB) => {
+        const aStart = TimeParser.clockToMinutes(startA);
+        const aEnd = TimeParser.clockToMinutes(endA);
+        const bStart = TimeParser.clockToMinutes(startB);
+        const bEnd = TimeParser.clockToMinutes(endB);
+        if ([aStart, aEnd, bStart, bEnd].some(value => value < 0) || aEnd <= aStart || bEnd <= bStart) return false;
+        return aStart < bEnd && bStart < aEnd;
+    },
+
     // 从排班时间字符串计算课时长（小时）
     calcHours: (timeStr) => {
         if (!timeStr) return 0;

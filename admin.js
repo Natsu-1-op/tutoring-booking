@@ -213,6 +213,28 @@
         }
     }
 
+    function restoreAdminSession() {
+        try {
+            const raw = sessionStorage.getItem(ADMIN_SESSION_KEY);
+            const session = raw ? JSON.parse(raw) : null;
+            if (!session || !Number.isFinite(Number(session.expiresAt)) || Number(session.expiresAt) <= Date.now()) {
+                sessionStorage.removeItem(ADMIN_SESSION_KEY);
+                return false;
+            }
+            isAdminAuthenticated = true;
+            document.getElementById('admin-login').style.display = 'none';
+            const contentEl = document.getElementById('admin-content');
+            contentEl.classList.add('is-visible');
+            contentEl.style.display = '';
+            renderTodayDashboard();
+            initAdminSystem();
+            return true;
+        } catch (error) {
+            try { sessionStorage.removeItem(ADMIN_SESSION_KEY); } catch (ignore) {}
+            return false;
+        }
+    }
+
     // 核验成功后只向当前标签页签发 30 分钟会话标记，供教师端无感通行。
     function verifyAdmin() {
         const inputPass = document.getElementById('admin-password').value.trim();
@@ -461,20 +483,24 @@
                 totalNow > 0 ? totalNow : ''
             );
             if (raw === null) return;
-            const v = parseFloat(raw);
+            const normalized = raw.trim();
+            const v = normalized === '' ? 0 : Number(normalized);
             const hoursRef = db.ref(`years/${viewingYear}/studentHours/${name}`);
-            if (isNaN(v) || v <= 0) {
+            if (!Number.isFinite(v)) return alert('请输入有效数字，留空或填 0 表示不限制。');
+            if (v <= 0) {
                 hoursRef.remove().then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({
                         action: `清除了学生 [${name}] 的总时长限制`, timestamp: firebase.database.ServerValue.TIMESTAMP
                     });
                 });
-            } else {
+            } else if (v <= 10000) {
                 hoursRef.set(v).then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({
                         action: `设置学生 [${name}] 总时长为 ${v} 小时`, timestamp: firebase.database.ServerValue.TIMESTAMP
                     });
                 });
+            } else {
+                alert('总时长不能超过 10000 小时。');
             }
         }
 
@@ -522,7 +548,11 @@
                     header.querySelector('.arrow-indicator').textContent = dateCollapseState[dateKey] ? '展开 +' : '收起 -';
                 };
 
-                groups[dateKey].forEach(item => {
+                groups[dateKey].sort((a, b) => {
+                    const pa = TimeParser.parseRawText(a.data.time, viewingYear);
+                    const pb = TimeParser.parseRawText(b.data.time, viewingYear);
+                    return String(pa && pa.startTime || a.data.time).localeCompare(String(pb && pb.startTime || b.data.time));
+                }).forEach(item => {
                     const slotDiv = document.createElement('div'); slotDiv.className = 'slot-item'; slotDiv.id = `slot-row-${item.id}`; 
                     
                     const p = TimeParser.parseRawText(item.data.time, viewingYear);
@@ -691,11 +721,23 @@
                 if (newName && newName.trim() !== "" && newName.trim() !== oldName) {
                     const cleanName = newName.trim();
                     if (!isValidStudentName(cleanName)) return alert('姓名格式不合法（最多50字，不能包含逗号或路径特殊字符）！');
-                    SystemRouter.getReservationsRef(viewingYear).child(resKey).update({ nickname: cleanName }).then(() => {
+                    let feeConflict = false;
+                    SystemRouter.getReservationsRef(viewingYear).child(resKey).transaction(current => {
+                        if (!current) return;
+                        feeConflict = current.status === 'completed' && (current.feeStatus === 'posted' || !!current.feeRecordId);
+                        if (feeConflict) return;
+                        current.nickname = cleanName;
+                        return current;
+                    }).then(result => {
+                        if (!result.committed) {
+                            return alert(feeConflict
+                                ? '该课程已经入账，请在课时费页面通过“两端数据核对”修改姓名。'
+                                : '姓名修改失败，请刷新后重试。');
+                        }
                         SystemRouter.getLogsRef(viewingYear).push({
                             action: `管理员将预约单据 [${resKey}] 的姓名由 [${oldName}] 修改为 [${cleanName}]`, timestamp: firebase.database.ServerValue.TIMESTAMP
                         });
-                    });
+                    }).catch(() => alert('姓名修改失败，请重试。'));
                 }
             };
         });
@@ -707,25 +749,32 @@
         if(!name) return alert('请输入名字！');
         if (!isValidStudentName(name)) return alert('姓名格式不合法（最多50字，不能包含逗号或路径特殊字符）！');
         const hoursRaw = hoursInput ? hoursInput.value.trim() : '';
-        const parsedHours = hoursRaw === '' ? null : parseFloat(hoursRaw);
-        const validHours = parsedHours !== null && !isNaN(parsedHours) && parsedHours > 0;
-
-        db.ref(`years/${viewingYear}/studentWhitelist`).once('value').then(snap => {
-            const exist = snap.val() || {}; const isDup = Object.values(exist).some(v => v === name);
-            if(isDup) return alert('该同学已经在名单中了！');
-
-            const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
-            const updates = {};
-            updates[`years/${viewingYear}/studentWhitelist/${studentKey}`] = name;
-            if (validHours) updates[`years/${viewingYear}/studentHours/${name}`] = parsedHours;
-            db.ref().update(updates).then(() => {
-                SystemRouter.getLogsRef(viewingYear).push({
-                    action: `新增准入白名单学生：[${name}]${validHours ? `，总时长 ${parsedHours} 小时` : ''}`, timestamp: firebase.database.ServerValue.TIMESTAMP
-                });
-                input.value = '';
-                if (hoursInput) hoursInput.value = '';
-            }).catch(() => alert('新增学生失败，请重试。'));
-        });
+        const parsedHours = hoursRaw === '' ? null : Number(hoursRaw);
+        if (parsedHours !== null && (!Number.isFinite(parsedHours) || parsedHours <= 0 || parsedHours > 10000)) {
+            return alert('总时长需为大于 0 且不超过 10000 的数字，或留空表示不限制。');
+        }
+        const validHours = parsedHours !== null;
+        const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
+        let duplicateFound = false;
+        db.ref(`years/${viewingYear}`).transaction(yearData => {
+            const next = yearData || {};
+            next.studentWhitelist = next.studentWhitelist || {};
+            duplicateFound = Object.values(next.studentWhitelist).some(value => value === name);
+            if (duplicateFound) return;
+            next.studentWhitelist[studentKey] = name;
+            if (validHours) {
+                next.studentHours = next.studentHours || {};
+                next.studentHours[name] = parsedHours;
+            }
+            return next;
+        }).then(result => {
+            if (!result.committed) return alert(duplicateFound ? '该同学已经在名单中了！' : '新增学生失败，请重试。');
+            SystemRouter.getLogsRef(viewingYear).push({
+                action: `新增准入白名单学生：[${name}]${validHours ? `，总时长 ${parsedHours} 小时` : ''}`, timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            input.value = '';
+            if (hoursInput) hoursInput.value = '';
+        }).catch(() => alert('新增学生失败，请重试。'));
     }
 
     // 显示/隐藏每学生课时统计
@@ -778,9 +827,10 @@
         if (validReservations.length === 0) return alert('当前没有已完成的课时可用于记账。');
 
         const outputRecords = [];
+        let skippedInvalidCount = 0;
         validReservations.forEach(r => {
-            let itemDate = new Date().toISOString().split('T')[0]; 
-            let calculatedHours = 2.0; 
+            let itemDate = '';
+            let calculatedHours = 0;
             
             if (r.slotSnapshot && r.slotSnapshot.date) {
                 itemDate = r.slotSnapshot.date; 
@@ -791,6 +841,10 @@
             
             const hours = TimeParser.calcHours(r.time);
             if (hours > 0) calculatedHours = hours;
+            if (!itemDate || !TimeParser.isValidDateString(itemDate, viewingYear) || !(calculatedHours > 0)) {
+                skippedInvalidCount++;
+                return;
+            }
 
             outputRecords.push({
                 id: "imported_" + (r.id || Math.random().toString(36).substring(2, 9)),
@@ -810,6 +864,7 @@
         const link = document.createElement('a'); link.href = url;
         link.download = `课时费对接包_${viewingYear}学年.json`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
+        if (skippedInvalidCount > 0) alert(`导出完成，已跳过 ${skippedInvalidCount} 条时间或课时无效的预约，避免生成错误账单。`);
     }
 
     // === 旧审批函数已废弃，状态通过状态下拉框自由切换 (changeReservationStatus) ===
@@ -839,31 +894,58 @@
             </div>`;
     }
 
+    function scheduleTimesOverlap(timeA, timeB) {
+        const a = TimeParser.parseRawText(timeA, viewingYear);
+        const b = TimeParser.parseRawText(timeB, viewingYear);
+        return !!(a && b && a.date === b.date && TimeParser.rangesOverlap(a.startTime, a.endTime, b.startTime, b.endTime));
+    }
+
     window.saveEditedSlot = function(slotId) {
         const newTime = document.getElementById('edit-input-' + slotId).value.trim();
         const validationParser = TimeParser.parseRawText(newTime, viewingYear);
         if (!validationParser) return alert('格式错误（例：6/19 1400-1500）');
 
-        SystemRouter.getSlotsRef(viewingYear).once('value').then(snap => {
-            const data = snap.val() || {};
-            const isDup = Object.keys(data).some(id => id !== slotId && data[id].time === validationParser.formattedSlotText && data[id].status !== "hidden");
-            if (isDup) return alert('该时间段已存在排班！');
+        let overlapFound = false;
+        let missingSlot = false;
+        let feeConflict = false;
+        db.ref(`years/${viewingYear}`).transaction(yearData => {
+            if (!yearData || !yearData.slots || !yearData.slots[slotId]) {
+                missingSlot = true;
+                return;
+            }
+            overlapFound = Object.keys(yearData.slots).some(id => {
+                const slot = yearData.slots[id];
+                return id !== slotId && slot && slot.status !== 'hidden'
+                    && scheduleTimesOverlap(slot.time, validationParser.formattedSlotText);
+            });
+            if (overlapFound) return;
 
-            return SystemRouter.getReservationsRef(viewingYear).once('value').then((resSnap) => {
-                const reservations = resSnap.val() || {};
-                const batchUpdates = {};
-                batchUpdates[`years/${viewingYear}/slots/${slotId}/time`] = validationParser.formattedSlotText;
-                Object.keys(reservations).forEach(resKey => {
-                    if (reservations[resKey] && reservations[resKey].slotId === slotId) {
-                        batchUpdates[`years/${viewingYear}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
-                        batchUpdates[`years/${viewingYear}/reservations/${resKey}/slotSnapshot`] = validationParser;
-                    }
-                });
-                return db.ref().update(batchUpdates);
-            }).then(() => {
-                SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-            }).catch(() => alert('修改排班失败，请重试。'));
-        }).catch(() => alert('读取排班失败，请重试。'));
+            const reservations = yearData.reservations || {};
+            feeConflict = Object.values(reservations).some(reservation => reservation
+                && reservation.slotId === slotId
+                && reservation.status === 'completed'
+                && (reservation.feeStatus === 'posted' || reservation.feeRecordId));
+            if (feeConflict) return;
+
+            yearData.slots[slotId].time = validationParser.formattedSlotText;
+            Object.keys(reservations).forEach(resKey => {
+                const reservation = reservations[resKey];
+                // 已取消记录保留当时的历史时间，不随后来重新开放的排班一起变化。
+                if (!reservation || reservation.slotId !== slotId || reservation.status === 'canceled') return;
+                reservation.time = validationParser.formattedSlotText;
+                reservation.slotSnapshot = { ...validationParser };
+            });
+            return yearData;
+        }).then(result => {
+            if (!result.committed) {
+                return alert(overlapFound
+                    ? '该时间段与现有排班重叠！'
+                    : feeConflict
+                        ? '该排班已有课程完成并入账，请先在课时费页面处理对应记录。'
+                        : missingSlot ? '该排班已不存在。' : '修改排班失败，请重试。');
+            }
+            SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+        }).catch(() => alert('修改排班失败，请重试。'));
     };
 
     function setNotice() {
@@ -911,53 +993,69 @@
         const timeInput = document.getElementById('new-slot-time'); const time = timeInput.value.trim();
         const validationParser = TimeParser.parseRawText(time, viewingYear);
         if (!validationParser) return alert('格式错误（例：6/19 1400-1500）');
-        
-        SystemRouter.getSlotsRef(viewingYear).once('value').then(snap => {
-            const current = snap.val() || {};
-            const isDup = Object.values(current).some(s => s.time === validationParser.formattedSlotText && s.status !== "hidden");
-            if (isDup) return alert('该时间已存在排班。');
-            
-            SystemRouter.getSlotsRef(viewingYear).push({ time: validationParser.formattedSlotText, reserved: false, status: "active" }).then(() => {
-                SystemRouter.getLogsRef(viewingYear).push({ action: `新增排班：[${validationParser.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                timeInput.value = '';
-            }).catch(() => { alert('新增排班失败，请重试。'); });
-        });
+
+        const slotsRef = SystemRouter.getSlotsRef(viewingYear);
+        const newKey = slotsRef.push().key;
+        let duplicateFound = false;
+        slotsRef.transaction(current => {
+            const slots = current || {};
+            duplicateFound = Object.values(slots).some(s => s && s.status !== 'hidden' && scheduleTimesOverlap(s.time, validationParser.formattedSlotText));
+            if (duplicateFound) return;
+            slots[newKey] = { time: validationParser.formattedSlotText, reserved: false, status: 'active' };
+            return slots;
+        }).then(result => {
+            if (!result.committed) return alert(duplicateFound ? '该时间与现有排班重叠。' : '新增排班失败，请重试。');
+            SystemRouter.getLogsRef(viewingYear).push({ action: `新增排班：[${validationParser.formattedSlotText}]`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+            timeInput.value = '';
+        }).catch(() => { alert('新增排班失败，请重试。'); });
     }
 
     function generateDayTemplate() {
         const dateInput = document.getElementById('template-date').value; if (!dateInput) return alert('请选择日期。');
-        const dateObj = new Date(dateInput);
-        if (isNaN(dateObj.getTime())) return alert('日期格式无效！');
-        const prefix = `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
+        if (!TimeParser.isValidDateString(dateInput, viewingYear)) return alert(`请选择 ${viewingYear} 年内的有效日期。`);
+        const [, month, day] = dateInput.split('-').map(Number);
+        const prefix = `${month}/${day}`;
         const templates = []; for (let i = 1; i <= 5; i++) { const val = document.getElementById(`tpl-time-${i}`).value.trim(); if (val) templates.push(val); }
+        if (templates.length === 0) return alert('请先填写至少一个排班模板。');
 
-        SystemRouter.getSlotsRef(viewingYear).once('value').then(snap => {
-            const existData = snap.val() || {}; const atomicUpdates = {}; const plannedTimes = new Set(); let okCount = 0; let failCount = 0;
-            templates.forEach(t => {
-                const rawCheck = `${prefix} ${t}`;
-                const normalizedParser = TimeParser.parseRawText(rawCheck, viewingYear);
-                if (!normalizedParser) return;
-
-                const normalizedTime = normalizedParser.formattedSlotText;
-                const isDup = plannedTimes.has(normalizedTime) || Object.values(existData).some(s => s.time === normalizedTime && s.status !== "hidden");
-                if (isDup) { failCount++; } else {
-                    plannedTimes.add(normalizedTime);
-                    okCount++; 
-                    const newKey = SystemRouter.getSlotsRef(viewingYear).push().key; 
-                    atomicUpdates[`years/${viewingYear}/slots/${newKey}`] = { time: normalizedParser.formattedSlotText, reserved: false, status: "active" };
-                }
-            });
-            
-            if (okCount === 0) return alert('这些时间段都已经存在了。');
-            
-            if (confirm('确定要批量添加排班吗？')) {
-                db.ref().update(atomicUpdates).then(() => {
-                    SystemRouter.getLogsRef(viewingYear).push({ action: `批量新增了 ${okCount} 个排班`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-                    document.getElementById('template-date').value = "";
-                }).catch(() => {
-                    alert('批量排班失败，请重试。');
-                });
+        const candidates = [];
+        let invalidCount = 0;
+        templates.forEach(t => {
+            const parsed = TimeParser.parseRawText(`${prefix} ${t}`, viewingYear);
+            if (!parsed || candidates.some(item => scheduleTimesOverlap(item.time, parsed.formattedSlotText))) {
+                invalidCount++;
+                return;
             }
+            candidates.push({ key: SystemRouter.getSlotsRef(viewingYear).push().key, time: parsed.formattedSlotText });
+        });
+        if (candidates.length === 0) return alert('模板时间格式无效或彼此重叠，请先修改模板。');
+        if (!confirm(`确定要批量添加 ${candidates.length} 个排班吗？${invalidCount ? `\n已跳过 ${invalidCount} 个格式无效或互相重叠的模板。` : ''}`)) return;
+
+        const slotsRef = SystemRouter.getSlotsRef(viewingYear);
+        let addedCount = 0;
+        let skippedCount = 0;
+        slotsRef.transaction(current => {
+            const slots = current || {};
+            addedCount = 0;
+            skippedCount = 0;
+            candidates.forEach(candidate => {
+                const conflicts = Object.values(slots).some(slot => slot && slot.status !== 'hidden' && scheduleTimesOverlap(slot.time, candidate.time));
+                if (conflicts) {
+                    skippedCount++;
+                    return;
+                }
+                slots[candidate.key] = { time: candidate.time, reserved: false, status: 'active' };
+                addedCount++;
+            });
+            if (addedCount === 0) return;
+            return slots;
+        }).then(result => {
+            if (!result.committed) return alert('这些时间段与现有排班重叠，没有新增排班。');
+            SystemRouter.getLogsRef(viewingYear).push({ action: `批量新增了 ${addedCount} 个排班`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+            document.getElementById('template-date').value = '';
+            if (skippedCount > 0) alert(`已新增 ${addedCount} 个排班，另有 ${skippedCount} 个与现有排班重叠，已跳过。`);
+        }).catch(() => {
+            alert('批量排班失败，请重试。');
         });
     }
 
@@ -1028,12 +1126,48 @@
             return { ok: true, changed: false, slotConflict: !!reservation.slotId && !released.committed };
         }
 
+        // 已经与课时费账本建立关联的完成记录不能直接改成取消/预约，
+        // 否则课时费账本会留下无法追溯的孤儿记录。先在课时费页面删除或修正该笔记录。
+        const hasPostedFee = reservation.feeStatus === 'posted' || !!reservation.feeRecordId;
+        if (oldStatus === 'completed' && newStatus !== 'completed' && hasPostedFee) {
+            return { ok: false, reason: 'fee-posted' };
+        }
+
+        function resetFeeFields(next) {
+            next.feeStatus = 'pending';
+            next.feePostedAt = null;
+            next.feeDismissedAt = null;
+            next.feeRecordId = null;
+            return next;
+        }
+
+        function applyStatus(current, status) {
+            if (!current || current.status === 'canceled' && status === 'canceled') return;
+            const wasCompletedAndPosted = current.status === 'completed' && current.feeStatus === 'posted' && status === 'completed';
+            current.status = status;
+            // 重新激活取消记录或从完成状态回退时，清理旧的入账/忽略标记。
+            if (!wasCompletedAndPosted) resetFeeFields(current);
+            return current;
+        }
+
+        let feeConflict = false;
+        function hasCurrentPostedFee(current) {
+            return current && current.status === 'completed'
+                && (current.feeStatus === 'posted' || !!current.feeRecordId);
+        }
+
         if (newStatus === 'canceled') {
             const result = await reservationRef.transaction(current => {
                 if (!current || current.status === 'canceled') return;
-                current.status = 'canceled';
-                return current;
+                // 课时费页面可能在初次读取之后刚好完成入账；事务内再次校验，
+                // 避免把已经关联账本的课程取消后留下孤立流水。
+                if (hasCurrentPostedFee(current)) {
+                    feeConflict = true;
+                    return;
+                }
+                return applyStatus(current, 'canceled');
             });
+            if (feeConflict) return { ok: false, reason: 'fee-posted' };
             if (!result.committed) return { ok: false, reason: 'stale' };
             const released = await releaseSlotIfOwned(year, reservation.slotId, resKey);
             return { ok: true, changed: true, slotConflict: !!reservation.slotId && !released.committed };
@@ -1045,8 +1179,7 @@
             try {
                 const result = await reservationRef.transaction(current => {
                     if (!current || current.status !== 'canceled') return;
-                    current.status = newStatus;
-                    return current;
+                    return applyStatus(current, newStatus);
                 });
                 if (!result.committed) {
                     await releaseSlotIfOwned(year, reservation.slotId, resKey);
@@ -1062,17 +1195,33 @@
         const result = await reservationRef.transaction(current => {
             // 快照读取后学生可能刚好取消；此分支不能绕过“重新占用排班”的流程复活预约。
             if (!current || current.status === 'canceled' || current.status === newStatus) return;
-            current.status = newStatus;
-            return current;
+            if (newStatus !== 'completed' && hasCurrentPostedFee(current)) {
+                feeConflict = true;
+                return;
+            }
+            return applyStatus(current, newStatus);
         });
+        if (feeConflict) return { ok: false, reason: 'fee-posted' };
         return { ok: result.committed, changed: result.committed };
     }
 
     function deleteSingleReservation(resKey, slotId, nickname) {
         if (!confirm(`确定要删除 ${nickname} 的预约记录吗？`)) return;
-        updateReservationStatusSafe(viewingYear, resKey, 'canceled').then(result => {
+        SystemRouter.getReservationsRef(viewingYear).child(resKey).once('value').then(snapshot => {
+            const reservation = snapshot.val();
+            if (!reservation) throw { silent: true };
+            if (reservation.feeStatus === 'posted' || reservation.feeRecordId) {
+                alert('这条预约已经关联课时费账本，请先在课时费页面删除或修正对应记录，再删除预约。');
+                throw { silent: true };
+            }
+            return updateReservationStatusSafe(viewingYear, resKey, 'canceled');
+        }).then(result => {
             if (!result.ok) {
-                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，未删除记录，请先处理冲突。' : '删除失败，请重试。');
+                alert(result.reason === 'slot-conflict'
+                    ? '该时段已被其他预约占用，未删除记录，请先处理冲突。'
+                    : result.reason === 'fee-posted'
+                        ? '该预约已经关联课时费，请先处理账本记录。'
+                        : '删除失败，请重试。');
                 throw { silent: true };
             }
             if (result.slotConflict) {
@@ -1196,7 +1345,7 @@
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `预约系统全量备份_${new Date().toISOString().split('T')[0]}.json`;
+            link.download = `预约系统全量备份_${localDateKey(new Date())}.json`;
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
             URL.revokeObjectURL(url);
         }).catch(err => alert('导出失败：' + err.message));
@@ -1249,6 +1398,7 @@
             const clearPacks = {};
             clearPacks[`years/${viewingYear}/slots`] = null;
             clearPacks[`years/${viewingYear}/reservations`] = null;
+            clearPacks[`years/${viewingYear}/dailyLocks`] = null;
             clearPacks[`years/${viewingYear}/operationLog`] = null;
             clearPacks[`years/${viewingYear}/settings/deadline`] = null;
             clearPacks[`years/${viewingYear}/settings/notice`] = null;
@@ -1387,7 +1537,11 @@
 
         updateReservationStatusSafe(viewingYear, resKey, newStatus).then(result => {
             if (!result.ok) {
-                alert(result.reason === 'slot-conflict' ? '该时段已被其他预约占用，无法恢复。' : '状态修改失败，请重试。');
+                alert(result.reason === 'slot-conflict'
+                    ? '该时段已被其他预约占用，无法恢复。'
+                    : result.reason === 'fee-posted'
+                        ? '该预约已经关联课时费账本，请先在课时费页面删除或修正对应记录。'
+                        : '状态修改失败，请重试。');
                 const selectEl = document.querySelector(`.status-select-admin[data-key="${resKey}"]`);
                 if (selectEl) selectEl.value = oldStatus;
                 return;
@@ -1513,5 +1667,8 @@
     if (newStudentHoursInput) newStudentHoursInput.onkeypress = (e) => { if (e.key === 'Enter') addNewStudentToWhitelist(); };
     document.getElementById('btn-export-all').onclick = exportAllDataJSON;
     document.getElementById('btn-restore-all').onclick = triggerRestoreFile;
+
+    // 刷新教师端后恢复短时会话，避免每次刷新都回到登录页。
+    restoreAdminSession();
 
 })();

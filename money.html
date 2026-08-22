@@ -9,6 +9,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="utils/time-parser.js?v=20260822-functional-1"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
         .tab-active { color: #2563eb; border-bottom: 2px solid #2563eb; }
@@ -405,6 +406,19 @@
         return htmlEscape(JSON.stringify(String(value ?? '')));
     }
 
+    function isValidLedgerDate(value, expectedYear) {
+        return typeof TimeParser !== 'undefined'
+            && typeof TimeParser.isValidDateString === 'function'
+            && TimeParser.isValidDateString(value, expectedYear);
+    }
+
+    function localDateKey(date = new Date()) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     function normalizeStudent(raw) {
         if (!raw || typeof raw !== 'object') return null;
         const name = String(raw.name ?? '').trim();
@@ -420,7 +434,7 @@
         const hours = Number(raw.hours);
         const rate = Number(raw.rate);
         const total = Number(raw.total);
-        if (!studentName || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(hours) || hours <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(total)) return null;
+        if (!studentName || !isValidLedgerDate(date) || !Number.isFinite(hours) || hours <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(total)) return null;
         return { ...raw, id: String(raw.id ?? ('record_' + Date.now() + Math.random().toString(36).slice(2, 7))), studentName, date, hours, rate, total };
     }
 
@@ -443,7 +457,7 @@
             } catch (e) {
                 console.error("Data corruption detected, resetting data to prevent crash.", e);
             }
-            const today = new Date().toISOString().split('T')[0];
+            const today = localDateKey();
             const dateInput = document.getElementById('recordDate');
             if (dateInput) dateInput.value = today;
             const monthEl = document.getElementById('statsMonthFilter');
@@ -488,7 +502,7 @@
     // --- State & Navigation ---
     let currentView = 'calendar';
     let currentDate = new Date();
-    let selectedDate = new Date().toISOString().split('T')[0];
+    let selectedDate = localDateKey();
     let chartInstance = null;
 
     function switchTab(view) {
@@ -590,10 +604,11 @@
         
         const name = nameInput.value.trim();
         const group = groupInput.value.trim();
-        const rate = parseFloat(rateInput.value);
+        const rateRaw = rateInput.value.trim();
+        const rate = Number(rateRaw);
 
-        if (!name || !Number.isFinite(rate) || rate < 0) {
-            showToast('请填写姓名和课时费');
+        if (!name || name.length > 50 || rateRaw === '' || !Number.isFinite(rate) || rate < 0 || rate > 1000000) {
+            showToast('请填写姓名和有效课时费');
             return;
         }
 
@@ -606,6 +621,13 @@
         if (editingStudentId) {
             const studentIndex = data.students.findIndex(s => s.id === editingStudentId);
             if (studentIndex > -1) {
+                const previousName = data.students[studentIndex].name;
+                const hasLinkedRecords = previousName !== name && data.records.some(record =>
+                    record.studentId === editingStudentId || (record.studentName === previousName && record.sourceId));
+                if (hasLinkedRecords) {
+                    showToast('该学生已有预约账本记录，请通过“两端数据核对”修改姓名');
+                    return;
+                }
                 data.students[studentIndex].name = name;
                 data.students[studentIndex].group = group;
                 data.students[studentIndex].rate = rate;
@@ -614,6 +636,14 @@
         } else {
             const id = Date.now().toString();
             data.students.push({ id, name, group, rate });
+            // 未建档时按 0 元导入的预约，在首次建立同名档案后补齐单价和学生关联。
+            data.records.forEach(record => {
+                const importedBooking = !!record.sourceId || String(record.id || '').startsWith('booking_');
+                if (!importedBooking || record.studentName !== name || Number(record.rate) !== 0) return;
+                record.studentId = id;
+                record.rate = rate;
+                record.total = Number((rate * Number(record.hours || 0)).toFixed(2));
+            });
             showToast('学生添加成功');
         }
 
@@ -731,7 +761,7 @@
                         const date = String(impRec?.date ?? '');
                         const hours = Number(impRec?.hours);
                         const sourceId = typeof impRec?.id === 'string' ? impRec.id : '';
-                        if (!studentName || studentName.length > 50 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(hours) || hours <= 0 || hours > 24 || sourceId.length > 200) {
+                        if (!studentName || studentName.length > 50 || !isValidLedgerDate(date) || !Number.isFinite(hours) || hours <= 0 || hours > 24 || sourceId.length > 200) {
                             skipCount++;
                             return;
                         }
@@ -847,7 +877,7 @@
         const url = URL.createObjectURL(blob);
         
         const a = document.createElement('a');
-        const date = new Date().toISOString().split('T')[0];
+        const date = localDateKey();
         a.href = url;
         a.download = `课时费备份_${date}.json`;
         document.body.appendChild(a);
@@ -952,7 +982,7 @@
         
         if(!studentSelect) return;
         const studentId = studentSelect.value;
-        if (!date || !studentId || !Number.isFinite(hours) || hours <= 0) {
+        if (!date || !isValidLedgerDate(date, activeYear) || !studentId || !Number.isFinite(hours) || hours <= 0) {
             showToast('请填写完整信息');
             return;
         }
@@ -996,11 +1026,60 @@
         updateSelectedDateView();
     }
 
-    function deleteRecord(id) {
-        if(confirm('确定删除这条记录吗？')) {
-            data.records = data.records.filter(r => r.id !== id);
+    async function clearBookingFeeLink(record) {
+        if (!record || !db || !activeYear) return true;
+        const sourceId = String(record.sourceId || '');
+        const snapshot = await db.ref(`years/${activeYear}/reservations`).once('value');
+        const reservations = snapshot.val() || {};
+        const updates = {};
+        Object.keys(reservations).forEach(key => {
+            const reservation = reservations[key];
+            if (!reservation) return;
+            const matches = (record.id && reservation.feeRecordId === record.id)
+                || (sourceId && sourceId === `imported_${key}`);
+            if (!matches) return;
+            updates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'pending';
+            updates[`years/${activeYear}/reservations/${key}/feePostedAt`] = null;
+            updates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
+            updates[`years/${activeYear}/reservations/${key}/feeRecordId`] = null;
+        });
+        if (Object.keys(updates).length > 0) await db.ref().update(updates);
+        return true;
+    }
+
+    async function deleteRecord(id) {
+        if (!confirm('确定删除这条记录吗？')) return;
+        const recordIndex = (data.records || []).findIndex(item => item.id === id);
+        if (recordIndex < 0) return showToast('记录已经不存在，请刷新后重试');
+        const record = data.records[recordIndex];
+        try {
+            // 先确认加密账本已经删除成功，再解除预约端关联；任一步失败都回滚，
+            // 避免出现“预约待入账、云端账本仍有流水”或相反状态。
+            data.records.splice(recordIndex, 1);
             saveData();
-            showToast('已删除');
+            const ledgerDeleted = await cloudPushChain.catch(() => false);
+            if (!ledgerDeleted) {
+                data.records.splice(Math.min(recordIndex, data.records.length), 0, record);
+                renderLedgerWithoutCloudPush();
+                return showToast('删除失败：云端账本未更新，原记录已恢复');
+            }
+
+            try {
+                await clearBookingFeeLink(record);
+            } catch (linkError) {
+                data.records.splice(Math.min(recordIndex, data.records.length), 0, record);
+                saveData();
+                const restored = await cloudPushChain.catch(() => false);
+                if (!restored) {
+                    console.error('预约关联解除失败，且账本回滚失败', linkError);
+                    return showToast('删除未完成：两端回滚失败，请刷新账本后重试');
+                }
+                throw linkError;
+            }
+            showToast('已删除，相关预约已恢复为待入账');
+        } catch (error) {
+            console.error('删除课时记录并解除预约关联失败', error);
+            showToast('删除失败，原记录和预约关联已保留，请重试');
         }
     }
 
@@ -1034,7 +1113,7 @@
 
         for (let day = 1; day <= daysInMonth; day++) {
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday = dateStr === new Date().toISOString().split('T')[0];
+            const isToday = dateStr === localDateKey();
             const isSelected = dateStr === selectedDate;
             const hasRecord = data.records.some(r => r.date === dateStr);
             
@@ -1349,6 +1428,7 @@ let reconciliationIssues = [];
 let reconciliationCases = [];
 let activeReconciliationCaseIndex = null;
 let reconciliationBusy = false;
+let autoPostInProgress = false;
 let _applyingCloud = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
@@ -1837,26 +1917,13 @@ async function forceUploadCloud() {
     pullCloud(); // 上传后立即按最新云端状态刷新（清除墓碑提示、更新年份摘要）
 }
 
-// 判断某条云端记录是否本地已存在（按 sourceId / id / 日期+姓名+课时 三元组）
+// 判断某条记录是否本地已存在。
+// 预约导入必须以 sourceId / id 为准；只有没有任何稳定 ID 的旧手工记录才允许使用三元组兼容。
 function isRecordExisting(rc) {
     if (rc.sourceId && data.records.some(r => r.sourceId && r.sourceId === rc.sourceId)) return true;
     if (rc.id && data.records.some(r => r.id && r.id === rc.id)) return true;
+    if (rc.sourceId || rc.id) return false;
     return data.records.some(r => r.date === rc.date && r.studentName === rc.studentName && Math.abs(Number(r.hours) - Number(rc.hours)) < 0.01);
-}
-
-// 判断两条课时记录是否为同一条（id / sourceId / 日期+姓名+课时 三元组）
-function sameRecordIdentity(a, b) {
-    if (!a || !b) return false;
-    if (a.id && b.id && a.id === b.id) return true;
-    if (a.sourceId && b.sourceId && a.sourceId === b.sourceId) return true;
-    return a.date === b.date && a.studentName === b.studentName && Math.abs(Number(a.hours) - Number(b.hours)) < 0.01;
-}
-
-// 并集合并两条记录列表（按身份去重），用于"本机独有记录保留"
-function mergeRecordLists(primary, extras) {
-    const out = primary.slice();
-    extras.forEach(e => { if (!out.some(o => sameRecordIdentity(o, e))) out.push(e); });
-    return out;
 }
 
 // 删除当前学年的云端数据（本地数据不受影响；写入墓碑，防止其他设备自动重建）
@@ -1984,23 +2051,14 @@ async function pullCloud(options) {
         }
         // 云端较新或相同：以云端当前学年切片为准，传播同 ID 修改和删除；其他年份仍保留在本机。
         let changed = false;
-        let mergedLocalOnlyCount = 0;
-        let localOnlyNames = new Set();
         const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : []).map(normalizeRecord).filter(Boolean);
         const localActiveRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === String(activeYear));
         const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
         if (recordsChanged) {
-            // 本机独有（云端没有）的记录：并集保留，防止覆盖丢数据；云端独有的记录与删除照常传播。
-            const localOnlyRecords = acceptRemote
-                ? []
-                : localActiveRecords.filter(lr => !cloudRecords.some(cr => sameRecordIdentity(lr, cr)));
-            if (localOnlyRecords.length > 0) {
-                localOnlyNames = new Set(localOnlyRecords.map(r => r.studentName));
-                data.records = mergeRecordLists(cloudRecords, localOnlyRecords);
-                mergedLocalOnlyCount = localOnlyRecords.length;
-            } else {
-                data.records = cloudRecords;
-            }
+            // 云端版本不旧于本机时必须整体采用云端切片。把“本机独有”记录再并回去
+            // 会让另一台设备已经删除的流水复活；尚未同步的本机修改会由上面的
+            // localUpdatedAt 分支上传或进入冲突处理，不会走到这里。
+            data.records = cloudRecords;
             changed = true;
         } else {
             // 即使当前学年内容相同，也不要把未迁移的历史年份本机记录带到页面上。
@@ -2008,14 +2066,8 @@ async function pullCloud(options) {
         }
 
         const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : []).map(normalizeStudent).filter(Boolean);
-        // 只保留云端学生档案和当前学年本机独有记录对应的档案，不显示未迁移的历史年份本机档案。
-        const preservedStudents = data.students.filter(s => localOnlyNames.has(s.name));
-        const mergedStudents = [];
-        [...cloudStudents, ...preservedStudents].forEach(s => {
-            if (!mergedStudents.some(existing => existing.name === s.name)) mergedStudents.push(s);
-        });
-        if (JSON.stringify(data.students) !== JSON.stringify(mergedStudents)) {
-            data.students = mergedStudents;
+        if (JSON.stringify(data.students) !== JSON.stringify(cloudStudents)) {
+            data.students = cloudStudents;
             changed = true;
         }
 
@@ -2032,16 +2084,7 @@ async function pullCloud(options) {
             _applyingCloud = true;
             saveData();
             _applyingCloud = false;
-            showToast(`已合并云端 ${activeYear} 年账本到本地${mergedLocalOnlyCount ? `，并保留本机 ${mergedLocalOnlyCount} 条云端没有的记录` : ''}`);
-        }
-        // 旧本机缓存中若有云端没有的当前学年记录，必须先补推成功，再删除本地缓存。
-        if (mergedLocalOnlyCount > 0 && !acceptRemote) {
-            const up = await pushCloud();
-            if (!up) {
-                const conflict = getCloudConflict(activeYear);
-                showFeeLedgerPending(conflict ? '本机独有记录尚未完成云端合并，请选择保留哪一份。' : `本机记录尚未完成云端合并：${lastCloudPushError || '请重试。'}`, conflict ? { conflict: true } : {});
-                return false;
-            }
+            showToast(`已从云端更新 ${activeYear} 年账本`);
         }
         if (pendingConflict || acceptRemote) clearCloudConflict(activeYear);
         finishFeeLedgerLoad();
@@ -2074,6 +2117,17 @@ saveData = function() {
     _origSaveData();
     if (!_applyingCloud && window.__feeLedgerReady) pushCloud();
 };
+
+// 仅刷新当前内存状态，不产生新的云端写入任务。用于失败回滚，防止回滚动作
+// 覆盖掉服务器上仍然正确的数据。
+function renderLedgerWithoutCloudPush() {
+    _applyingCloud = true;
+    try {
+        saveData();
+    } finally {
+        _applyingCloud = false;
+    }
+}
 
 // ---- 约课对接：拉取已完成预约 → 待入账 ----
 function parseLessonTime(rawText, year) {
@@ -2152,7 +2206,7 @@ function getReservationComparisonData(reservation) {
         if (!startTime) startTime = normalizeClockValue(`${timeMatch[3]}:${timeMatch[4]}`);
         if (!endTime) endTime = normalizeClockValue(`${timeMatch[5]}:${timeMatch[6]}`);
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : '';
+    if (!isValidLedgerDate(date, activeYear)) date = parsed && isValidLedgerDate(parsed.date, activeYear) ? parsed.date : '';
     if (!hours && startTime && endTime) hours = calculateClockHours(startTime, endTime);
     return {
         studentName: String(r.nickname || '').trim(),
@@ -2172,11 +2226,28 @@ function formatReconciliationDate(date) {
 }
 
 function formatReservationTime(date, startTime, endTime) {
-    const dateMatch = String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    const dateMatch = isValidLedgerDate(date, activeYear) && String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
     const start = normalizeClockValue(startTime);
     const end = normalizeClockValue(endTime);
     if (!dateMatch || !start || !end) return '';
     return `${Number(dateMatch[1])}/${Number(dateMatch[2])} ${start}-${end}`;
+}
+
+async function findScheduleTimeConflict(year, excludedSlotId, formattedTime) {
+    if (!db || !year || !formattedTime) return null;
+    const candidate = TimeParser.parseRawText(formattedTime, year);
+    if (!candidate) return { reason: 'invalid-time' };
+    const snapshot = await db.ref(`years/${year}/slots`).once('value');
+    const slots = snapshot.val() || {};
+    for (const [slotId, slot] of Object.entries(slots)) {
+        if (slotId === excludedSlotId || !slot || slot.status === 'hidden' || !slot.time) continue;
+        const existing = TimeParser.parseRawText(slot.time, year);
+        if (!existing || existing.date !== candidate.date) continue;
+        if (TimeParser.rangesOverlap(candidate.startTime, candidate.endTime, existing.startTime, existing.endTime)) {
+            return { slotId, time: existing.formattedSlotText };
+        }
+    }
+    return null;
 }
 
 function getReconciliationCandidates(booking, sourceId, feeRecordId) {
@@ -2221,13 +2292,15 @@ function addReconciliationCase(caseData) {
     return item;
 }
 
-// 检查待入账与已入账记录（及待入账列表内其他条目）的时间重合
-// 改过时间后可能与账本里已有的课时重叠：同学生+同日期+课时相同=疑似重复；课时相近(差≤0.5h)=疑似相邻冲突
+// 检查待入账与已入账记录（及待入账列表内其他条目）的时间重合。
+// 只有实际时间区间发生重叠才提示，不能再用“同一天+同课时”把两节不同课程误判为重复。
 function findLessonConflicts(lesson, includePending) {
     const conflicts = [];
     const sameDay = (a) => a.studentName === lesson.studentName && a.date === lesson.date;
+    const overlaps = (other) => sameDay(other)
+        && TimeParser.rangesOverlap(lesson.startTime, lesson.endTime, other.startTime, other.endTime);
     (data.records || []).forEach(r => {
-        if (!sameDay(r)) return;
+        if (!overlaps(r)) return;
         const diff = Math.abs(Number(r.hours) - Number(lesson.hours));
         if (diff < 0.01) {
             conflicts.push({ kind: 'exact', label: `已入账 ${r.date} ${r.studentName} ${Number(r.hours).toFixed(2)}h` });
@@ -2237,7 +2310,7 @@ function findLessonConflicts(lesson, includePending) {
     });
     if (includePending) {
         (pendingLessons || []).forEach(o => {
-            if (o === lesson || !sameDay(o)) return;
+            if (o === lesson || !overlaps(o)) return;
             if (Math.abs(Number(o.hours) - Number(lesson.hours)) < 0.01) {
                 conflicts.push({ kind: 'exact', label: `本次待入账内重复 ${o.date} ${o.studentName} ${Number(o.hours).toFixed(2)}h` });
             }
@@ -2246,7 +2319,7 @@ function findLessonConflicts(lesson, includePending) {
     return conflicts;
 }
 
-async function refreshPendingList() {
+async function refreshPendingList(options = {}) {
     const statusEl = document.getElementById('feeSyncStatus');
     const listEl = document.getElementById('pendingFeeList');
     if (!listEl) return;
@@ -2270,6 +2343,7 @@ async function refreshPendingList() {
         let reconciledImportedCount = 0;
         let reconciledDismissedCount = 0;
         let legacyLinked = false;
+        const legacyLinkTargets = [];
         const queuePostedStatus = (key, lesson, candidate) => {
             const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
             const postedAt = candidate && candidate.record
@@ -2301,7 +2375,7 @@ async function refreshPendingList() {
                 lesson.overridden = true;
             }
 
-            if (!lesson.studentName || !/^\d{4}-\d{2}-\d{2}$/.test(lesson.date) || !(lesson.hours > 0)) {
+            if (!lesson.studentName || !isValidLedgerDate(lesson.date, activeYear) || !(lesson.hours > 0)) {
                 addReconciliationCase({
                     type: 'invalidReservation',
                     resKey: key,
@@ -2391,6 +2465,31 @@ async function refreshPendingList() {
                 return;
             }
 
+            if (feeRecordCandidate) {
+                const diffs = getReconciliationDiffs(lesson, feeRecordCandidate.record);
+                const ownedByOther = feeRecordCandidate.record.sourceId && feeRecordCandidate.record.sourceId !== sourceId;
+                if (diffs.length === 0 && !ownedByOther && !consumedRecordIndexes.has(feeRecordCandidate.index)) {
+                    consumedRecordIndexes.add(feeRecordCandidate.index);
+                    if (!feeRecordCandidate.record.sourceId) {
+                        feeRecordCandidate.record.sourceId = sourceId;
+                        legacyLinked = true;
+                        legacyLinkTargets.push({ key, lesson, record: feeRecordCandidate.record, sourceId });
+                    }
+                    queuePostedStatus(key, lesson, feeRecordCandidate);
+                } else {
+                    addReconciliationCase({
+                        type: 'fieldMismatch',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: ownedByOther ? '指定账本记录已经关联其他预约' : '指定账本记录与预约数据不一致'
+                    });
+                }
+                return;
+            }
+
             if (legacyCandidates.length === 1 && !consumedRecordIndexes.has(legacyCandidates[0].index)) {
                 // 只有一条 姓名+日期+课时 完全一致的旧记录 → 自动关联为已入账（补齐 sourceId，避免反复人工核对）
                 const legacy = legacyCandidates[0];
@@ -2398,6 +2497,7 @@ async function refreshPendingList() {
                 if (legacy.record && typeof legacy.record === 'object' && !legacy.record.sourceId) {
                     legacy.record.sourceId = sourceId; // 直接改 data.records 中的对象，随后 saveData 持久化
                     legacyLinked = true;
+                    legacyLinkTargets.push({ key, lesson, record: legacy.record, sourceId });
                 }
                 queuePostedStatus(key, lesson, legacy);
                 return;
@@ -2432,9 +2532,35 @@ async function refreshPendingList() {
             pendingLessons.push(lesson);
         });
 
-        if (legacyLinked) saveData(); // 持久化自动补上的 sourceId（并推送加密账本），避免下次仍要人工核对
+        let ledgerLinkSyncFailed = false;
+        if (legacyLinked) {
+            // 必须先确认补上的 sourceId 已进入加密云端账本，再把预约标记为已入账。
+            saveData();
+            const linkedInCloud = await cloudPushChain.catch(() => false);
+            if (!linkedInCloud) {
+                ledgerLinkSyncFailed = true;
+                legacyLinkTargets.forEach(target => {
+                    if (target.record.sourceId === target.sourceId) delete target.record.sourceId;
+                    const prefix = `years/${activeYear}/reservations/${target.key}/`;
+                    Object.keys(reconciliationUpdates).forEach(path => {
+                        if (path.startsWith(prefix)) delete reconciliationUpdates[path];
+                    });
+                    addReconciliationCase({
+                        type: 'syncFailed',
+                        resKey: target.key,
+                        sourceId: target.sourceId,
+                        reservation: res[target.key],
+                        booking: target.lesson,
+                        candidates: getReconciliationCandidates(target.lesson, target.sourceId, res[target.key] && res[target.key].feeRecordId),
+                        message: `账本关联未同步到云端：${lastCloudPushError || '请稍后重试'}`
+                    });
+                });
+                reconciledImportedCount = Math.max(0, reconciledImportedCount - legacyLinkTargets.length);
+                renderLedgerWithoutCloudPush();
+            }
+        }
 
-        let reconciliationSyncFailed = false;
+        let reconciliationSyncFailed = ledgerLinkSyncFailed;
         if (Object.keys(reconciliationUpdates).length > 0) {
             try {
                 await db.ref().update(reconciliationUpdates);
@@ -2464,6 +2590,9 @@ async function refreshPendingList() {
         renderReconciliationNotice({ reconciledImportedCount, reconciledDismissedCount, reconciliationSyncFailed });
         statusEl.textContent = `当前学年 ${activeYear} · ${pendingLessons.length} 条待入账${reconciliationCases.length ? ` · ${reconciliationCases.length} 条需核对` : ''}${conflictCount ? ` · ${conflictCount} 条有重合提示` : ''}`;
         renderYearSummary();
+        // 账本已解锁后，自动处理已建档且没有时间冲突的完成课程；
+        // 无档案、时间异常或存在冲突的记录仍保留在人工处理列表。
+        if (!options.skipAutoPost) await autoPostPendingLessons();
     } catch (e) {
         console.error(e);
         statusEl.textContent = '读取失败：' + (e.message || e);
@@ -2668,6 +2797,10 @@ async function buildReconciliationReservationUpdates(item, canonical, recordId, 
         const endTime = normalizeClockValue(canonical.endTime || addHoursToClock(startTime, canonical.hours));
         const formattedTime = formatReservationTime(canonical.date, startTime, endTime);
         if (!formattedTime) return { ok: false, message: '需要完整的日期、开始时间和结束时间，才能同步约课端。' };
+        const conflict = await findScheduleTimeConflict(activeYear, reservation.slotId, formattedTime);
+        if (conflict) {
+            return { ok: false, message: `修改后的时间与现有排班重叠（${conflict.time || '时间无效'}），请先调整排班。` };
+        }
         updates[`years/${activeYear}/reservations/${item.resKey}/nickname`] = canonical.studentName;
         updates[`years/${activeYear}/reservations/${item.resKey}/time`] = formattedTime;
         updates[`years/${activeYear}/reservations/${item.resKey}/slotSnapshot/date`] = canonical.date;
@@ -2710,12 +2843,14 @@ function upsertReconciliationLedgerRecord(item, canonical, candidate) {
         studentId: profile ? profile.id : String(existing && existing.studentId || ''),
         studentName: canonical.studentName,
         date: canonical.date,
+        startTime: normalizeClockValue(canonical.startTime),
+        endTime: normalizeClockValue(canonical.endTime || addHoursToClock(canonical.startTime, canonical.hours)),
         hours: Number(Number(canonical.hours).toFixed(2)),
         rate,
         total: Number((rate * Number(canonical.hours)).toFixed(2)),
         postedAt: Number(existing && existing.postedAt || Date.now())
     };
-    if (!(nextRecord.hours > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(nextRecord.date) || !nextRecord.studentName) throw new Error('账本数据不完整，请使用手动填写。');
+    if (!(nextRecord.hours > 0) || !isValidLedgerDate(nextRecord.date, activeYear) || !nextRecord.studentName) throw new Error('账本数据不完整，请使用手动填写。');
     if (targetIndex >= 0) records[targetIndex] = nextRecord;
     else records.push(nextRecord);
     data.records = records;
@@ -2850,7 +2985,7 @@ async function saveManualReconciliation() {
     const hours = Number(document.getElementById('feeManualHours').value);
     const rate = Number(document.getElementById('feeManualRate').value);
     const calculatedHours = calculateClockHours(startTime, endTime);
-    if (!studentName || studentName.length > 50 || /[.#$\/\[\]]/.test(studentName) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !startTime || !endTime || !(calculatedHours > 0) || !(hours > 0) || !(rate >= 0)) {
+    if (!studentName || studentName.length > 50 || /[.#$\/\[\]]/.test(studentName) || !isValidLedgerDate(date, activeYear) || !startTime || !endTime || !(calculatedHours > 0) || !(hours > 0) || !(rate >= 0)) {
         alert('请完整填写姓名、日期、起止时间、课时和课时费。');
         return;
     }
@@ -2862,19 +2997,39 @@ async function saveManualReconciliation() {
     await commitReconciliation(caseIndex, { studentName, date, startTime, endTime, hours, rate }, candidate, true);
 }
 
-async function importSelectedPending() {
-    const checked = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]);
-    if (checked.length === 0) return;
-    if (!confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return;
-    // 重合检查：与已入账记录时间重合/相近的，先提示再确认，防止重复计费
-    const conflictLines = [];
-    checked.forEach(p => {
-        (p.conflicts || []).forEach(c => conflictLines.push(`${p.date} ${p.studentName} ${p.hours.toFixed(2)}h ← ${c.label}`));
-    });
-    if (conflictLines.length > 0) {
-        const shown = conflictLines.slice(0, 10).join('\n');
-        const more = conflictLines.length > 10 ? `\n…还有 ${conflictLines.length - 10} 条` : '';
-        if (!confirm(`以下 ${conflictLines.length} 条与已入账记录时间重合或相近，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用「修改时间」或「忽略」处理。确定仍要导入这 ${checked.length} 条吗？`)) return;
+async function importPendingLessons(lessons, options = {}) {
+    const auto = options.auto === true;
+    let checked = Array.isArray(lessons) ? lessons.filter(Boolean) : [];
+    if (checked.length === 0) return false;
+    if (!auto && !confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return false;
+
+    // 入账前重新读取预约，避免把已经删除、取消或尚未完成的旧页面数据写进账本。
+    try {
+        const latestReservations = (await db.ref(`years/${activeYear}/reservations`).once('value')).val() || {};
+        checked = checked.filter(lesson => {
+            const current = latestReservations[lesson.resKey];
+            return current && current.status === 'completed';
+        });
+    } catch (error) {
+        console.error('入账前复核预约失败:', error);
+        if (!auto) alert('暂时无法复核预约状态，未写入账本，请检查网络后重试。');
+        return false;
+    }
+    if (checked.length === 0) {
+        if (!auto) alert('所选课程状态已经变化，请刷新后重试。');
+        return false;
+    }
+    // 重合检查：自动入账只接收已提前确认无冲突的记录；手动导入仍二次提示。
+    if (!options.skipConflictCheck) {
+        const conflictLines = [];
+        checked.forEach(p => {
+            (p.conflicts || []).forEach(c => conflictLines.push(`${p.date} ${p.studentName} ${p.hours.toFixed(2)}h ← ${c.label}`));
+        });
+        if (conflictLines.length > 0) {
+            const shown = conflictLines.slice(0, 10).join('\n');
+            const more = conflictLines.length > 10 ? `\n…还有 ${conflictLines.length - 10} 条` : '';
+            if (!confirm(`以下 ${conflictLines.length} 条与已入账记录时间重合，继续导入可能重复计费：\n\n${shown}${more}\n\n建议先用「修改时间」或「忽略」处理。确定仍要导入这 ${checked.length} 条吗？`)) return false;
+        }
     }
     const noProfile = new Set();
     const importedRecords = [];
@@ -2894,44 +3049,93 @@ async function importSelectedPending() {
             studentId: targetStudent ? targetStudent.id : "",
             studentName: p.studentName,
             date: p.date,
+            startTime: normalizeClockValue(p.startTime),
+            endTime: normalizeClockValue(p.endTime),
             hours: Number(Number(p.hours).toFixed(2)),
             rate: rate,
             total: total
         });
         importedRecords.push({ lesson: p, recordId });
     });
-    saveData();
-    const cloudSaved = await cloudPushChain.catch(() => false);
-    let statusSynced = false;
-    if (cloudSaved && db && activeYear) {
+    if (importedRecords.length > 0) saveData();
+    const cloudSaved = importedRecords.length === 0 ? true : await cloudPushChain.catch(() => false);
+    if (!cloudSaved) {
+        const addedIds = new Set(importedRecords.map(item => item.recordId));
+        data.records = (data.records || []).filter(record => !addedIds.has(record.id));
+        renderLedgerWithoutCloudPush();
+        const message = `入账未完成：加密账本云端同步失败${lastCloudPushError ? `（${lastCloudPushError}）` : ''}`;
+        if (auto) showToast(message); else alert(message + '，本次没有改变预约状态。');
+        return false;
+    }
+
+    let statusSynced = true;
+    let successfulImports = importedRecords;
+    if (db && activeYear && importedRecords.length > 0) {
         const postedAt = Date.now();
-        const updates = {};
-        // 一次读取预约集合，避免对已删除预约写 feeStatus 产生残缺节点
-        let existingRes = {};
-        try { existingRes = (await db.ref(`years/${activeYear}/reservations`).once('value')).val() || {}; } catch (e) {}
-        importedRecords.forEach(({ lesson, recordId }) => {
-            const resKey = lesson.resKey;
-            if (!existingRes[resKey]) return; // 预约已删除，跳过云端写入
-            updates[`years/${activeYear}/reservations/${resKey}/feeStatus`] = 'posted';
-            updates[`years/${activeYear}/reservations/${resKey}/feePostedAt`] = postedAt;
-            updates[`years/${activeYear}/reservations/${resKey}/feeRecordId`] = recordId;
-        });
-        if (Object.keys(updates).length > 0) {
+        const results = await Promise.all(importedRecords.map(async item => {
             try {
-                await db.ref().update(updates);
-                statusSynced = true;
+                const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
+                    if (!current || current.status !== 'completed') return;
+                    current.feeStatus = 'posted';
+                    current.feePostedAt = postedAt;
+                    current.feeRecordId = item.recordId;
+                    current.feeDismissedAt = null;
+                    return current;
+                });
+                return { ...item, committed: result.committed };
             } catch (error) {
                 console.error('预约入账状态同步失败:', error);
+                return { ...item, committed: false };
             }
-        } else {
-            statusSynced = true; // 没有需要写云端的预约（都已删除），视为同步完成
+        }));
+        successfulImports = results.filter(item => item.committed);
+        const failedImports = results.filter(item => !item.committed);
+        if (failedImports.length > 0) {
+            statusSynced = false;
+            const failedIds = new Set(failedImports.map(item => item.recordId));
+            data.records = (data.records || []).filter(record => !failedIds.has(record.id));
+            saveData();
+            const rollbackSaved = await cloudPushChain.catch(() => false);
+            if (!rollbackSaved) {
+                console.error('未完成入账的账本记录云端回滚失败:', lastCloudPushError);
+            }
         }
     }
-    let warn = "";
-    if (noProfile.size > 0) warn = `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ` + [...noProfile].join('、');
-    const syncMessage = statusSynced ? '' : '\n\n本机账本已保存，但云端入账状态尚未确认，请稍后检查同步。';
-    alert(`约课入账成功！已导入 ${checked.length - alreadyImportedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
-    refreshPendingList();
+    const importedCount = successfulImports.length;
+    const warn = noProfile.size > 0
+        ? `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ${[...noProfile].join('、')}`
+        : '';
+    const syncMessage = statusSynced ? '' : '\n\n部分预约状态在入账时发生变化，相关账本记录已撤回，请刷新后重试。';
+    if (auto) {
+        if (importedCount > 0) showToast(`已自动入账 ${importedCount} 条完成课程${noProfile.size ? `；${noProfile.size} 名学生未建档` : ''}`);
+        if (!statusSynced) showToast('部分课程状态已变化，未自动入账');
+    } else {
+        alert(`约课入账成功！已导入 ${importedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
+    }
+    await refreshPendingList(statusSynced ? {} : { skipAutoPost: true });
+    return statusSynced;
+}
+
+async function autoPostPendingLessons() {
+    if (autoPostInProgress || !window.__feeLedgerReady || pendingLessons.length === 0) return;
+    const eligible = pendingLessons.filter(lesson =>
+        lesson.hasProfile &&
+        isValidLedgerDate(lesson.date, activeYear) &&
+        lesson.hours > 0 &&
+        (!lesson.conflicts || lesson.conflicts.length === 0)
+    );
+    if (eligible.length === 0) return;
+    autoPostInProgress = true;
+    try {
+        await importPendingLessons(eligible, { auto: true, skipConflictCheck: true });
+    } finally {
+        autoPostInProgress = false;
+    }
+}
+
+async function importSelectedPending() {
+    const checked = [...document.querySelectorAll('.pending-check:checked')].map(cb => pendingLessons[+cb.dataset.idx]);
+    await importPendingLessons(checked);
 }
 
 // ---- 时间段修改 / 忽略（约课系统里当时填的时间可能有误）----
@@ -2954,53 +3158,72 @@ function editPendingLesson(i) {
     `;
 }
 
-function saveEditPendingLesson(i) {
+async function saveEditPendingLesson(i) {
     const p = pendingLessons[i];
     if (!p) return;
     const date = document.getElementById('edit-date-' + i).value;
     const hours = parseFloat(document.getElementById('edit-hours-' + i).value);
-    if (!date) return alert('请选择日期');
+    if (!date || !isValidLedgerDate(date, activeYear)) return alert('请选择有效日期');
     if (!(hours > 0)) return alert('请输入有效课时');
+    const nextLesson = { ...p, date, hours: Number(Number(hours).toFixed(2)) };
+    const synced = await syncReservationTime(nextLesson);
+    if (!synced) return;
+
     data.lessonOverrides = data.lessonOverrides || {};
-    data.lessonOverrides[p.resKey] = { date: date, hours: Number(Number(hours).toFixed(2)) };
-    p.date = date;
-    p.hours = Number(Number(hours).toFixed(2));
+    data.lessonOverrides[p.resKey] = { date: nextLesson.date, hours: nextLesson.hours };
+    p.date = nextLesson.date;
+    p.hours = nextLesson.hours;
     p.overridden = true;
     // 修改后的时间可能与已入账记录/其他待入账重合，重新检测
     pendingLessons.forEach(x => { x.conflicts = findLessonConflicts(x, true); });
     saveData(); // 修改随账本加密同步云端
     showToast('已修改');
     renderPendingList();
-    syncReservationTime(p); // 同步修改约课后台的预约时间与时长
 }
 
 // 修改时间段时同步更新约课后台的预约记录（时间、时长），
 // 让学生端历史记录与管理端预约记录都显示修正后的时间，而不是只改了本账本
 async function syncReservationTime(p) {
-    if (!db || !activeYear || !p.resKey) return;
+    if (!db || !activeYear || !p.resKey) return false;
     try {
         const snap = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
         const r = snap.val();
-        if (!r) return;
+        if (!r || r.status !== 'completed') {
+            showToast('课程状态已经变化，请刷新后重试');
+            return false;
+        }
+        if (r.feeStatus === 'posted' || r.feeRecordId) {
+            showToast('该课程已经入账，请通过“两端数据核对”修改');
+            return false;
+        }
         // 取原开始时间：优先 slotSnapshot，其次从 time 字符串解析
         let startTime = (r.slotSnapshot && r.slotSnapshot.startTime) || null;
         if (!startTime && r.time) {
             const m = String(r.time).match(/(\d{1,2}):(\d{2})/);
             if (m) startTime = `${String(+m[1]).padStart(2, '0')}:${m[2]}`;
         }
-        if (!startTime) return;
+        if (!startTime) {
+            showToast('原预约缺少开始时间，无法同步修改');
+            return false;
+        }
         // 结束时间 = 开始时间 + 修正后的课时长；不允许跨午夜（否则生成"结束早于开始"的非法时间）
         const [sh, sm] = startTime.split(':').map(Number);
         const totalMin = sh * 60 + sm + Math.round(Number(p.hours) * 60);
         if (totalMin >= 24 * 60) {
-            showToast('修改后课时超过当天剩余时间（跨午夜），后台时间未同步（本机账本仍生效），请调小课时或调整日期');
-            return;
+            showToast('修改后课时会跨午夜，未保存，请调小课时或调整日期');
+            return false;
         }
         const eh = Math.floor(totalMin / 60);
         const em = totalMin % 60;
         const endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
         const md = String(p.date).split('-'); // YYYY-MM-DD
         const newTime = `${+md[1]}/${+md[2]} ${startTime}-${endTime}`; // 与排班时间字符串格式一致
+
+        const conflict = await findScheduleTimeConflict(activeYear, r.slotId, newTime);
+        if (conflict) {
+            showToast(`修改失败：与现有排班 ${conflict.time || ''} 重叠，请先调整排班`);
+            return false;
+        }
 
         // 一次性原子更新多处：预约记录本身（time + slotSnapshot）与对应排班 slot 的时间，
         // 让学生端历史、管理端预约记录、管理端排班表都显示修正后的时间与时长
@@ -3023,9 +3246,11 @@ async function syncReservationTime(p) {
         showToast(slotOwnershipConflict
             ? '预约时间已同步；排班所有权冲突，未修改排班，请到管理端检查'
             : '已修改，后台预约时间与排班已同步更新');
+        return true;
     } catch (e) {
         console.error('同步后台预约时间失败', e);
-        showToast('后台预约时间同步失败：' + (e.message || e) + '（本地修改仍生效）');
+        showToast('后台预约时间同步失败：' + (e.message || e));
+        return false;
     }
 }
 
@@ -3035,35 +3260,49 @@ async function dismissPendingLesson(i) {
     if (!confirm(`确定忽略这条预约吗？\n${p.date} ${p.studentName} ${p.hours.toFixed(2)} 小时\n\n忽略后不会自动导入，可在下方「已忽略的时间段」中恢复。`)) return;
     const ok = await ensureCloudReady();
     if (!ok) { showToast('云端未连接，暂时无法忽略'); return; }
-    // 预约可能已被管理端删除：先确认存在，避免凭空写残缺节点
+    // 预约可能已被管理端删除或改状态：先确认仍是待处理的完成课程。
     let reservationStillExists = false;
     try {
         const rSnap = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).once('value');
-        reservationStillExists = rSnap.exists();
-    } catch (e) {}
-    if (reservationStillExists) {
-        try {
-            await db.ref().update({
-                [`years/${activeYear}/reservations/${p.resKey}/feeStatus`]: 'dismissed',
-                [`years/${activeYear}/reservations/${p.resKey}/feeDismissedAt`]: Date.now(),
-                [`years/${activeYear}/reservations/${p.resKey}/feePostedAt`]: null,
-                [`years/${activeYear}/reservations/${p.resKey}/feeRecordId`]: null
-            });
-        } catch (error) {
-            console.error('忽略状态同步失败:', error);
-            showToast('云端状态同步失败，未忽略');
-            return;
-        }
-    } else {
-        showToast('该预约在云端已不存在，仅在本机忽略');
+        const reservation = rSnap.val();
+        reservationStillExists = !!reservation && reservation.status === 'completed'
+            && reservation.feeStatus !== 'posted' && !reservation.feeRecordId;
+    } catch (error) {
+        console.error('忽略前复核预约失败:', error);
+        showToast('无法复核预约状态，未忽略');
+        return;
     }
+    if (!reservationStillExists) return showToast('课程状态已经变化，请刷新后重试');
+
     data.dismissedLessons = data.dismissedLessons || [];
-    if (!data.dismissedLessons.some(d => d.resKey === p.resKey)) {
-        data.dismissedLessons.push({ resKey: p.resKey, date: p.date, studentName: p.studentName, hours: p.hours });
-    }
+    const dismissedItem = { resKey: p.resKey, date: p.date, studentName: p.studentName, hours: p.hours };
+    if (!data.dismissedLessons.some(d => d.resKey === p.resKey)) data.dismissedLessons.push(dismissedItem);
     saveData();
+    const ledgerSaved = await cloudPushChain.catch(() => false);
+    if (!ledgerSaved) {
+        data.dismissedLessons = data.dismissedLessons.filter(item => item.resKey !== p.resKey);
+        renderLedgerWithoutCloudPush();
+        return showToast('忽略失败：加密账本云端未更新');
+    }
+    try {
+        const result = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).transaction(current => {
+            if (!current || current.status !== 'completed' || current.feeStatus === 'posted' || current.feeRecordId) return;
+            current.feeStatus = 'dismissed';
+            current.feeDismissedAt = Date.now();
+            current.feePostedAt = null;
+            current.feeRecordId = null;
+            return current;
+        });
+        if (!result.committed) throw new Error('课程状态已经变化');
+    } catch (error) {
+        data.dismissedLessons = data.dismissedLessons.filter(item => item.resKey !== p.resKey);
+        saveData();
+        await cloudPushChain.catch(() => false);
+        console.error('忽略状态同步失败:', error);
+        return showToast('忽略失败，已恢复原状态，请刷新后重试');
+    }
     showToast('已忽略该时间段');
-    refreshPendingList();
+    await refreshPendingList();
 }
 
 function renderDismissed() {
@@ -3091,32 +3330,45 @@ async function restoreDismissed(idx) {
     if (!item || !activeYear) return;
     const ok = await ensureCloudReady();
     if (!ok) { showToast('云端未连接，暂时无法恢复'); return; }
-    // 预约可能已被管理端删除：先确认存在，避免凭空写残缺节点
-    let reservationStillExists = false;
+    let reservation = null;
     try {
         const rSnap = await db.ref(`years/${activeYear}/reservations/${item.resKey}`).once('value');
-        reservationStillExists = rSnap.exists();
-    } catch (e) {}
-    if (reservationStillExists) {
-        try {
-            await db.ref().update({
-                [`years/${activeYear}/reservations/${item.resKey}/feeStatus`]: 'pending',
-                [`years/${activeYear}/reservations/${item.resKey}/feeDismissedAt`]: null,
-                [`years/${activeYear}/reservations/${item.resKey}/feePostedAt`]: null,
-                [`years/${activeYear}/reservations/${item.resKey}/feeRecordId`]: null
-            });
-        } catch (error) {
-            console.error('恢复状态同步失败:', error);
-            showToast('云端状态同步失败，未恢复');
-            return;
-        }
-    } else {
-        showToast('该预约在云端已不存在，仅在本机恢复');
+        reservation = rSnap.val();
+    } catch (error) {
+        console.error('恢复前复核预约失败:', error);
+        return showToast('无法复核预约状态，未恢复');
     }
     (data.dismissedLessons || []).splice(idx, 1);
     saveData();
-    renderPendingList();
-    refreshPendingList();
+    const ledgerSaved = await cloudPushChain.catch(() => false);
+    if (!ledgerSaved) {
+        data.dismissedLessons.splice(Math.min(idx, data.dismissedLessons.length), 0, item);
+        renderLedgerWithoutCloudPush();
+        return showToast('恢复失败：加密账本云端未更新');
+    }
+    const canResetReservation = reservation && reservation.status === 'completed'
+        && reservation.feeStatus !== 'posted' && !reservation.feeRecordId;
+    if (canResetReservation) {
+        try {
+            const result = await db.ref(`years/${activeYear}/reservations/${item.resKey}`).transaction(current => {
+                if (!current || current.status !== 'completed' || current.feeStatus === 'posted' || current.feeRecordId) return;
+                current.feeStatus = 'pending';
+                current.feeDismissedAt = null;
+                current.feePostedAt = null;
+                current.feeRecordId = null;
+                return current;
+            });
+            if (!result.committed) throw new Error('课程状态已经变化');
+        } catch (error) {
+            data.dismissedLessons.splice(Math.min(idx, data.dismissedLessons.length), 0, item);
+            saveData();
+            await cloudPushChain.catch(() => false);
+            console.error('恢复状态同步失败:', error);
+            return showToast('恢复失败，已保留忽略状态，请刷新后重试');
+        }
+    }
+    showToast(canResetReservation ? '已恢复为待入账' : '课程状态已变化，已清理旧的忽略记录');
+    await refreshPendingList();
 }
 
 async function changeFeePassphrase() {
