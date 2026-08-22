@@ -1732,6 +1732,7 @@ let cloudPushChain = Promise.resolve(true);
 let lastCloudPushError = ''; // 最近一次云端推送失败原因，供对账等流程展示
 let cloudDeleteInProgress = false;
 let cloudLedgerLoading = false;
+let cloudPullInProgress = null;
 const FEE_CONFLICT_STORAGE_PREFIX = 'fee_vault_conflict_v1_';
 
 function clearLocalLedgerCache() {
@@ -1954,6 +1955,8 @@ function pushCloud() {
 async function forceUploadCloud() {
     const ok = await ensureCloudReady();
     if (!ok) { showToast('云端未连接，请稍后重试'); return; }
+    // 等待页面刚开始的拉取完成，避免旧拉取在强制上传之后把旧版本重新设为基线。
+    if (cloudPullInProgress) await cloudPullInProgress.catch(() => false);
     const slice = getYearSlice(activeYear);
     if (!slice.records.length && !slice.students.length) {
         showToast(`本机没有 ${activeYear} 年的数据可上传`);
@@ -1968,8 +1971,14 @@ async function forceUploadCloud() {
     clearCloudConflict(activeYear);
     clearTombstoneNotice();
     renderYearSummary();
+    // 强制上传已经明确选择本机为准，回读时采用刚提交的云端版本，
+    // 同时把本地时间基线更新为云端时间，避免刚上传就再次触发冲突。
+    const refreshed = await pullCloud({ acceptRemote: true });
+    if (!refreshed) {
+        showToast('本机账本已上传，但云端基线回读失败，请点击刷新重试');
+        return;
+    }
     alert(`已上传本机 ${activeYear} 年账本到云端（AES 加密）：\n学生 ${slice.students.length} 名\n记录 ${slice.records.length} 条\n（其他年份数据仅保留在本地）`);
-    pullCloud(); // 上传后立即按最新云端状态刷新（清除墓碑提示、更新年份摘要）
 }
 
 // 判断某条记录是否本地已存在。
@@ -2036,12 +2045,14 @@ function renderYearSummary() {
 }
 
 async function pullCloud(options) {
-    options = options || {};
-    const acceptRemote = options.acceptRemote === true;
-    if (cloudLedgerLoading) return false;
-    cloudLedgerLoading = true;
-    showFeeLedgerPending(options.retry ? '正在重新读取云端账本…' : '正在读取云端账本…');
-    try {
+    if (cloudPullInProgress) return cloudPullInProgress;
+    const run = (async () => {
+        options = options || {};
+        const acceptRemote = options.acceptRemote === true;
+        if (cloudLedgerLoading) return false;
+        cloudLedgerLoading = true;
+        showFeeLedgerPending(options.retry ? '正在重新读取云端账本…' : '正在读取云端账本…');
+        try {
         const ok = await ensureCloudReady();
         if (!ok) {
             showFeeLedgerPending('云端暂时无法连接，账本未显示。请检查网络后重试。');
@@ -2150,9 +2161,14 @@ async function pullCloud(options) {
         showFeeLedgerPending(message);
         showToast(message);
         return false;
-    } finally {
-        cloudLedgerLoading = false;
-    }
+        } finally {
+            cloudLedgerLoading = false;
+        }
+    })();
+    cloudPullInProgress = run.finally(() => {
+        cloudPullInProgress = null;
+    });
+    return cloudPullInProgress;
 }
 
 // 每次保存自动推云端（云端口令未设置时静默跳过，本地照常可用）
