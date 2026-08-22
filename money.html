@@ -1838,16 +1838,21 @@ async function resolveCloudConflict(mode) {
 
 async function pushCloudNow(job, options) {
     options = options || {};
+    const rebase = options.rebase === true;
     try {
         if (!db || !job || !job.year) return false;
         const year = job.year;
         if (cloudDeleteInProgress) return false;
+        // 普通保存必须先处理冲突；“安全追加入账”会在下面用云端版本做 CAS
+        // 校验，只允许把本次新记录追加到最新云端账本，不允许覆盖其他修改。
         if (!options.force) {
-            const conflict = getCloudConflict(year);
-            if (conflict) {
-                lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
-                renderCloudConflictNotice(conflict);
-                return false;
+            if (!rebase) {
+                const conflict = getCloudConflict(year);
+                if (conflict) {
+                    lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
+                    renderCloudConflictNotice(conflict);
+                    return false;
+                }
             }
             const tombstone = (await db.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val();
             if (tombstone && tombstone.deletedAt) {
@@ -1859,7 +1864,7 @@ async function pushCloudNow(job, options) {
         }
         const slice = job.slice;
         const ref = vaultRefFor(year);
-        let known = cloudVersionsByYear[year];
+        let known = options.expectedVersion || cloudVersionsByYear[year];
         const remote = (await ref.once('value')).val();
         const knownRevision = known ? Number(known.revision || 0) : null;
         if (!options.force && remote && known && Number(remote.revision || 0) !== knownRevision) {
@@ -1949,6 +1954,119 @@ function pushCloud() {
     const job = { year, slice: cloneForCloud(slice), localUpdatedAt: data.yearUpdatedAt && data.yearUpdatedAt[year] || data.updatedAt || 0 };
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(job), () => pushCloudNow(job));
     return cloudPushChain;
+}
+
+function ledgerFingerprint(value) {
+    try {
+        return JSON.stringify(value, (key, item) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+            return Object.keys(item).sort().reduce((sorted, name) => {
+                sorted[name] = item[name];
+                return sorted;
+            }, {});
+        });
+    } catch (e) {
+        return String(value);
+    }
+}
+
+function ledgerArrayFingerprint(value) {
+    const list = Array.isArray(value) ? value.slice() : [];
+    list.sort((a, b) => ledgerFingerprint(a).localeCompare(ledgerFingerprint(b)));
+    return ledgerFingerprint(list);
+}
+
+function findLedgerRecordByLink(records, record) {
+    const list = Array.isArray(records) ? records : [];
+    if (!record) return null;
+    if (record.sourceId) {
+        const bySource = list.find(item => item && item.sourceId === record.sourceId);
+        if (bySource) return bySource;
+    }
+    if (record.id) return list.find(item => item && item.id === record.id) || null;
+    return null;
+}
+
+// 冲突存在时给“新完成课程”开一条安全的追加通道：
+// 只有当本机除本次新增记录外的内容与最新云端完全一致，才允许追加；
+// 任何其他本机修改都继续交给人工选择，避免用自动入账覆盖另一台设备的数据。
+async function appendImportedRecordsAfterConflict(importedRecords) {
+    const year = String(activeYear || '');
+    if (!db || !year || !Array.isArray(importedRecords) || importedRecords.length === 0) return false;
+    if (!getCloudConflict(year)) return false;
+    try {
+        const vault = (await vaultRefFor(year).once('value')).val();
+        if (!vault || !vault.cipher) return false;
+        if (!await ensureFeePassphrase()) return false;
+        const remoteData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
+        const remoteRecords = (remoteData && Array.isArray(remoteData.records) ? remoteData.records : [])
+            .map(normalizeRecord).filter(Boolean);
+        const remoteStudents = (remoteData && Array.isArray(remoteData.students) ? remoteData.students : [])
+            .map(normalizeStudent).filter(Boolean);
+        const localSlice = getYearSlice(year);
+        const importedIds = new Set(importedRecords.map(item => String(item.recordId || '')));
+        const localNonImported = (localSlice.records || []).filter(record => !importedIds.has(String(record.id || '')));
+
+        // 本机原有记录、学生档案和教师修改必须已经包含在云端；否则不能自动合并。
+        for (const localRecord of localNonImported) {
+            const remoteRecord = findLedgerRecordByLink(remoteRecords, localRecord);
+            if (!remoteRecord || ledgerFingerprint(remoteRecord) !== ledgerFingerprint(localRecord)) return false;
+        }
+        if (ledgerArrayFingerprint(localSlice.students || []) !== ledgerArrayFingerprint(remoteStudents)) return false;
+        const remoteOverrides = remoteData && remoteData.lessonOverrides && typeof remoteData.lessonOverrides === 'object'
+            ? remoteData.lessonOverrides : {};
+        const remoteDismissed = remoteData && Array.isArray(remoteData.dismissedLessons) ? remoteData.dismissedLessons : [];
+        if (ledgerFingerprint(localSlice.lessonOverrides || {}) !== ledgerFingerprint(remoteOverrides)) return false;
+        if (ledgerArrayFingerprint(localSlice.dismissedLessons || []) !== ledgerArrayFingerprint(remoteDismissed)) return false;
+
+        const mergedRecords = remoteRecords.slice();
+        for (const item of importedRecords) {
+            const localRecord = (localSlice.records || []).find(record => String(record.id || '') === String(item.recordId || ''));
+            if (!localRecord) continue;
+            const remoteRecord = findLedgerRecordByLink(mergedRecords, localRecord);
+            if (remoteRecord) {
+                // 同一预约已被另一端先入账时，只接受完全一致的记录，避免改写云端金额或课时。
+                if (ledgerFingerprint(remoteRecord) !== ledgerFingerprint(localRecord)) return false;
+            } else {
+                mergedRecords.push(cloneForCloud(localRecord));
+            }
+        }
+
+        const remoteVersion = {
+            revision: Number(vault.revision || 0),
+            updatedAt: Number(vault.updatedAt || 0)
+        };
+        const pushed = await pushCloudNow({
+            year,
+            slice: {
+                students: cloneForCloud(remoteStudents),
+                records: cloneForCloud(mergedRecords),
+                lessonOverrides: cloneForCloud(remoteOverrides),
+                dismissedLessons: cloneForCloud(remoteDismissed)
+            }
+        }, { rebase: true, expectedVersion: remoteVersion });
+        if (!pushed) return false;
+
+        data.records = [
+            ...(data.records || []).filter(record => String(record.date || '').slice(0, 4) !== year),
+            ...mergedRecords
+        ];
+        data.students = remoteStudents;
+        data.lessonOverrides = cloneForCloud(remoteOverrides);
+        data.dismissedLessons = cloneForCloud(remoteDismissed);
+        data.lessonOverridesByYear = data.lessonOverridesByYear || {};
+        data.dismissedLessonsByYear = data.dismissedLessonsByYear || {};
+        data.lessonOverridesByYear[year] = data.lessonOverrides;
+        data.dismissedLessonsByYear[year] = data.dismissedLessons;
+        data.yearUpdatedAt = data.yearUpdatedAt || {};
+        data.yearUpdatedAt[year] = Number(cloudVersionsByYear[year] && cloudVersionsByYear[year].updatedAt || Date.now());
+        _applyingCloud = true;
+        try { saveData(); } finally { _applyingCloud = false; }
+        return true;
+    } catch (error) {
+        console.error('冲突账本安全追加失败:', error);
+        return false;
+    }
 }
 
 // 一键上传本机当年账本到云端（强制以本机当年数据覆盖云端；仅上传当前学年）
@@ -3198,7 +3316,12 @@ async function importPendingLessons(lessons, options = {}) {
         importedRecords.push({ lesson: p, recordId });
     });
     if (importedRecords.length > 0) saveData();
-    const cloudSaved = importedRecords.length === 0 ? true : await cloudPushChain.catch(() => false);
+    let cloudSaved = importedRecords.length === 0 ? true : await cloudPushChain.catch(() => false);
+    // 已存在的多设备冲突不应阻断一条全新的完成课程：在确认本机其余内容
+    // 与最新云端一致后，仅把本次新增记录安全追加到云端。
+    if (!cloudSaved && importedRecords.length > 0 && getCloudConflict(activeYear)) {
+        cloudSaved = await appendImportedRecordsAfterConflict(importedRecords);
+    }
     if (!cloudSaved) {
         const addedIds = new Set(importedRecords.map(item => item.recordId));
         data.records = (data.records || []).filter(record => !addedIds.has(record.id));
