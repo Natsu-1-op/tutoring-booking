@@ -1430,10 +1430,17 @@ let activeReconciliationCaseIndex = null;
 let reconciliationBusy = false;
 let autoPostInProgress = false;
 let _applyingCloud = false;
+let reservationRealtimeRef = null;
+let reservationRealtimeHandler = null;
+let reservationRealtimeYear = '';
+let reservationRealtimeFingerprint = '';
+let reservationRefreshTimer = null;
+let reservationRefreshQueued = false;
+let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-08-22a'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-08-23a'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
@@ -1443,7 +1450,10 @@ let feePassphraseChanging = false;
 let feePassphrasePromise = null;
 
 async function ensureCloudReady() {
-    if (db) return true;
+    if (db) {
+        attachReservationRealtimeSync();
+        return true;
+    }
     if (!window.firebase) return false;
     try {
         if (!firebase.apps.length) firebase.initializeApp(FEE_FIREBASE_CONFIG);
@@ -1453,8 +1463,53 @@ async function ensureCloudReady() {
         activeYear = (sys && /^\d{4}$/.test(String(sys.activeYear || '')))
             ? String(sys.activeYear)
             : String(new Date().getFullYear());
+        attachReservationRealtimeSync();
         return true;
     } catch (e) { console.error('云端初始化失败', e); return false; }
+}
+
+function reservationRealtimeFingerprintFor(value) {
+    const reservations = value && typeof value === 'object' ? value : {};
+    return Object.keys(reservations).sort().map(key => {
+        const reservation = reservations[key] || {};
+        return [
+            key,
+            reservation.status || '',
+            reservation.feeStatus || '',
+            reservation.feeRecordId || '',
+            reservation.nickname || '',
+            reservation.time || ''
+        ].join('\u0001');
+    }).join('\u0002');
+}
+
+function scheduleReservationRefresh(snapshot) {
+    const fingerprint = reservationRealtimeFingerprintFor(snapshot && snapshot.val());
+    if (fingerprint === reservationRealtimeFingerprint) return;
+    reservationRealtimeFingerprint = fingerprint;
+    if (!window.__feeLedgerReady || currentView !== 'fee') return;
+    clearTimeout(reservationRefreshTimer);
+    reservationRefreshTimer = setTimeout(() => {
+        reservationRefreshTimer = null;
+        if (pendingRefreshInProgress) {
+            reservationRefreshQueued = true;
+            return;
+        }
+        refreshPendingList({ realtime: true });
+    }, 250);
+}
+
+function attachReservationRealtimeSync() {
+    if (!db || !activeYear) return;
+    if (reservationRealtimeYear === String(activeYear) && reservationRealtimeRef) return;
+    if (reservationRealtimeRef && reservationRealtimeHandler) {
+        reservationRealtimeRef.off('value', reservationRealtimeHandler);
+    }
+    reservationRealtimeYear = String(activeYear);
+    reservationRealtimeFingerprint = '';
+    reservationRealtimeRef = db.ref(`years/${activeYear}/reservations`);
+    reservationRealtimeHandler = snapshot => scheduleReservationRefresh(snapshot);
+    reservationRealtimeRef.on('value', reservationRealtimeHandler);
 }
 
 // ---- 加密（AES-GCM + PBKDF2，口令仅存本机）----
@@ -2320,9 +2375,17 @@ function findLessonConflicts(lesson, includePending) {
 }
 
 async function refreshPendingList(options = {}) {
+    if (pendingRefreshInProgress) {
+        reservationRefreshQueued = true;
+        return false;
+    }
+    pendingRefreshInProgress = true;
     const statusEl = document.getElementById('feeSyncStatus');
     const listEl = document.getElementById('pendingFeeList');
-    if (!listEl) return;
+    if (!listEl) {
+        pendingRefreshInProgress = false;
+        return false;
+    }
     listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">加载中…</div>';
     pendingLessons = [];
     reconciliationIssues = [];
@@ -2364,7 +2427,8 @@ async function refreshPendingList(options = {}) {
             const candidates = getReconciliationCandidates(booking, sourceId, r.feeRecordId);
             const sourceCandidate = candidates.find(candidate => candidate.matchType === 'sourceId');
             const feeRecordCandidate = candidates.find(candidate => candidate.matchType === 'feeRecordId');
-            const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact');
+            const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact'
+                && (!candidate.record.sourceId || candidate.record.sourceId === sourceId));
             const similarCandidates = candidates.filter(candidate => ['sameNameDate', 'sameDateHours', 'sameNameHours'].includes(candidate.matchType));
             const lesson = { ...booking, resKey: key, sourceId, feeStatus: r.feeStatus || 'pending' };
             // 应用教师修改过的时间（覆盖约课系统里填错的时间）
@@ -2406,7 +2470,10 @@ async function refreshPendingList(options = {}) {
             }
 
             if (r.feeStatus === 'posted') {
-                const postedCandidate = sourceCandidate || feeRecordCandidate;
+                // 历史上已经核对完成的记录可能只有姓名+日期+课时，没有 sourceId/feeRecordId。
+                // 允许唯一的旧记录作为已入账候选，并补齐关联，避免历史记录反复显示为“找不到账本”。
+                const postedLegacyCandidate = legacyCandidates.length === 1 ? legacyCandidates[0] : null;
+                const postedCandidate = sourceCandidate || feeRecordCandidate || postedLegacyCandidate;
                 if (!postedCandidate) {
                     addReconciliationCase({
                         type: 'postedLocalMissing',
@@ -2421,7 +2488,17 @@ async function refreshPendingList(options = {}) {
                     const diffs = getReconciliationDiffs(lesson, postedCandidate.record);
                     // 强匹配（sourceId / feeRecordId 精确命中）且字段一致 → 已入账状态成立，无需人工核对；
                     // 只有字段不一致或只是模糊匹配时才需要确认，避免大量重复弹核对
-                    const strongMatch = postedCandidate.matchType === 'sourceId' || postedCandidate.matchType === 'feeRecordId';
+                    const strongMatch = postedCandidate.matchType === 'sourceId'
+                        || postedCandidate.matchType === 'feeRecordId'
+                        || postedCandidate.matchType === 'legacyExact';
+                    if (postedCandidate.matchType === 'legacyExact' && postedCandidate.record && !postedCandidate.record.sourceId) {
+                        postedCandidate.record.sourceId = sourceId;
+                        legacyLinked = true;
+                        legacyLinkTargets.push({ key, lesson, record: postedCandidate.record, sourceId });
+                        if (postedCandidate.record.id && !r.feeRecordId) {
+                            reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = String(postedCandidate.record.id);
+                        }
+                    }
                     if (!strongMatch || diffs.length > 0) {
                         addReconciliationCase({
                             type: 'postedMismatch',
@@ -2597,6 +2674,18 @@ async function refreshPendingList(options = {}) {
         console.error(e);
         statusEl.textContent = '读取失败：' + (e.message || e);
         listEl.innerHTML = '';
+    } finally {
+        pendingRefreshInProgress = false;
+        if (reservationRefreshQueued) {
+            reservationRefreshQueued = false;
+            if (window.__feeLedgerReady && currentView === 'fee') {
+                clearTimeout(reservationRefreshTimer);
+                reservationRefreshTimer = setTimeout(() => {
+                    reservationRefreshTimer = null;
+                    refreshPendingList({ realtime: true });
+                }, 0);
+            }
+        }
     }
 }
 
