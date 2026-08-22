@@ -901,51 +901,52 @@
     }
 
     window.saveEditedSlot = function(slotId) {
-        const newTime = document.getElementById('edit-input-' + slotId).value.trim();
+        const input = document.getElementById('edit-input-' + slotId);
+        if (!input) return alert('排班编辑状态已失效，请刷新后重试。');
+        const newTime = input.value.trim();
         const validationParser = TimeParser.parseRawText(newTime, viewingYear);
         if (!validationParser) return alert('格式错误（例：6/19 1400-1500）');
 
-        let overlapFound = false;
-        let missingSlot = false;
-        let feeConflict = false;
-        db.ref(`years/${viewingYear}`).transaction(yearData => {
-            if (!yearData || !yearData.slots || !yearData.slots[slotId]) {
-                missingSlot = true;
-                return;
-            }
-            overlapFound = Object.keys(yearData.slots).some(id => {
-                const slot = yearData.slots[id];
+        // 只读取并更新排班与预约节点，不在学年根节点上做大事务；根节点还包含
+        // 课时费云端密文，部分数据库状态下会导致整个排班保存被拒绝。
+        const slotsRef = SystemRouter.getSlotsRef(viewingYear);
+        slotsRef.once('value').then(slotSnapshot => {
+            const slots = slotSnapshot.val() || {};
+            const currentSlot = slots[slotId];
+            if (!currentSlot) throw new Error('该排班已不存在。');
+            const overlap = Object.keys(slots).some(id => {
+                const slot = slots[id];
                 return id !== slotId && slot && slot.status !== 'hidden'
                     && scheduleTimesOverlap(slot.time, validationParser.formattedSlotText);
             });
-            if (overlapFound) return;
+            if (overlap) throw new Error('该时间段与现有排班重叠！');
 
-            const reservations = yearData.reservations || {};
-            feeConflict = Object.values(reservations).some(reservation => reservation
-                && reservation.slotId === slotId
-                && reservation.status === 'completed'
-                && (reservation.feeStatus === 'posted' || reservation.feeRecordId));
-            if (feeConflict) return;
+            return SystemRouter.getReservationsRef(viewingYear).once('value').then(resSnapshot => {
+                const reservations = resSnapshot.val() || {};
+                const feeConflict = Object.values(reservations).some(reservation => reservation
+                    && reservation.slotId === slotId
+                    && reservation.status === 'completed'
+                    && (reservation.feeStatus === 'posted' || reservation.feeRecordId));
+                if (feeConflict) throw new Error('该排班已有课程完成并入账，请先在课时费页面处理对应记录。');
 
-            yearData.slots[slotId].time = validationParser.formattedSlotText;
-            Object.keys(reservations).forEach(resKey => {
-                const reservation = reservations[resKey];
-                // 已取消记录保留当时的历史时间，不随后来重新开放的排班一起变化。
-                if (!reservation || reservation.slotId !== slotId || reservation.status === 'canceled') return;
-                reservation.time = validationParser.formattedSlotText;
-                reservation.slotSnapshot = { ...validationParser };
+                const updates = {};
+                updates[`years/${viewingYear}/slots/${slotId}/time`] = validationParser.formattedSlotText;
+                Object.keys(reservations).forEach(resKey => {
+                    const reservation = reservations[resKey];
+                    // 已取消记录保留当时的历史时间，不随后来重新开放的排班一起变化。
+                    if (!reservation || reservation.slotId !== slotId || reservation.status === 'canceled') return;
+                    updates[`years/${viewingYear}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
+                    updates[`years/${viewingYear}/reservations/${resKey}/slotSnapshot`] = { ...validationParser };
+                });
+                return db.ref().update(updates);
             });
-            return yearData;
-        }).then(result => {
-            if (!result.committed) {
-                return alert(overlapFound
-                    ? '该时间段与现有排班重叠！'
-                    : feeConflict
-                        ? '该排班已有课程完成并入账，请先在课时费页面处理对应记录。'
-                        : missingSlot ? '该排班已不存在。' : '修改排班失败，请重试。');
-            }
+        }).then(() => {
             SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
-        }).catch(() => alert('修改排班失败，请重试。'));
+            alert('排班已修改。');
+        }).catch(error => {
+            console.error('修改排班失败:', error);
+            alert(error.message || '修改排班失败，请重试。');
+        });
     };
 
     function setNotice() {
