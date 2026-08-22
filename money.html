@@ -2275,6 +2275,25 @@ function getReservationComparisonData(reservation) {
     };
 }
 
+function normalizeReconciliationName(value) {
+    return String(value || '').trim().replace(/\s+/g, '');
+}
+
+function normalizeReconciliationDate(value) {
+    const text = String(value || '').trim();
+    let match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+    if (!match) match = text.match(/^(\d{1,2})[-\/.](\d{1,2})$/);
+    if (match && match.length === 4) {
+        const year = match[1].length === 4 ? Number(match[1]) : Number(activeYear);
+        const month = match[1].length === 4 ? Number(match[2]) : Number(match[1]);
+        const day = match[1].length === 4 ? Number(match[3]) : Number(match[2]);
+        if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+    }
+    return text;
+}
+
 function formatReconciliationDate(date) {
     const match = String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
     return match ? `${Number(match[1])}/${Number(match[2])}` : String(date || '未填写');
@@ -2316,11 +2335,22 @@ function getReconciliationCandidates(booking, sourceId, feeRecordId) {
     };
     records.forEach((record, index) => {
         const sameSource = !!sourceId && record.sourceId === sourceId;
+        // 管理端历史导出使用 imported_<预约ID> 作为记录 id，但旧版本没有保存 sourceId。
+        // 这个 id 仍然是稳定关联键，不能退化成姓名+日期+课时模糊匹配。
+        const sourceRecordIds = sourceId
+            ? new Set([sourceId, `booking_${sourceId}`, `booking_${sourceId.replace(/^imported_/, '')}`])
+            : new Set();
+        const sameSourceRecordId = !!sourceId
+            && sourceRecordIds.has(String(record.id || ''))
+            && (!record.sourceId || record.sourceId === sourceId);
         const sameRecordId = !!feeRecordId && record.id === feeRecordId;
-        const sameName = !!booking.studentName && record.studentName === booking.studentName;
-        const sameDate = !!booking.date && record.date === booking.date;
+        const sameName = !!booking.studentName
+            && normalizeReconciliationName(record.studentName) === normalizeReconciliationName(booking.studentName);
+        const sameDate = !!booking.date
+            && normalizeReconciliationDate(record.date) === normalizeReconciliationDate(booking.date);
         const sameHours = booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) < 0.01;
         if (sameSource) add(record, index, 1000, 'sourceId');
+        else if (sameSourceRecordId) add(record, index, 995, 'recordSourceId');
         else if (sameRecordId) add(record, index, 990, 'feeRecordId');
         else if (sameName && sameDate && sameHours) add(record, index, 900, 'legacyExact');
         else if (sameName && sameDate) add(record, index, 600, 'sameNameDate');
@@ -2334,8 +2364,8 @@ function getReconciliationCandidates(booking, sourceId, feeRecordId) {
 function getReconciliationDiffs(booking, record) {
     if (!record) return [];
     const diffs = [];
-    if (booking.studentName && record.studentName !== booking.studentName) diffs.push(`姓名：约课端“${booking.studentName}” / 账本“${record.studentName || '未填写'}”`);
-    if (booking.date && record.date !== booking.date) diffs.push(`日期：约课端“${booking.date}” / 账本“${record.date || '未填写'}”`);
+    if (booking.studentName && normalizeReconciliationName(record.studentName) !== normalizeReconciliationName(booking.studentName)) diffs.push(`姓名：约课端“${booking.studentName}” / 账本“${record.studentName || '未填写'}”`);
+    if (booking.date && normalizeReconciliationDate(record.date) !== normalizeReconciliationDate(booking.date)) diffs.push(`日期：约课端“${booking.date}” / 账本“${record.date || '未填写'}”`);
     if (booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) >= 0.01) diffs.push(`课时：约课端“${Number(booking.hours).toFixed(2)}” / 账本“${Number(record.hours || 0).toFixed(2)}”`);
     return diffs;
 }
@@ -2425,7 +2455,7 @@ async function refreshPendingList(options = {}) {
             const booking = getReservationComparisonData(r);
             const sourceId = 'imported_' + key;
             const candidates = getReconciliationCandidates(booking, sourceId, r.feeRecordId);
-            const sourceCandidate = candidates.find(candidate => candidate.matchType === 'sourceId');
+            const sourceCandidate = candidates.find(candidate => ['sourceId', 'recordSourceId'].includes(candidate.matchType));
             const feeRecordCandidate = candidates.find(candidate => candidate.matchType === 'feeRecordId');
             const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact'
                 && (!candidate.record.sourceId || candidate.record.sourceId === sourceId));
@@ -2489,9 +2519,11 @@ async function refreshPendingList(options = {}) {
                     // 强匹配（sourceId / feeRecordId 精确命中）且字段一致 → 已入账状态成立，无需人工核对；
                     // 只有字段不一致或只是模糊匹配时才需要确认，避免大量重复弹核对
                     const strongMatch = postedCandidate.matchType === 'sourceId'
+                        || postedCandidate.matchType === 'recordSourceId'
                         || postedCandidate.matchType === 'feeRecordId'
                         || postedCandidate.matchType === 'legacyExact';
-                    if (postedCandidate.matchType === 'legacyExact' && postedCandidate.record && !postedCandidate.record.sourceId) {
+                    if (['recordSourceId', 'legacyExact'].includes(postedCandidate.matchType)
+                        && postedCandidate.record && !postedCandidate.record.sourceId) {
                         postedCandidate.record.sourceId = sourceId;
                         legacyLinked = true;
                         legacyLinkTargets.push({ key, lesson, record: postedCandidate.record, sourceId });
@@ -2527,6 +2559,11 @@ async function refreshPendingList(options = {}) {
                 const diffs = getReconciliationDiffs(lesson, sourceCandidate.record);
                 if (diffs.length === 0 && !consumedRecordIndexes.has(sourceCandidate.index)) {
                     consumedRecordIndexes.add(sourceCandidate.index);
+                    if (sourceCandidate.matchType === 'recordSourceId' && !sourceCandidate.record.sourceId) {
+                        sourceCandidate.record.sourceId = sourceId;
+                        legacyLinked = true;
+                        legacyLinkTargets.push({ key, lesson, record: sourceCandidate.record, sourceId });
+                    }
                     queuePostedStatus(key, lesson, sourceCandidate);
                 } else {
                     addReconciliationCase({
