@@ -2354,9 +2354,7 @@ function getReconciliationCandidates(booking, sourceId, feeRecordId) {
         else if (sameRecordId) add(record, index, 990, 'feeRecordId');
         else if (sameName && sameDate && sameHours) add(record, index, 900, 'legacyExact');
         else if (sameName && sameDate) add(record, index, 600, 'sameNameDate');
-        // 同日期同课时只在"某一端没有姓名"时才当候选，避免把其他学生的记录列出来造成困惑
-        else if (sameDate && sameHours && (!booking.studentName || !record.studentName)) add(record, index, 500, 'sameDateHours');
-        else if (sameName && sameHours) add(record, index, 400, 'sameNameHours');
+        // 姓名或日期任一不一致时，不进入人工核对候选，避免把其他课程误列为相近记录。
     });
     return candidates.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 8);
 }
@@ -2459,7 +2457,7 @@ async function refreshPendingList(options = {}) {
             const feeRecordCandidate = candidates.find(candidate => candidate.matchType === 'feeRecordId');
             const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact'
                 && (!candidate.record.sourceId || candidate.record.sourceId === sourceId));
-            const similarCandidates = candidates.filter(candidate => ['sameNameDate', 'sameDateHours', 'sameNameHours'].includes(candidate.matchType));
+            const similarCandidates = candidates.filter(candidate => candidate.matchType === 'sameNameDate');
             const lesson = { ...booking, resKey: key, sourceId, feeStatus: r.feeStatus || 'pending' };
             // 应用教师修改过的时间（覆盖约课系统里填错的时间）
             const ov = (data.lessonOverrides || {})[key];
