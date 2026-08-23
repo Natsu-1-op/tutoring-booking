@@ -371,6 +371,16 @@
                         <option value="">请选择...</option>
                     </select>
                 </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">开始时间</label>
+                        <input type="time" id="recordStartTime" onchange="updateRecordHoursFromTimes()" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">结束时间</label>
+                        <input type="time" id="recordEndTime" onchange="updateRecordHoursFromTimes()" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50">
+                    </div>
+                </div>
                 <div>
                     <label class="block text-xs font-medium text-gray-500 mb-1">上课时长 (小时)</label>
                     <div class="flex items-center space-x-2">
@@ -604,7 +614,7 @@
         document.getElementById('studentModalTitle').innerText = '编辑学生信息';
     }
 
-    function saveStudentFormData() {
+    async function saveStudentFormData() {
         const nameInput = document.getElementById('studentName');
         const groupInput = document.getElementById('studentGroup');
         const rateInput = document.getElementById('studentRate');
@@ -625,36 +635,79 @@
             return;
         }
 
+        let rateSyncCompleted = false;
         if (editingStudentId) {
             const studentIndex = data.students.findIndex(s => s.id === editingStudentId);
             if (studentIndex > -1) {
-                const previousName = data.students[studentIndex].name;
+                const previousStudent = cloneForCloud(data.students[studentIndex]);
+                const previousName = previousStudent.name;
                 const hasLinkedRecords = previousName !== name && data.records.some(record =>
                     record.studentId === editingStudentId || (record.studentName === previousName && record.sourceId));
                 if (hasLinkedRecords) {
                     showToast('该学生已有预约账本记录，请通过“两端数据核对”修改姓名');
                     return;
                 }
-                data.students[studentIndex].name = name;
-                data.students[studentIndex].group = group;
-                data.students[studentIndex].rate = rate;
+                const nextStudent = { ...previousStudent, name, group, rate };
+                const rateChanged = Number(previousStudent.rate) !== rate;
+                if (rateChanged) {
+                    const btn = document.getElementById('btnSaveStudent');
+                    if (btn) btn.disabled = true;
+                    try {
+                        await syncStudentRateAcrossYears(previousStudent, nextStudent);
+                        rateSyncCompleted = true;
+                    } catch (error) {
+                        console.error('学生课时费同步失败:', error);
+                        showToast(`课时费未修改：${error.message || error}`);
+                        return;
+                    } finally {
+                        if (btn) btn.disabled = false;
+                    }
+                }
+                data.students[studentIndex] = nextStudent;
+                if (rateChanged) applyStudentRateToLocalRecords(previousStudent, nextStudent);
                 showToast('学生信息已更新');
             }
         } else {
             const id = Date.now().toString();
-            data.students.push({ id, name, group, rate });
-            // 未建档时按 0 元导入的预约，在首次建立同名档案后补齐单价和学生关联。
-            data.records.forEach(record => {
+            const nextStudent = { id, name, group, rate };
+            const unlinkedImportedRecords = data.records.some(record => {
                 const importedBooking = !!record.sourceId || String(record.id || '').startsWith('booking_');
-                if (!importedBooking || record.studentName !== name || Number(record.rate) !== 0) return;
-                record.studentId = id;
-                record.rate = rate;
-                record.total = Number((rate * Number(record.hours || 0)).toFixed(2));
+                return importedBooking && normalizeReconciliationName(record.studentName) === normalizeReconciliationName(name)
+                    && (!record.studentId || Number(record.rate) === 0);
             });
+            if (unlinkedImportedRecords) {
+                const btn = document.getElementById('btnSaveStudent');
+                if (btn) btn.disabled = true;
+                try {
+                    await syncStudentRateAcrossYears({ id: '', name, rate: 0 }, nextStudent);
+                    rateSyncCompleted = true;
+                } catch (error) {
+                    console.error('新建学生的历史课时费同步失败:', error);
+                    showToast(`学生未添加：${error.message || error}`);
+                    return;
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            }
+            data.students.push(nextStudent);
+            // 未建档时按 0 元导入的预约，在首次建立同名档案后补齐单价和学生关联。
+            if (rateSyncCompleted) {
+                applyStudentRateToLocalRecords({ id: '', name, rate: 0 }, nextStudent);
+            } else {
+                data.records.forEach(record => {
+                    const importedBooking = !!record.sourceId || String(record.id || '').startsWith('booking_');
+                    if (!importedBooking || normalizeReconciliationName(record.studentName) !== normalizeReconciliationName(name)
+                        || Number(record.rate) !== 0) return;
+                    record.studentId = id;
+                    record.rate = rate;
+                    record.total = Number((rate * Number(record.hours || 0)).toFixed(2));
+                });
+            }
             showToast('学生添加成功');
         }
 
-        saveData();
+        if (rateSyncCompleted) renderLedgerWithoutCloudPush();
+        else saveData();
         resetStudentForm();
         renderStudentList();
         updateGroupSuggestions();
@@ -923,6 +976,8 @@
         editingRecordId = null;
         document.getElementById('recordDate').value = selectedDate;
         document.getElementById('recordHours').value = 2; 
+        document.getElementById('recordStartTime').value = '';
+        document.getElementById('recordEndTime').value = '';
         document.getElementById('recordStudent').value = '';
         document.getElementById('recordModalTitle').innerText = '添加上课记录';
         document.getElementById('btnSaveRecord').innerText = '确认保存';
@@ -968,6 +1023,8 @@
         document.getElementById('recordDate').value = record.date;
         document.getElementById('recordStudent').value = record.studentId;
         document.getElementById('recordHours').value = record.hours;
+        document.getElementById('recordStartTime').value = normalizeClockValue(record.startTime) || '';
+        document.getElementById('recordEndTime').value = normalizeClockValue(record.endTime) || '';
         document.getElementById('recordModalTitle').innerText = '修改上课记录';
         document.getElementById('btnSaveRecord').innerText = '保存修改';
         document.getElementById('modal-record').classList.remove('hidden');
@@ -982,15 +1039,30 @@
         input.value = Number(val.toFixed(2)); 
     }
 
+    function updateRecordHoursFromTimes() {
+        const start = normalizeClockValue(document.getElementById('recordStartTime').value);
+        const end = normalizeClockValue(document.getElementById('recordEndTime').value);
+        const hours = calculateClockHours(start, end);
+        if (hours > 0) document.getElementById('recordHours').value = Number(hours.toFixed(2));
+    }
+
     function saveRecord() {
         const date = document.getElementById('recordDate').value;
         const studentSelect = document.getElementById('recordStudent');
         const hours = parseFloat(document.getElementById('recordHours').value);
+        const startTime = normalizeClockValue(document.getElementById('recordStartTime').value);
+        const endTime = normalizeClockValue(document.getElementById('recordEndTime').value);
+        const clockHours = calculateClockHours(startTime, endTime);
         
         if(!studentSelect) return;
         const studentId = studentSelect.value;
-        if (!date || !isValidLedgerDate(date, activeYear) || !studentId || !Number.isFinite(hours) || hours <= 0) {
-            showToast('请填写完整信息');
+        if (!date || !isValidLedgerDate(date, activeYear) || !studentId || !startTime || !endTime
+            || !(clockHours > 0) || !Number.isFinite(hours) || hours <= 0) {
+            showToast('请填写完整的日期、学生和起止时间');
+            return;
+        }
+        if (Math.abs(clockHours - hours) >= 0.01) {
+            showToast(`起止时间计算为 ${clockHours.toFixed(2)} 小时，与课时不一致`);
             return;
         }
 
@@ -1004,6 +1076,8 @@
                 data.records[index].studentId = studentId;
                 data.records[index].studentName = student.name;
                 data.records[index].hours = Number(hours.toFixed(2));
+                data.records[index].startTime = startTime;
+                data.records[index].endTime = endTime;
                 data.records[index].rate = student.rate; 
                 data.records[index].total = Number((student.rate * hours).toFixed(2));
                 showToast('记录已更新');
@@ -1016,6 +1090,8 @@
                 studentId,
                 studentName: student.name,
                 date,
+                startTime,
+                endTime,
                 hours: Number(hours.toFixed(2)),
                 rate,
                 total
@@ -1466,7 +1542,7 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-08-23c'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-08-23d'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
@@ -1836,19 +1912,144 @@ function hydrateYearScopedFields(year) {
     data.dismissedLessons = data.dismissedLessonsByYear[year] || [];
 }
 
-// 取某学年的云端切片：该年记录 + 该年有记录的学生 + 完全无记录的学生（新建档）
+// 当前学年保存完整学生档案；历史学年只保存该年有记录的学生。
+// 这样历史学生的档案修改不会丢失，新建档也不会被复制到所有年份。
 function getYearSlice(year) {
     const yearRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === year);
-    const noRecordStudents = (data.students || []).filter(s => !(data.records || []).some(r => r.studentName === s.name));
-    const yearStudents = (data.students || []).filter(s =>
-        yearRecords.some(r => r.studentName === s.name) || noRecordStudents.some(n => n.name === s.name)
-    );
+    const cloudRecords = cloneForCloud(yearRecords).map(record => {
+        delete record.amountConfirmedAt;
+        return record;
+    });
+    const yearStudentIds = new Set(yearRecords.map(record => String(record.studentId || '')).filter(Boolean));
+    const yearStudentNames = new Set(yearRecords.map(record => normalizeReconciliationName(record.studentName)).filter(Boolean));
+    const yearStudents = String(year) === String(activeYear)
+        ? (data.students || [])
+        : (data.students || []).filter(student => yearStudentIds.has(String(student.id || ''))
+            || yearStudentNames.has(normalizeReconciliationName(student.name)));
     return {
         students: cloneForCloud(yearStudents),
-        records: cloneForCloud(yearRecords),
+        records: cloudRecords,
         lessonOverrides: cloneForCloud((data.lessonOverridesByYear && data.lessonOverridesByYear[year]) || (year === activeYear ? data.lessonOverrides : {}) || {}),
         dismissedLessons: cloneForCloud((data.dismissedLessonsByYear && data.dismissedLessonsByYear[year]) || (year === activeYear ? data.dismissedLessons : []) || [])
     };
+}
+
+function matchesStudentEntity(entity, student) {
+    if (!entity || !student) return false;
+    if (student.id && entity.studentId && String(entity.studentId) === String(student.id)) return true;
+    return normalizeReconciliationName(entity.studentName || entity.name)
+        === normalizeReconciliationName(student.name);
+}
+
+function applyStudentProfileToLedgerData(ledgerData, previousStudent, nextStudent, options) {
+    options = options || {};
+    const next = cloneForCloud(ledgerData || {});
+    next.students = Array.isArray(next.students) ? next.students : [];
+    next.records = Array.isArray(next.records) ? next.records : [];
+    let changed = false;
+    const studentIndex = next.students.findIndex(student =>
+        (previousStudent.id && student.id && String(student.id) === String(previousStudent.id))
+        || normalizeReconciliationName(student.name) === normalizeReconciliationName(previousStudent.name));
+    if (studentIndex >= 0) {
+        const replacement = { ...next.students[studentIndex], ...cloneForCloud(nextStudent) };
+        if (ledgerFingerprint(replacement) !== ledgerFingerprint(next.students[studentIndex])) changed = true;
+        next.students[studentIndex] = replacement;
+    } else if (options.ensureStudent === true) {
+        next.students.push(cloneForCloud(nextStudent));
+        changed = true;
+    }
+    next.records = next.records.map(record => {
+        if (!matchesStudentEntity(record, previousStudent)) return record;
+        const replacement = {
+            ...record,
+            studentId: nextStudent.id || record.studentId || '',
+            studentName: nextStudent.name,
+            rate: Number(nextStudent.rate),
+            total: Number((Number(nextStudent.rate) * Number(record.hours || 0)).toFixed(2)),
+            amountConfirmed: true
+        };
+        delete replacement.amountConfirmedAt;
+        if (ledgerFingerprint(replacement) !== ledgerFingerprint(record)) changed = true;
+        return replacement;
+    });
+    return { data: next, changed };
+}
+
+function applyStudentRateToLocalRecords(previousStudent, nextStudent) {
+    data.records = (data.records || []).map(record => {
+        if (!matchesStudentEntity(record, previousStudent)) return record;
+        const replacement = {
+            ...record,
+            studentId: nextStudent.id || record.studentId || '',
+            studentName: nextStudent.name,
+            rate: Number(nextStudent.rate),
+            total: Number((Number(nextStudent.rate) * Number(record.hours || 0)).toFixed(2)),
+            amountConfirmed: true
+        };
+        delete replacement.amountConfirmedAt;
+        return replacement;
+    });
+}
+
+async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
+    const ok = await ensureCloudReady();
+    if (!ok) throw new Error('云端未连接，请检查网络后重试');
+    if (!await ensureFeePassphrase()) throw new Error('需要先输入云端账本口令');
+    const queued = await cloudPushChain.catch(() => false);
+    if (!queued || getYearSyncState(activeYear).dirty || hasCloudConflictState(activeYear)) {
+        throw new Error('当前账本仍有待同步修改或冲突，请先刷新处理');
+    }
+    const yearsSnapshot = await db.ref('years').once('value');
+    const yearsValue = yearsSnapshot.val() || {};
+    const entries = [];
+    let activeVaultSeen = false;
+    for (const year of Object.keys(yearsValue)) {
+        const vault = yearsValue[year] && yearsValue[year].feeVault;
+        if (!vault || !vault.cipher) continue;
+        if (String(year) === String(activeYear)) activeVaultSeen = true;
+        const remoteData = await readRemoteLedgerData(year, vault);
+        const applied = applyStudentProfileToLedgerData(remoteData, previousStudent, nextStudent, {
+            ensureStudent: String(year) === String(activeYear)
+        });
+        if (applied.changed) entries.push({ year, vault, data: applied.data });
+    }
+    if (!activeVaultSeen) {
+        const applied = applyStudentProfileToLedgerData(getYearSlice(activeYear), previousStudent, nextStudent, { ensureStudent: true });
+        entries.push({ year: String(activeYear), vault: null, data: applied.data });
+    }
+    const encryptedEntries = [];
+    for (const entry of entries) {
+        const encrypted = await encryptFeeData(entry.data);
+        encryptedEntries.push({ ...entry, encrypted });
+    }
+    const updatedAt = Date.now();
+    const updates = {};
+    for (const entry of encryptedEntries) {
+        const latest = (await vaultRefFor(entry.year).once('value')).val();
+        if (entry.vault) {
+            if (!latest || Number(latest.revision || 0) !== Number(entry.vault.revision || 0)
+                || String(latest.cipher || '') !== String(entry.vault.cipher || '')) {
+                throw new Error(`${entry.year} 年账本在修改期间已变化，请刷新后重试`);
+            }
+        } else if (latest && latest.cipher) {
+            throw new Error(`${entry.year} 年账本刚被其他设备创建，请刷新后重试`);
+        }
+        updates[`years/${entry.year}/feeVault`] = {
+            schemaVersion: 3,
+            updatedAt,
+            revision: Number(entry.vault && entry.vault.revision || 0) + 1,
+            cipher: entry.encrypted.cipher,
+            salt: entry.encrypted.salt,
+            kdfIterations: entry.encrypted.kdfIterations
+        };
+    }
+    if (Object.keys(updates).length > 0) await db.ref().update(updates);
+    encryptedEntries.forEach(entry => {
+        const version = { revision: Number(entry.vault && entry.vault.revision || 0) + 1, updatedAt };
+        cloudVersionsByYear[entry.year] = version;
+        cloudDecryptedByYear[entry.year] = { ...version, data: cloneForCloud(entry.data) };
+        if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version);
+    });
 }
 
 let cloudPushChain = Promise.resolve(true);
@@ -2139,8 +2340,11 @@ function pushCloud() {
 function ledgerFingerprint(value) {
     try {
         return JSON.stringify(value, (key, item) => {
+            // 设备本地的确认时间不是账本业务内容，不得用它制造多设备冲突。
+            if (key === 'amountConfirmedAt') return undefined;
             if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
             return Object.keys(item).sort().reduce((sorted, name) => {
+                if (name === 'amountConfirmedAt') return sorted;
                 sorted[name] = item[name];
                 return sorted;
             }, {});
@@ -2922,10 +3126,18 @@ function getReconciliationCandidates(booking, sourceId, feeRecordId) {
         const sameDate = !!booking.date
             && normalizeReconciliationDate(record.date) === normalizeReconciliationDate(booking.date);
         const sameHours = booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) < 0.01;
+        const bookingStart = normalizeClockValue(booking.startTime);
+        const bookingEnd = normalizeClockValue(booking.endTime);
+        const recordStart = normalizeClockValue(record.startTime);
+        const recordEnd = normalizeClockValue(record.endTime);
+        const sameTime = !!bookingStart && !!bookingEnd && !!recordStart && !!recordEnd
+            && bookingStart === recordStart && bookingEnd === recordEnd;
         if (sameSource) add(record, index, 1000, 'sourceId');
         else if (sameSourceRecordId) add(record, index, 995, 'recordSourceId');
         else if (sameRecordId) add(record, index, 990, 'feeRecordId');
-        else if (sameName && sameDate && sameHours) add(record, index, 900, 'legacyExact');
+        // 无稳定 ID 的旧记录只能在姓名、日期、课时和起止时间全部一致时自动关联。
+        // 时间缺失时降级为人工候选，避免同日上午/下午的课被误认为同一节。
+        else if (sameName && sameDate && sameHours && sameTime) add(record, index, 900, 'legacyExact');
         else if (sameName && sameDate) add(record, index, 600, 'sameNameDate');
         // 姓名或日期任一不一致时，不进入人工核对候选，避免把其他课程误列为相近记录。
     });
@@ -2940,25 +3152,25 @@ function getReconciliationDiffs(booking, record, options) {
     if (booking.date && normalizeReconciliationDate(record.date) !== normalizeReconciliationDate(booking.date)) diffs.push(`日期：约课端“${booking.date}” / 账本“${record.date || '未填写'}”`);
     if (booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) >= 0.01) diffs.push(`课时：约课端“${Number(booking.hours).toFixed(2)}” / 账本“${Number(record.hours || 0).toFixed(2)}”`);
     const profile = getStudentProfile(booking.studentName || record.studentName);
-    if (!record.amountConfirmedAt && options.amountMode === 'integrity') {
-        const recordRate = Number(record.rate);
-        const expectedTotal = Number((recordRate * Number(record.hours || 0)).toFixed(2));
-        if (!Number.isFinite(recordRate) || recordRate < 0 || !Number.isFinite(Number(record.total))
-            || Math.abs(Number(record.total) - expectedTotal) >= 0.01) {
-            diffs.push('金额：账本单价、课时和总额无法互相核对');
-        } else if (recordRate === 0 && (!profile || Number(profile.rate) !== 0)) {
-            diffs.push('金额：该记录仍为 ¥0，需要补齐学生档案或人工确认');
-        }
-    } else if (!record.amountConfirmedAt && !profile) {
+    const recordRate = Number(record.rate);
+    const recordHours = Number(record.hours || 0);
+    const recordTotal = Number(record.total);
+    const internallyExpectedTotal = Number((recordRate * recordHours).toFixed(2));
+    if (options.amountMode === 'integrity'
+        && (!Number.isFinite(recordRate) || recordRate < 0 || !Number.isFinite(recordTotal)
+            || Math.abs(recordTotal - internallyExpectedTotal) >= 0.01)) {
+        diffs.push('金额：账本单价、课时和总额无法互相核对');
+    }
+    if (!profile) {
         diffs.push('金额：学生尚未建档，不能把 ¥0 记录自动标记为已入账');
-    } else if (!record.amountConfirmedAt) {
+    } else {
         const expectedRate = Number(profile.rate);
         const expectedHours = Number(booking.hours > 0 ? booking.hours : record.hours || 0);
         const expectedTotal = Number((expectedRate * expectedHours).toFixed(2));
-        if (!Number.isFinite(Number(record.rate)) || Math.abs(Number(record.rate) - expectedRate) >= 0.01) {
+        if (!Number.isFinite(recordRate) || Math.abs(recordRate - expectedRate) >= 0.01) {
             diffs.push(`单价：学生档案“¥${expectedRate.toFixed(2)}” / 账本“¥${Number(record.rate || 0).toFixed(2)}”`);
         }
-        if (!Number.isFinite(Number(record.total)) || Math.abs(Number(record.total) - expectedTotal) >= 0.01) {
+        if (!Number.isFinite(recordTotal) || Math.abs(recordTotal - expectedTotal) >= 0.01) {
             diffs.push(`金额：应为“¥${expectedTotal.toFixed(2)}” / 账本“¥${Number(record.total || 0).toFixed(2)}”`);
         }
     }
@@ -2976,12 +3188,21 @@ function addReconciliationCase(caseData) {
 // 只有实际时间区间发生重叠才提示，不能再用“同一天+同课时”把两节不同课程误判为重复。
 function findLessonConflicts(lesson, includePending) {
     const conflicts = [];
-    const sameDay = (a) => a.studentName === lesson.studentName && a.date === lesson.date;
-    const overlaps = (other) => sameDay(other)
+    const sameDay = (a) => normalizeReconciliationName(a && a.studentName) === normalizeReconciliationName(lesson.studentName)
+        && normalizeReconciliationDate(a && a.date) === normalizeReconciliationDate(lesson.date);
+    const hasCompleteRange = item => !!normalizeClockValue(item && item.startTime) && !!normalizeClockValue(item && item.endTime);
+    const overlaps = (other) => sameDay(other) && hasCompleteRange(lesson) && hasCompleteRange(other)
         && TimeParser.rangesOverlap(lesson.startTime, lesson.endTime, other.startTime, other.endTime);
     (data.records || []).forEach(r => {
-        if (!overlaps(r)) return;
         const diff = Math.abs(Number(r.hours) - Number(lesson.hours));
+        if (sameDay(r) && (!hasCompleteRange(r) || !hasCompleteRange(lesson))) {
+            conflicts.push({
+                kind: diff < 0.01 ? 'exact' : 'near',
+                label: `已入账 ${r.date} ${r.studentName} ${Number(r.hours).toFixed(2)}h（旧记录缺少起止时间，需要确认）`
+            });
+            return;
+        }
+        if (!overlaps(r)) return;
         if (diff < 0.01) {
             conflicts.push({ kind: 'exact', label: `已入账 ${r.date} ${r.studentName} ${Number(r.hours).toFixed(2)}h` });
         } else if (diff <= 0.5) {
@@ -3666,8 +3887,9 @@ function upsertReconciliationLedgerRecord(item, canonical, candidate) {
         rate,
         total: Number((rate * Number(canonical.hours)).toFixed(2)),
         postedAt: Number(existing && existing.postedAt || Date.now()),
-        amountConfirmedAt: Date.now()
+        amountConfirmed: true
     };
+    delete nextRecord.amountConfirmedAt;
     if (!(nextRecord.hours > 0) || !isValidLedgerDate(nextRecord.date, activeYear) || !nextRecord.studentName) throw new Error('账本数据不完整，请使用手动填写。');
     if (targetIndex >= 0) records[targetIndex] = nextRecord;
     else records.push(nextRecord);
