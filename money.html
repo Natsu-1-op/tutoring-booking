@@ -1851,16 +1851,13 @@ async function pushCloudNow(job, options) {
         if (!db || !job || !job.year) return false;
         const year = job.year;
         if (cloudDeleteInProgress) return false;
+        const slice = job.slice;
+        let storedConflict = null;
         // 普通保存必须先处理冲突；“安全追加入账”会在下面用云端版本做 CAS
         // 校验，只允许把本次新记录追加到最新云端账本，不允许覆盖其他修改。
         if (!options.force) {
             if (!rebase) {
-                const conflict = getCloudConflict(year);
-                if (conflict) {
-                    lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
-                    renderCloudConflictNotice(conflict);
-                    return false;
-                }
+                storedConflict = getCloudConflict(year);
             }
             const tombstone = (await db.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val();
             if (tombstone && tombstone.deletedAt) {
@@ -1870,10 +1867,27 @@ async function pushCloudNow(job, options) {
                 return false;
             }
         }
-        const slice = job.slice;
         const ref = vaultRefFor(year);
         let known = options.expectedVersion || cloudVersionsByYear[year];
         const remote = (await ref.once('value')).val();
+        const remoteVersion = remote ? {
+            revision: Number(remote.revision || 0),
+            updatedAt: Number(remote.updatedAt || 0)
+        } : null;
+        // revision 变化不一定代表内容变化：删除后用同一份本机账本重传、
+        // 或另一台设备重新加密上传，都会产生新 revision。先比较实际账本，
+        // 避免把同一份数据误报为多设备冲突。
+        if (remote && await isRemoteLedgerEquivalent(remote, slice)) {
+            cloudVersionsByYear[year] = remoteVersion;
+            clearCloudConflict(year);
+            lastCloudPushError = '';
+            return true;
+        }
+        if (storedConflict) {
+            lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
+            renderCloudConflictNotice(storedConflict);
+            return false;
+        }
         const knownRevision = known ? Number(known.revision || 0) : null;
         if (!options.force && remote && known && Number(remote.revision || 0) !== knownRevision) {
             const conflict = { reason: 'remote-changed', remoteRevision: Number(remote.revision || 0), localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
@@ -1982,6 +1996,67 @@ function ledgerArrayFingerprint(value) {
     const list = Array.isArray(value) ? value.slice() : [];
     list.sort((a, b) => ledgerFingerprint(a).localeCompare(ledgerFingerprint(b)));
     return ledgerFingerprint(list);
+}
+
+function ledgerSyncMarker(slice) {
+    const records = Array.isArray(slice && slice.records) ? slice.records : [];
+    const latest = records.slice().sort((a, b) => {
+        const aKey = `${a && a.date || ''}|${a && a.postedAt || a && a.createdAt || 0}|${a && a.id || ''}`;
+        const bKey = `${b && b.date || ''}|${b && b.postedAt || b && b.createdAt || 0}|${b && b.id || ''}`;
+        return aKey.localeCompare(bKey);
+    }).pop() || null;
+    return {
+        recordCount: records.length,
+        studentCount: Array.isArray(slice && slice.students) ? slice.students.length : 0,
+        latestRecord: latest ? ledgerFingerprint({
+            id: latest.id,
+            sourceId: latest.sourceId,
+            studentName: latest.studentName,
+            date: latest.date,
+            hours: latest.hours,
+            rate: latest.rate,
+            total: latest.total,
+            postedAt: latest.postedAt,
+            createdAt: latest.createdAt
+        }) : ''
+    };
+}
+
+function ledgerSliceFingerprint(slice) {
+    const records = (Array.isArray(slice && slice.records) ? slice.records : [])
+        .map(record => cloneForCloud(record));
+    const students = (Array.isArray(slice && slice.students) ? slice.students : [])
+        .map(student => cloneForCloud(student));
+    return ledgerFingerprint({
+        marker: ledgerSyncMarker({ records, students }),
+        records: records.sort((a, b) => ledgerFingerprint(a).localeCompare(ledgerFingerprint(b))),
+        students: students.sort((a, b) => ledgerFingerprint(a).localeCompare(ledgerFingerprint(b))),
+        lessonOverrides: slice && slice.lessonOverrides && typeof slice.lessonOverrides === 'object' ? slice.lessonOverrides : {},
+        dismissedLessons: (Array.isArray(slice && slice.dismissedLessons) ? slice.dismissedLessons : [])
+            .slice().sort((a, b) => ledgerFingerprint(a).localeCompare(ledgerFingerprint(b)))
+    });
+}
+
+async function isRemoteLedgerEquivalent(remote, localSlice) {
+    if (!remote || !remote.cipher || !localSlice) return false;
+    try {
+        const remoteData = await decryptFeeData(remote.cipher, remote.salt, remote.kdfIterations);
+        const remoteSlice = {
+            students: remoteData && remoteData.students,
+            records: remoteData && remoteData.records,
+            lessonOverrides: remoteData && remoteData.lessonOverrides,
+            dismissedLessons: remoteData && remoteData.dismissedLessons
+        };
+        const localMarker = ledgerSyncMarker(localSlice);
+        const remoteMarker = ledgerSyncMarker(remoteSlice);
+        if (localMarker.recordCount !== remoteMarker.recordCount
+            || localMarker.studentCount !== remoteMarker.studentCount
+            || localMarker.latestRecord !== remoteMarker.latestRecord) return false;
+        return ledgerSliceFingerprint(localSlice) === ledgerSliceFingerprint(remoteSlice);
+    } catch (error) {
+        // 等待正常的口令/网络错误处理，不把解密失败误判成同一份账本。
+        return false;
+    }
 }
 
 function findLedgerRecordByLink(records, record) {
