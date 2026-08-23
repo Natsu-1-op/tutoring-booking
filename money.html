@@ -392,8 +392,10 @@
     // --- Data Management ---
     const DB_KEY = 'tutor_fee_data_v1';
     let data = {
-        students: [], 
-        records: []
+        students: [],
+        records: [],
+        syncStateByYear: {},
+        pendingFeeUnlinksByYear: {}
     };
 
     function htmlEscape(value) {
@@ -447,12 +449,17 @@
                     if (Array.isArray(parsed.students)) data.students = parsed.students.map(normalizeStudent).filter(Boolean);
                     if (Array.isArray(parsed.records)) data.records = parsed.records.map(normalizeRecord).filter(Boolean);
                     if (Number.isFinite(Number(parsed.updatedAt))) data.updatedAt = Number(parsed.updatedAt);
-                    // 旧版本本地账本只用于首次云端迁移，迁移完成后会立即删除。
+                    // 兼容旧版本本机副本；迁移后继续作为云端失败时的 WAL 保留。
                     if (parsed.lessonOverrides && typeof parsed.lessonOverrides === 'object') data.lessonOverrides = parsed.lessonOverrides;
                     if (Array.isArray(parsed.dismissedLessons)) data.dismissedLessons = parsed.dismissedLessons;
                     if (parsed.yearUpdatedAt && typeof parsed.yearUpdatedAt === 'object') data.yearUpdatedAt = parsed.yearUpdatedAt;
                     if (parsed.lessonOverridesByYear && typeof parsed.lessonOverridesByYear === 'object') data.lessonOverridesByYear = parsed.lessonOverridesByYear;
                     if (parsed.dismissedLessonsByYear && typeof parsed.dismissedLessonsByYear === 'object') data.dismissedLessonsByYear = parsed.dismissedLessonsByYear;
+                    if (parsed.syncStateByYear && typeof parsed.syncStateByYear === 'object') data.syncStateByYear = parsed.syncStateByYear;
+                    else if ((Array.isArray(parsed.records) && parsed.records.length > 0) || (Array.isArray(parsed.students) && parsed.students.length > 0)) {
+                        window.__moneyLegacyLedgerWithoutSyncState = true;
+                    }
+                    if (parsed.pendingFeeUnlinksByYear && typeof parsed.pendingFeeUnlinksByYear === 'object') data.pendingFeeUnlinksByYear = parsed.pendingFeeUnlinksByYear;
                 }
             } catch (e) {
                 console.error("Data corruption detected, resetting data to prevent crash.", e);
@@ -1031,20 +1038,52 @@
         const sourceId = String(record.sourceId || '');
         const snapshot = await db.ref(`years/${activeYear}/reservations`).once('value');
         const reservations = snapshot.val() || {};
-        const updates = {};
-        Object.keys(reservations).forEach(key => {
+        const matchingKeys = Object.keys(reservations).filter(key => {
             const reservation = reservations[key];
-            if (!reservation) return;
+            if (!reservation) return false;
             const matches = (record.id && reservation.feeRecordId === record.id)
                 || (sourceId && sourceId === `imported_${key}`);
-            if (!matches) return;
-            updates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'pending';
-            updates[`years/${activeYear}/reservations/${key}/feePostedAt`] = null;
-            updates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
-            updates[`years/${activeYear}/reservations/${key}/feeRecordId`] = null;
+            return matches;
         });
-        if (Object.keys(updates).length > 0) await db.ref().update(updates);
+        const results = await Promise.all(matchingKeys.map(key => db.ref(`years/${activeYear}/reservations/${key}`).transaction(current => {
+            if (!current) return;
+            const stillMatches = (record.id && current.feeRecordId === record.id)
+                || (sourceId && sourceId === `imported_${key}` && (!current.feeRecordId || current.feeRecordId === record.id));
+            if (!stillMatches) return;
+            current.feeStatus = 'pending';
+            current.feePostedAt = null;
+            current.feeDismissedAt = null;
+            current.feeRecordId = null;
+            return current;
+        })));
+        if (results.some(result => !result.committed)) throw new Error('预约关联已经变化');
         return true;
+    }
+
+    function queuePendingFeeUnlink(record) {
+        if (!record || !activeYear) return;
+        data.pendingFeeUnlinksByYear = data.pendingFeeUnlinksByYear && typeof data.pendingFeeUnlinksByYear === 'object'
+            ? data.pendingFeeUnlinksByYear : {};
+        const list = Array.isArray(data.pendingFeeUnlinksByYear[activeYear]) ? data.pendingFeeUnlinksByYear[activeYear] : [];
+        if (!list.some(item => item.id === record.id && item.sourceId === record.sourceId)) {
+            list.push({ id: String(record.id || ''), sourceId: String(record.sourceId || ''), queuedAt: Date.now() });
+        }
+        data.pendingFeeUnlinksByYear[activeYear] = list;
+    }
+
+    async function flushPendingFeeUnlinks() {
+        if (!db || !activeYear) return true;
+        const list = data.pendingFeeUnlinksByYear && Array.isArray(data.pendingFeeUnlinksByYear[activeYear])
+            ? data.pendingFeeUnlinksByYear[activeYear].slice() : [];
+        if (list.length === 0) return true;
+        const remaining = [];
+        for (const item of list) {
+            try { await clearBookingFeeLink(item); }
+            catch (error) { console.error('预约入账关联待重试:', error); remaining.push(item); }
+        }
+        data.pendingFeeUnlinksByYear[activeYear] = remaining;
+        persistLocalLedgerSnapshot();
+        return remaining.length === 0;
     }
 
     async function deleteRecord(id) {
@@ -1053,33 +1092,20 @@
         if (recordIndex < 0) return showToast('记录已经不存在，请刷新后重试');
         const record = data.records[recordIndex];
         try {
-            // 先确认加密账本已经删除成功，再解除预约端关联；任一步失败都回滚，
-            // 避免出现“预约待入账、云端账本仍有流水”或相反状态。
+            // 先把删除和待解除关联写入本机 WAL。云端失败时保留待重试状态，
+            // 不再做可能二次失败的反向回滚。
+            queuePendingFeeUnlink(record);
             data.records.splice(recordIndex, 1);
             saveData();
             const ledgerDeleted = await cloudPushChain.catch(() => false);
             if (!ledgerDeleted) {
-                data.records.splice(Math.min(recordIndex, data.records.length), 0, record);
-                renderLedgerWithoutCloudPush();
-                return showToast('删除失败：云端账本未更新，原记录已恢复');
+                return showToast('已在本机记录删除，云端恢复后会继续同步；预约关联暂未改变');
             }
-
-            try {
-                await clearBookingFeeLink(record);
-            } catch (linkError) {
-                data.records.splice(Math.min(recordIndex, data.records.length), 0, record);
-                saveData();
-                const restored = await cloudPushChain.catch(() => false);
-                if (!restored) {
-                    console.error('预约关联解除失败，且账本回滚失败', linkError);
-                    return showToast('删除未完成：两端回滚失败，请刷新账本后重试');
-                }
-                throw linkError;
-            }
-            showToast('已删除，相关预约已恢复为待入账');
+            const unlinked = await flushPendingFeeUnlinks();
+            showToast(unlinked ? '已删除，相关预约已恢复为待入账' : '账本已删除，预约关联将在刷新后继续重试');
         } catch (error) {
             console.error('删除课时记录并解除预约关联失败', error);
-            showToast('删除失败，原记录和预约关联已保留，请重试');
+            showToast('删除操作已保存在本机，将在刷新后继续重试');
         }
     }
 
@@ -1440,14 +1466,90 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-08-23b'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-08-23c'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
 const FEE_PASSPHRASE_STORE = 'device-secrets';
 let cloudVersionsByYear = {};
+let cloudDecryptedByYear = {};
+let lastLocalPersistError = '';
 let feePassphraseChanging = false;
 let feePassphrasePromise = null;
+
+function getYearSyncState(year) {
+    const key = String(year || 'local');
+    data.syncStateByYear = data.syncStateByYear && typeof data.syncStateByYear === 'object' ? data.syncStateByYear : {};
+    const current = data.syncStateByYear[key] && typeof data.syncStateByYear[key] === 'object'
+        ? data.syncStateByYear[key] : {};
+    data.syncStateByYear[key] = {
+        dirty: current.dirty === true,
+        changeId: Number.isInteger(Number(current.changeId)) ? Number(current.changeId) : 0,
+        baseRevision: current.baseRevision === null || Number.isInteger(Number(current.baseRevision))
+            ? (current.baseRevision === null ? null : Number(current.baseRevision)) : null,
+        baseUpdatedAt: Number(current.baseUpdatedAt || 0),
+        dirtyAt: Number(current.dirtyAt || 0),
+        lastSyncedAt: Number(current.lastSyncedAt || 0),
+        lastError: String(current.lastError || '')
+    };
+    return data.syncStateByYear[key];
+}
+
+function persistLocalLedgerSnapshot() {
+    try {
+        localStorage.setItem(DB_KEY, JSON.stringify({ ...data, walSchemaVersion: 1, walSavedAt: Date.now() }));
+        lastLocalPersistError = '';
+        return true;
+    } catch (error) {
+        lastLocalPersistError = '本机账本保存失败：' + (error && error.message || error);
+        console.error(lastLocalPersistError, error);
+        return false;
+    }
+}
+
+function markYearDirty(year) {
+    const state = getYearSyncState(year);
+    state.dirty = true;
+    state.changeId += 1;
+    state.dirtyAt = Date.now();
+    state.lastError = '';
+    const known = cloudVersionsByYear[String(year || '')];
+    if (known && Number.isInteger(Number(known.revision))) {
+        state.baseRevision = Number(known.revision);
+        state.baseUpdatedAt = Number(known.updatedAt || 0);
+    }
+    return state.changeId;
+}
+
+function markYearSynced(year, version, changeId) {
+    const state = getYearSyncState(year);
+    if (version) {
+        state.baseRevision = Number(version.revision || 0);
+        state.baseUpdatedAt = Number(version.updatedAt || 0);
+    }
+    if (changeId === undefined || changeId === null || Number(state.changeId) === Number(changeId)) {
+        state.dirty = false;
+        state.lastError = '';
+        state.lastSyncedAt = Date.now();
+    }
+    persistLocalLedgerSnapshot();
+}
+
+function markYearSyncError(year, message) {
+    const state = getYearSyncState(year);
+    state.dirty = true;
+    state.lastError = String(message || '云端同步失败');
+    persistLocalLedgerSnapshot();
+}
+
+function setLedgerSaveStatus(message, synced) {
+    const el = document.getElementById('saveStatus');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('text-green-500', synced === true);
+    el.classList.toggle('text-amber-600', synced !== true);
+    el.classList.remove('opacity-0');
+}
 
 async function ensureCloudReady() {
     if (db) {
@@ -1463,6 +1565,24 @@ async function ensureCloudReady() {
         activeYear = (sys && /^\d{4}$/.test(String(sys.activeYear || '')))
             ? String(sys.activeYear)
             : String(new Date().getFullYear());
+        const localSync = getYearSyncState(activeYear);
+        if (window.__moneyLegacyLedgerWithoutSyncState && localSync.baseRevision === null) {
+            const legacySlice = getYearSlice(activeYear);
+            if (legacySlice.records.length || legacySlice.students.length
+                || Object.keys(legacySlice.lessonOverrides || {}).length || legacySlice.dismissedLessons.length) {
+                localSync.dirty = true;
+                localSync.changeId = Math.max(1, Number(localSync.changeId || 0));
+                localSync.dirtyAt = Number(data.updatedAt || Date.now());
+            }
+            window.__moneyLegacyLedgerWithoutSyncState = false;
+            persistLocalLedgerSnapshot();
+        }
+        if (!cloudVersionsByYear[activeYear] && localSync.baseRevision !== null) {
+            cloudVersionsByYear[activeYear] = {
+                revision: Number(localSync.baseRevision || 0),
+                updatedAt: Number(localSync.baseUpdatedAt || 0)
+            };
+        }
         attachReservationRealtimeSync();
         return true;
     } catch (e) { console.error('云端初始化失败', e); return false; }
@@ -1670,6 +1790,9 @@ function bufToB64(buf) {
 async function encryptFeeData(obj) {
     const pass = await ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
+    return encryptFeeDataWithPass(obj, pass);
+}
+async function encryptFeeDataWithPass(obj, pass) {
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const key = await deriveFeeKey(pass, salt, FEE_KDF_ITERATIONS);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -1695,7 +1818,7 @@ async function decryptFeeData(b64, saltB64, iterationValue) {
     return JSON.parse(new TextDecoder().decode(plain));
 }
 
-// ---- 云端同步：每次保存推送，启动时拉取（按 updatedAt 取新）----
+// ---- 云端同步：本机 WAL 先落盘，云端按 revision/CAS 推送；updatedAt 只用于展示 ----
 function vaultRef() { return db.ref(`years/${activeYear}/feeVault`); }
 function vaultRefFor(year) { return db.ref(`years/${year}/feeVault`); }
 
@@ -1735,10 +1858,6 @@ let cloudLedgerLoading = false;
 let cloudPullInProgress = null;
 const FEE_CONFLICT_STORAGE_PREFIX = 'fee_vault_conflict_v1_';
 
-function clearLocalLedgerCache() {
-    try { localStorage.removeItem(DB_KEY); } catch (e) {}
-}
-
 function getUnmigratedLocalLedgerYears() {
     const active = String(activeYear || '');
     return (window.__moneyLoadedLedgerYears || []).filter(year => year !== active);
@@ -1765,11 +1884,11 @@ function showFeeLedgerPending(message, options) {
 
 function finishFeeLedgerLoad() {
     const legacyYears = getUnmigratedLocalLedgerYears();
-    if (legacyYears.length === 0) {
-        clearLocalLedgerCache();
-    } else {
+    if (legacyYears.length > 0) {
         showToast(`当前学年已从云端读取；历史年份 ${legacyYears.join('、')} 尚未迁移，暂保留本机备份`);
     }
+    // 本机副本是云端失败时的 WAL，不能在读取成功后删除。
+    persistLocalLedgerSnapshot();
     window.__feeLedgerReady = true;
     document.documentElement.classList.remove('fee-ledger-pending');
     const force = document.getElementById('feeLedgerForceUploadButton');
@@ -1863,6 +1982,7 @@ async function pushCloudNow(job, options) {
             if (tombstone && tombstone.deletedAt) {
                 lastCloudPushError = `${year} 年账本已被手动删除，请使用“上传本机到云端”明确重建。`;
                 renderTombstoneNotice(tombstone.deletedAt);
+                markYearSyncError(year, lastCloudPushError);
                 showToast(lastCloudPushError);
                 return false;
             }
@@ -1877,34 +1997,53 @@ async function pushCloudNow(job, options) {
         // revision 变化不一定代表内容变化：删除后用同一份本机账本重传、
         // 或另一台设备重新加密上传，都会产生新 revision。先比较实际账本，
         // 避免把同一份数据误报为多设备冲突。
-        if (remote && await isRemoteLedgerEquivalent(remote, slice)) {
+        if (!storedConflict && remote && known && Number(remote.revision || 0) !== Number(known.revision || 0)
+            && await isRemoteLedgerEquivalent(year, remote, slice)) {
             cloudVersionsByYear[year] = remoteVersion;
             clearCloudConflict(year);
             lastCloudPushError = '';
+            markYearSynced(year, remoteVersion, job.changeId);
             return true;
         }
+        // 已经展示给用户的冲突必须由用户明确选择，普通保存不能静默清除。
         if (storedConflict) {
             lastCloudPushError = `${year} 年账本存在待确认的多设备冲突。`;
             renderCloudConflictNotice(storedConflict);
+            markYearSyncError(year, lastCloudPushError);
             return false;
         }
+        // 普通写入必须先证明当前口令能解开现有云端版本；缓存命中时不会重复做 PBKDF2。
+        // 这样不会因为另一台设备使用不同口令，就在 revision 相同的情况下静默换掉共享口令。
+        if (!options.force && remote) await readRemoteLedgerData(year, remote);
         const knownRevision = known ? Number(known.revision || 0) : null;
         if (!options.force && remote && known && Number(remote.revision || 0) !== knownRevision) {
-            const conflict = { reason: 'remote-changed', remoteRevision: Number(remote.revision || 0), localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            const conflict = { reason: 'remote-changed', remoteRevision: Number(remote.revision || 0), localChangeId: Number(job.changeId || 0) };
             setCloudConflict(year, conflict);
             lastCloudPushError = `${year} 年云端账本已被其他设备修改，请选择保留哪一份。`;
+            markYearSyncError(year, lastCloudPushError);
             showToast(lastCloudPushError);
             return false;
         }
-        // 页面刚打开、初始拉取尚未完成时，以当前服务器版本建立基线，避免无意义的 unknown-version 失败。
+        // 没有共同 revision 基线时不能直接把本机整本覆盖到已有云端。
         if (!options.force && remote && !known) {
-            known = { revision: Number(remote.revision || 0), updatedAt: Number(remote.updatedAt || 0) };
-            cloudVersionsByYear[year] = known;
+            const equivalent = await isRemoteLedgerEquivalent(year, remote, slice);
+            if (equivalent) {
+                cloudVersionsByYear[year] = remoteVersion;
+                clearCloudConflict(year);
+                markYearSynced(year, remoteVersion, job.changeId);
+                return true;
+            }
+            const conflict = { reason: 'missing-base-revision', remoteRevision: Number(remote.revision || 0), localChangeId: Number(job.changeId || 0) };
+            setCloudConflict(year, conflict);
+            lastCloudPushError = `${year} 年账本缺少共同版本基线，请选择保留哪一份。`;
+            markYearSyncError(year, lastCloudPushError);
+            return false;
         }
         if (!options.force && known && !remote) {
-            const conflict = { reason: 'remote-deleted', remoteRevision: null, localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            const conflict = { reason: 'remote-deleted', remoteRevision: null, localChangeId: Number(job.changeId || 0) };
             setCloudConflict(year, conflict);
             lastCloudPushError = `${year} 年云端账本刚被删除，请确认后手动重建。`;
+            markYearSyncError(year, lastCloudPushError);
             showToast(lastCloudPushError);
             return false;
         }
@@ -1939,29 +2078,42 @@ async function pushCloudNow(job, options) {
             if (retryRemote && known && Number(retryRemote.revision || 0) === Number(known.revision || 0)) {
                 transaction = await runTransaction();
             } else if (retryRemote) {
-                const conflict = { reason: 'remote-changed', remoteRevision: Number(retryRemote.revision || 0), localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+                const conflict = { reason: 'remote-changed', remoteRevision: Number(retryRemote.revision || 0), localChangeId: Number(job.changeId || 0) };
                 setCloudConflict(year, conflict);
                 lastCloudPushError = `${year} 年云端账本已被其他设备修改，请选择保留哪一份。`;
+                markYearSyncError(year, lastCloudPushError);
                 showToast(lastCloudPushError);
                 return false;
             }
         }
         const result = transaction.result;
         if (!result.committed) {
-            const conflict = { reason: transaction.conflictReason || 'remote-changed', remoteRevision: null, localUpdatedAt: Number(job.localUpdatedAt || Date.now()) };
+            const conflict = { reason: transaction.conflictReason || 'remote-changed', remoteRevision: null, localChangeId: Number(job.changeId || 0) };
             setCloudConflict(year, conflict);
             lastCloudPushError = `${year} 年云端账本写入未完成，请选择保留哪一份后重试。`;
+            markYearSyncError(year, lastCloudPushError);
             showToast(lastCloudPushError);
             return false;
         }
         const committedVault = result.snapshot.val() || {};
         cloudVersionsByYear[year] = { revision: Number(committedVault.revision || 0), updatedAt: Number(committedVault.updatedAt || updatedAt) };
+        cloudDecryptedByYear[year] = {
+            revision: Number(committedVault.revision || 0),
+            updatedAt: Number(committedVault.updatedAt || updatedAt),
+            data: cloneForCloud(slice)
+        };
         clearCloudConflict(year);
         lastCloudPushError = '';
+        markYearSynced(year, cloudVersionsByYear[year], job.changeId);
+        setLedgerSaveStatus('已同步云端', true);
         return true;
     } catch (e) {
         console.error('云端同步失败', e);
-        lastCloudPushError = '云端同步失败：' + (e.message || e);
+        lastCloudPushError = e && e.code === 'fee-passphrase-mismatch'
+            ? '云端账本口令与本机不一致，请输入云端正在使用的口令后重试。'
+            : '云端同步失败：' + (e.message || e);
+        markYearSyncError(job && job.year, lastCloudPushError);
+        setLedgerSaveStatus('已保存本机，待同步', false);
         showToast(lastCloudPushError);
         return false;
     }
@@ -1973,7 +2125,13 @@ function pushCloud() {
     if (cloudDeleteInProgress) return Promise.resolve(false);
     const year = activeYear;
     const slice = getYearSlice(year);
-    const job = { year, slice: cloneForCloud(slice), localUpdatedAt: data.yearUpdatedAt && data.yearUpdatedAt[year] || data.updatedAt || 0 };
+    const syncState = getYearSyncState(year);
+    const job = {
+        year,
+        slice: cloneForCloud(slice),
+        changeId: Number(syncState.changeId || 0),
+        baseRevision: syncState.baseRevision
+    };
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(job), () => pushCloudNow(job));
     return cloudPushChain;
 }
@@ -2003,7 +2161,7 @@ function ledgerSyncMarker(slice) {
     const latest = records.slice().sort((a, b) => {
         const aKey = `${a && a.date || ''}|${a && a.postedAt || a && a.createdAt || 0}|${a && a.id || ''}`;
         const bKey = `${b && b.date || ''}|${b && b.postedAt || b && b.createdAt || 0}|${b && b.id || ''}`;
-        return aKey.localeCompare(bKey);
+        return aKey.localeCompare(bKey) || ledgerFingerprint(a).localeCompare(ledgerFingerprint(b));
     }).pop() || null;
     return {
         recordCount: records.length,
@@ -2037,26 +2195,111 @@ function ledgerSliceFingerprint(slice) {
     });
 }
 
-async function isRemoteLedgerEquivalent(remote, localSlice) {
-    if (!remote || !remote.cipher || !localSlice) return false;
+async function readRemoteLedgerData(year, remote) {
+    if (!remote || !remote.cipher) throw new Error('云端账本数据缺失');
+    const key = String(year || activeYear || '');
+    const revision = Number(remote.revision || 0);
+    const updatedAt = Number(remote.updatedAt || 0);
+    const cached = cloudDecryptedByYear[key];
+    if (cached && cached.revision === revision && cached.updatedAt === updatedAt && cached.data) {
+        return cloneForCloud(cached.data);
+    }
     try {
         const remoteData = await decryptFeeData(remote.cipher, remote.salt, remote.kdfIterations);
-        const remoteSlice = {
-            students: remoteData && remoteData.students,
-            records: remoteData && remoteData.records,
-            lessonOverrides: remoteData && remoteData.lessonOverrides,
-            dismissedLessons: remoteData && remoteData.dismissedLessons
-        };
-        const localMarker = ledgerSyncMarker(localSlice);
-        const remoteMarker = ledgerSyncMarker(remoteSlice);
-        if (localMarker.recordCount !== remoteMarker.recordCount
-            || localMarker.studentCount !== remoteMarker.studentCount
-            || localMarker.latestRecord !== remoteMarker.latestRecord) return false;
-        return ledgerSliceFingerprint(localSlice) === ledgerSliceFingerprint(remoteSlice);
+        cloudDecryptedByYear[key] = { revision, updatedAt, data: cloneForCloud(remoteData) };
+        return remoteData;
     } catch (error) {
-        // 等待正常的口令/网络错误处理，不把解密失败误判成同一份账本。
-        return false;
+        const mismatch = new Error('云端账本口令不一致或密文已损坏');
+        mismatch.code = 'fee-passphrase-mismatch';
+        mismatch.cause = error;
+        throw mismatch;
     }
+}
+
+async function isRemoteLedgerEquivalent(year, remote, localSlice) {
+    if (!remote || !remote.cipher || !localSlice) return false;
+    const remoteData = await readRemoteLedgerData(year, remote);
+    const remoteSlice = {
+        students: remoteData && remoteData.students,
+        records: remoteData && remoteData.records,
+        lessonOverrides: remoteData && remoteData.lessonOverrides,
+        dismissedLessons: remoteData && remoteData.dismissedLessons
+    };
+    const localMarker = ledgerSyncMarker(localSlice);
+    const remoteMarker = ledgerSyncMarker(remoteSlice);
+    if (localMarker.recordCount !== remoteMarker.recordCount
+        || localMarker.studentCount !== remoteMarker.studentCount
+        || localMarker.latestRecord !== remoteMarker.latestRecord) return false;
+    return ledgerSliceFingerprint(localSlice) === ledgerSliceFingerprint(remoteSlice);
+}
+
+function hasLedgerSliceContent(slice) {
+    return !!slice && (
+        (Array.isArray(slice.records) && slice.records.length > 0)
+        || (Array.isArray(slice.students) && slice.students.length > 0)
+        || Object.keys(slice.lessonOverrides && typeof slice.lessonOverrides === 'object' ? slice.lessonOverrides : {}).length > 0
+        || (Array.isArray(slice.dismissedLessons) && slice.dismissedLessons.length > 0)
+    );
+}
+
+function backupLocalLedgerBeforeRemote(year, reason) {
+    try {
+        localStorage.setItem(`fee_vault_remote_backup_v1_${year}`, JSON.stringify({
+            savedAt: Date.now(),
+            reason: String(reason || 'accept-remote'),
+            syncState: cloneForCloud(getYearSyncState(year)),
+            slice: cloneForCloud(getYearSlice(year))
+        }));
+    } catch (error) {
+        console.warn('覆盖前本机账本备份失败', error);
+    }
+}
+
+function applyRemoteLedgerSlice(year, cloudData, remoteVersion, options) {
+    options = options || {};
+    const localSlice = getYearSlice(year);
+    const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : [])
+        .map(normalizeRecord).filter(Boolean);
+    const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : [])
+        .map(normalizeStudent).filter(Boolean);
+    const cloudOverrides = cloudData && cloudData.lessonOverrides && typeof cloudData.lessonOverrides === 'object'
+        ? cloneForCloud(cloudData.lessonOverrides) : {};
+    const cloudDismissed = cloudData && Array.isArray(cloudData.dismissedLessons)
+        ? cloneForCloud(cloudData.dismissedLessons) : [];
+    const remoteSlice = { students: cloudStudents, records: cloudRecords, lessonOverrides: cloudOverrides, dismissedLessons: cloudDismissed };
+    const changed = ledgerSliceFingerprint(localSlice) !== ledgerSliceFingerprint(remoteSlice);
+
+    if (options.backup === true && changed && hasLedgerSliceContent(localSlice)) {
+        backupLocalLedgerBeforeRemote(year, options.reason);
+    }
+
+    const otherYearRecords = (data.records || []).filter(record => String(record.date || '').slice(0, 4) !== String(year));
+    data.records = [...otherYearRecords, ...cloudRecords];
+    const cloudStudentNames = new Set(cloudStudents.map(student => student.name));
+    const historicalNames = new Set(otherYearRecords.map(record => record.studentName));
+    const historicalStudents = (data.students || []).filter(student => historicalNames.has(student.name) && !cloudStudentNames.has(student.name));
+    data.students = [...cloudStudents, ...historicalStudents];
+    data.lessonOverrides = cloudOverrides;
+    data.dismissedLessons = cloudDismissed;
+    data.lessonOverridesByYear = data.lessonOverridesByYear && typeof data.lessonOverridesByYear === 'object' ? data.lessonOverridesByYear : {};
+    data.dismissedLessonsByYear = data.dismissedLessonsByYear && typeof data.dismissedLessonsByYear === 'object' ? data.dismissedLessonsByYear : {};
+    data.yearUpdatedAt = data.yearUpdatedAt && typeof data.yearUpdatedAt === 'object' ? data.yearUpdatedAt : {};
+    data.lessonOverridesByYear[year] = cloudOverrides;
+    data.dismissedLessonsByYear[year] = cloudDismissed;
+    if (options.discardPendingOperations === true && data.pendingFeeUnlinksByYear) {
+        data.pendingFeeUnlinksByYear[year] = [];
+    }
+    data.yearUpdatedAt[year] = Number(remoteVersion && remoteVersion.updatedAt || 0);
+    cloudVersionsByYear[year] = remoteVersion;
+    cloudDecryptedByYear[year] = {
+        revision: Number(remoteVersion && remoteVersion.revision || 0),
+        updatedAt: Number(remoteVersion && remoteVersion.updatedAt || 0),
+        data: cloneForCloud(remoteSlice)
+    };
+    _applyingCloud = true;
+    try { saveData(); } finally { _applyingCloud = false; }
+    markYearSynced(year, remoteVersion);
+    return changed;
 }
 
 function findLedgerRecordByLink(records, record) {
@@ -2081,7 +2324,7 @@ async function appendImportedRecordsAfterConflict(importedRecords) {
         const vault = (await vaultRefFor(year).once('value')).val();
         if (!vault || !vault.cipher) return false;
         if (!await ensureFeePassphrase()) return false;
-        const remoteData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
+        const remoteData = await readRemoteLedgerData(year, vault);
         const remoteRecords = (remoteData && Array.isArray(remoteData.records) ? remoteData.records : [])
             .map(normalizeRecord).filter(Boolean);
         const remoteStudents = (remoteData && Array.isArray(remoteData.students) ? remoteData.students : [])
@@ -2148,6 +2391,10 @@ async function appendImportedRecordsAfterConflict(importedRecords) {
         return true;
     } catch (error) {
         console.error('冲突账本安全追加失败:', error);
+        if (error && error.code === 'fee-passphrase-mismatch') {
+            lastCloudPushError = '云端账本口令与本机不一致，请先输入正确口令。';
+            markYearSyncError(year, lastCloudPushError);
+        }
         return false;
     }
 }
@@ -2162,7 +2409,7 @@ async function replaceLedgerRecordAfterConflict(localRecord) {
         const vault = (await vaultRefFor(year).once('value')).val();
         if (!vault || !vault.cipher) return false;
         if (!await ensureFeePassphrase()) return false;
-        const remoteData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
+        const remoteData = await readRemoteLedgerData(year, vault);
         const remoteRecords = (remoteData && Array.isArray(remoteData.records) ? remoteData.records : [])
             .map(normalizeRecord).filter(Boolean);
         const remoteStudents = (remoteData && Array.isArray(remoteData.students) ? remoteData.students : [])
@@ -2224,6 +2471,10 @@ async function replaceLedgerRecordAfterConflict(localRecord) {
         return true;
     } catch (error) {
         console.error('冲突账本单条记录同步失败:', error);
+        if (error && error.code === 'fee-passphrase-mismatch') {
+            lastCloudPushError = '云端账本口令与本机不一致，请先输入正确口令。';
+            markYearSyncError(year, lastCloudPushError);
+        }
         return false;
     }
 }
@@ -2240,7 +2491,8 @@ async function forceUploadCloud() {
         return;
     }
     if (!confirm(`确定将本机 ${activeYear} 年的账本一键上传到云端吗？\n（仅上传 ${activeYear} 年数据，会以本机数据覆盖该年云端，包含 ${slice.students.length} 名学生、${slice.records.length} 条记录；其他年份只留本地）`)) return;
-    const forceJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
+    const forceState = getYearSyncState(activeYear);
+    const forceJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)), changeId: Number(forceState.changeId || 0) };
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(forceJob, { force: true }), () => pushCloudNow(forceJob, { force: true }));
     const pushed = await cloudPushChain;
     if (!pushed) { showToast('上传失败，请检查网络后重试'); return; }
@@ -2250,7 +2502,7 @@ async function forceUploadCloud() {
     renderYearSummary();
     // 强制上传已经明确选择本机为准，回读时采用刚提交的云端版本，
     // 同时把本地时间基线更新为云端时间，避免刚上传就再次触发冲突。
-    const refreshed = await pullCloud({ acceptRemote: true });
+    const refreshed = await pullCloud({ acceptRemote: true, preservePendingOperations: true });
     if (!refreshed) {
         showToast('本机账本已上传，但云端基线回读失败，请点击刷新重试');
         return;
@@ -2282,6 +2534,13 @@ async function deleteCloudData() {
             [`years/${activeYear}/feeVaultDeletedAt`]: { deletedAt }
         });
         delete cloudVersionsByYear[activeYear];
+        delete cloudDecryptedByYear[activeYear];
+        const syncState = getYearSyncState(activeYear);
+        syncState.baseRevision = null;
+        syncState.baseUpdatedAt = 0;
+        syncState.dirty = false;
+        syncState.lastError = '';
+        persistLocalLedgerSnapshot();
         clearCloudConflict(activeYear);
         renderTombstoneNotice(deletedAt);
         showToast(`已删除云端 ${activeYear} 年数据，本地保留`);
@@ -2330,114 +2589,127 @@ async function pullCloud(options) {
         cloudLedgerLoading = true;
         showFeeLedgerPending(options.retry ? '正在重新读取云端账本…' : '正在读取云端账本…');
         try {
-        const ok = await ensureCloudReady();
-        if (!ok) {
-            showFeeLedgerPending('云端暂时无法连接，账本未显示。请检查网络后重试。');
-            return false;
-        }
-        hydrateYearScopedFields(activeYear);
-        const snap = await vaultRef().once('value');
-        const vault = snap.val();
-        if (!vault || !vault.cipher) {
-            // 云端还没有该学年账本：先检查是否被手动删除（墓碑），避免其他设备打开时自动重建
-            let tombstone = null;
-            try { tombstone = (await db.ref(`years/${activeYear}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
-            if (tombstone && tombstone.deletedAt) {
-                renderTombstoneNotice(tombstone.deletedAt);
-                showFeeLedgerPending(`云端 ${activeYear} 年账本已被删除，本机账本不会显示。如需恢复，请明确上传本机账本。`, { forceUpload: true });
+            const ok = await ensureCloudReady();
+            if (!ok) {
+                showFeeLedgerPending('云端暂时无法连接，本机待同步账本已保留。请检查网络后重试。');
                 return false;
             }
-            clearTombstoneNotice();
-            // 本机有该年数据则自动一键上传（本地 → 云端迁移）
-            const slice = getYearSlice(activeYear);
-            if (slice.records.length || slice.students.length) {
-                const up = await pushCloud();
-                if (!up) {
-                    showFeeLedgerPending(`本机账本尚未成功上传云端：${lastCloudPushError || '请检查网络后重试。'}`);
+            hydrateYearScopedFields(activeYear);
+            const year = String(activeYear);
+            const syncState = getYearSyncState(year);
+            const localSlice = getYearSlice(year);
+            const vault = (await vaultRef().once('value')).val();
+            if (!vault || !vault.cipher) {
+                let tombstone = null;
+                try { tombstone = (await db.ref(`years/${year}/feeVaultDeletedAt`).once('value')).val(); } catch (e) {}
+                if (tombstone && tombstone.deletedAt) {
+                    renderTombstoneNotice(tombstone.deletedAt);
+                    showFeeLedgerPending(`云端 ${year} 年账本已被删除。本机副本已保留，如需恢复请明确上传本机账本。`, { forceUpload: true });
                     return false;
                 }
-                showToast(`本机 ${activeYear} 年账本已自动上传云端（${slice.students.length} 名学生、${slice.records.length} 条记录）`);
+                clearTombstoneNotice();
+                delete cloudVersionsByYear[year];
+                if (hasLedgerSliceContent(localSlice)) {
+                    syncState.dirty = true;
+                    syncState.changeId = Math.max(1, Number(syncState.changeId || 0));
+                    syncState.baseRevision = null;
+                    persistLocalLedgerSnapshot();
+                    const uploaded = await pushCloud();
+                    if (!uploaded) {
+                        showFeeLedgerPending(`本机账本已保留，尚未成功上传云端：${lastCloudPushError || '请检查网络后重试。'}`);
+                        return false;
+                    }
+                    showToast(`本机 ${year} 年账本已上传云端（${localSlice.students.length} 名学生、${localSlice.records.length} 条记录）`);
+                } else {
+                    syncState.dirty = false;
+                    syncState.baseRevision = null;
+                    syncState.baseUpdatedAt = 0;
+                    syncState.lastError = '';
+                    syncState.lastSyncedAt = Date.now();
+                    persistLocalLedgerSnapshot();
+                }
+                finishFeeLedgerLoad();
+                return true;
             }
-            keepOnlyActiveYearInMemory();
-            finishFeeLedgerLoad();
-            return true;
-        }
-        clearTombstoneNotice();
-        const remoteVersion = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
-        if (!await ensureFeePassphrase()) {
-            showFeeLedgerPending('需要云端加密口令才能读取账本。请完成口令输入后重试。');
-            return false;
-        }
-        const cloudData = await decryptFeeData(vault.cipher, vault.salt, vault.kdfIterations);
-        // 只有成功解密后才确认这个版本可作为本机写入基线；错误口令不能给后续自动上传放行。
-        cloudVersionsByYear[activeYear] = remoteVersion;
-        // 只有成功解密并完成拉取后，才清理可能残留的墓碑节点。
-        try { await db.ref(`years/${activeYear}/feeVaultDeletedAt`).remove(); } catch (e) {}
-        // 本地比云端新：整体覆盖云端（本地已删的流水、改过的时间得以传播），
-        // 不做并集合并——否则云端残留的旧记录会被合并回来，删除被撤销。
-        const localUpdatedAt = Number((data.yearUpdatedAt && data.yearUpdatedAt[activeYear]) || 0);
-        const pendingConflict = getCloudConflict(activeYear);
-        if (localUpdatedAt > Number(vault.updatedAt || 0) && !acceptRemote) {
+
+            clearTombstoneNotice();
+            const remoteVersion = { revision: Number(vault.revision || 0), updatedAt: Number(vault.updatedAt || 0) };
+            if (!await ensureFeePassphrase()) {
+                showFeeLedgerPending('需要云端加密口令才能读取账本。本机待同步账本仍安全保留。');
+                return false;
+            }
+            const cloudData = await readRemoteLedgerData(year, vault);
+            const remoteSlice = {
+                students: cloudData && cloudData.students,
+                records: cloudData && cloudData.records,
+                lessonOverrides: cloudData && cloudData.lessonOverrides,
+                dismissedLessons: cloudData && cloudData.dismissedLessons
+            };
+            const equivalent = ledgerSliceFingerprint(localSlice) === ledgerSliceFingerprint(remoteSlice);
+            const pendingConflict = getCloudConflict(year);
+
+            if (acceptRemote) {
+                const changed = applyRemoteLedgerSlice(year, cloudData, remoteVersion, {
+                    backup: syncState.dirty === true,
+                    reason: 'user-accepted-remote',
+                    discardPendingOperations: options.preservePendingOperations !== true
+                });
+                clearCloudConflict(year);
+                try { await db.ref(`years/${year}/feeVaultDeletedAt`).remove(); } catch (e) {}
+                if (changed) showToast(`已采用云端 ${year} 年账本；原本机副本已备份`);
+                finishFeeLedgerLoad();
+                return true;
+            }
+
             if (pendingConflict) {
                 renderCloudConflictNotice(pendingConflict);
                 showFeeLedgerPending('本机与云端账本存在待确认的多设备冲突，请选择保留哪一份。', { conflict: true });
                 return false;
             }
-            const up = await pushCloud();
-            if (up) {
-                finishFeeLedgerLoad();
-                return true;
+
+            if (syncState.dirty) {
+                if (equivalent) {
+                    cloudVersionsByYear[year] = remoteVersion;
+                    markYearSynced(year, remoteVersion);
+                    finishFeeLedgerLoad();
+                    return true;
+                }
+                if (syncState.baseRevision !== null && Number(syncState.baseRevision) === remoteVersion.revision) {
+                    cloudVersionsByYear[year] = remoteVersion;
+                    const uploaded = await pushCloud();
+                    if (uploaded) {
+                        finishFeeLedgerLoad();
+                        return true;
+                    }
+                    const conflict = getCloudConflict(year);
+                    showFeeLedgerPending(conflict ? '本机与云端账本发生冲突，请选择保留哪一份。' : `本机账本已保留，云端尚未更新：${lastCloudPushError || '请重试。'}`, conflict ? { conflict: true } : {});
+                    return false;
+                }
+                const conflict = {
+                    reason: 'remote-changed-with-local-dirty',
+                    remoteRevision: remoteVersion.revision,
+                    baseRevision: syncState.baseRevision,
+                    localChangeId: syncState.changeId
+                };
+                setCloudConflict(year, conflict);
+                markYearSyncError(year, `${year} 年云端版本已变化，本机待同步修改没有被覆盖。`);
+                showFeeLedgerPending('本机待同步修改与云端新版本冲突，请选择保留哪一份。', { conflict: true });
+                return false;
             }
-            const conflict = getCloudConflict(activeYear);
-            showFeeLedgerPending(conflict ? '本机与云端账本发生冲突，请选择保留哪一份。' : `云端账本尚未更新：${lastCloudPushError || '请重试。'}`, conflict ? { conflict: true } : {});
+
+            const changed = applyRemoteLedgerSlice(year, cloudData, remoteVersion);
+            try { await db.ref(`years/${year}/feeVaultDeletedAt`).remove(); } catch (e) {}
+            if (changed) showToast(`已从云端更新 ${year} 年账本`);
+            finishFeeLedgerLoad();
+            return true;
+        } catch (e) {
+            console.error('云端拉取失败', e);
+            const message = e && e.code === 'fee-passphrase-mismatch'
+                ? '云端账本口令与本机不一致。已保留本机账本，不会覆盖云端；请在“云端口令”中输入正确口令后重试。'
+                : '云端账本读取失败：' + (e.message || e) + '。本机待同步账本已保留。';
+            showFeeLedgerPending(message);
+            showToast(message);
             return false;
-        }
-        // 云端较新或相同：以云端当前学年切片为准，传播同 ID 修改和删除；其他年份仍保留在本机。
-        let changed = false;
-        const cloudRecords = (cloudData && Array.isArray(cloudData.records) ? cloudData.records : []).map(normalizeRecord).filter(Boolean);
-        const localActiveRecords = (data.records || []).filter(r => String(r.date || '').slice(0, 4) === String(activeYear));
-        const recordsChanged = JSON.stringify(localActiveRecords) !== JSON.stringify(cloudRecords);
-        if (recordsChanged) {
-            // 云端版本不旧于本机时必须整体采用云端切片。把“本机独有”记录再并回去
-            // 会让另一台设备已经删除的流水复活；尚未同步的本机修改会由上面的
-            // localUpdatedAt 分支上传或进入冲突处理，不会走到这里。
-            data.records = cloudRecords;
-            changed = true;
-        } else {
-            // 即使当前学年内容相同，也不要把未迁移的历史年份本机记录带到页面上。
-            data.records = cloudRecords;
-        }
-
-        const cloudStudents = (cloudData && Array.isArray(cloudData.students) ? cloudData.students : []).map(normalizeStudent).filter(Boolean);
-        if (JSON.stringify(data.students) !== JSON.stringify(cloudStudents)) {
-            data.students = cloudStudents;
-            changed = true;
-        }
-
-        data.lessonOverrides = data.lessonOverrides || {};
-        data.dismissedLessons = data.dismissedLessons || [];
-        const cloudOverrides = cloudData && cloudData.lessonOverrides && typeof cloudData.lessonOverrides === 'object' ? cloudData.lessonOverrides : {};
-        const cloudDismissed = cloudData && Array.isArray(cloudData.dismissedLessons) ? cloudData.dismissedLessons : [];
-        if (JSON.stringify(data.lessonOverrides) !== JSON.stringify(cloudOverrides)) { data.lessonOverrides = cloudOverrides; changed = true; }
-        if (JSON.stringify(data.dismissedLessons) !== JSON.stringify(cloudDismissed)) { data.dismissedLessons = cloudDismissed; changed = true; }
-        data.lessonOverridesByYear[activeYear] = data.lessonOverrides;
-        data.dismissedLessonsByYear[activeYear] = data.dismissedLessons;
-        data.yearUpdatedAt[activeYear] = Number(vault.updatedAt || 0);
-        if (changed) {
-            _applyingCloud = true;
-            saveData();
-            _applyingCloud = false;
-            showToast(`已从云端更新 ${activeYear} 年账本`);
-        }
-        if (pendingConflict || acceptRemote) clearCloudConflict(activeYear);
-        finishFeeLedgerLoad();
-        return true;
-    } catch (e) {
-        console.error('云端拉取失败', e);
-        const message = '云端账本读取失败：' + (e.message || e) + '（可能是口令不一致或网络异常）';
-        showFeeLedgerPending(message);
-        showToast(message);
-        return false;
         } finally {
             cloudLedgerLoading = false;
         }
@@ -2451,18 +2723,27 @@ async function pullCloud(options) {
 // 每次保存自动推云端（云端口令未设置时静默跳过，本地照常可用）
 const _origSaveData = saveData;
 saveData = function() {
+    const year = activeYear || 'local';
     if (!_applyingCloud) {
         data.updatedAt = Date.now();
         data.yearUpdatedAt = data.yearUpdatedAt && typeof data.yearUpdatedAt === 'object' ? data.yearUpdatedAt : {};
-        data.yearUpdatedAt[activeYear || 'local'] = data.updatedAt;
+        data.yearUpdatedAt[year] = data.updatedAt;
         data.lessonOverridesByYear = data.lessonOverridesByYear && typeof data.lessonOverridesByYear === 'object' ? data.lessonOverridesByYear : {};
         data.dismissedLessonsByYear = data.dismissedLessonsByYear && typeof data.dismissedLessonsByYear === 'object' ? data.dismissedLessonsByYear : {};
         if (activeYear) {
             data.lessonOverridesByYear[activeYear] = data.lessonOverrides || {};
             data.dismissedLessonsByYear[activeYear] = data.dismissedLessons || [];
         }
+        markYearDirty(year);
     }
+    const localSaved = persistLocalLedgerSnapshot();
     _origSaveData();
+    if (!localSaved) {
+        setLedgerSaveStatus('本机保存失败', false);
+        showToast(lastLocalPersistError || '本机账本保存失败，请勿刷新页面');
+    } else if (!_applyingCloud) {
+        setLedgerSaveStatus('已保存本机，云端同步中', false);
+    }
     if (!_applyingCloud && window.__feeLedgerReady) pushCloud();
 };
 
@@ -2574,15 +2855,14 @@ function normalizeReconciliationName(value) {
 
 function normalizeReconciliationDate(value) {
     const text = String(value || '').trim();
-    let match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
-    if (!match) match = text.match(/^(\d{1,2})[-\/.](\d{1,2})$/);
-    if (match && match.length === 4) {
-        const year = match[1].length === 4 ? Number(match[1]) : Number(activeYear);
-        const month = match[1].length === 4 ? Number(match[2]) : Number(match[1]);
-        const day = match[1].length === 4 ? Number(match[3]) : Number(match[2]);
-        if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
-            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        }
+    const full = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+    const short = full ? null : text.match(/^(\d{1,2})[-\/.](\d{1,2})$/);
+    const year = full ? Number(full[1]) : Number(activeYear);
+    const month = full ? Number(full[2]) : short ? Number(short[1]) : NaN;
+    const day = full ? Number(full[3]) : short ? Number(short[2]) : NaN;
+    if (Number.isInteger(year) && Number.isInteger(month) && Number.isInteger(day)) {
+        const normalized = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (isValidLedgerDate(normalized, String(year))) return normalized;
     }
     return text;
 }
@@ -2652,12 +2932,36 @@ function getReconciliationCandidates(booking, sourceId, feeRecordId) {
     return candidates.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 8);
 }
 
-function getReconciliationDiffs(booking, record) {
+function getReconciliationDiffs(booking, record, options) {
     if (!record) return [];
+    options = options || {};
     const diffs = [];
     if (booking.studentName && normalizeReconciliationName(record.studentName) !== normalizeReconciliationName(booking.studentName)) diffs.push(`姓名：约课端“${booking.studentName}” / 账本“${record.studentName || '未填写'}”`);
     if (booking.date && normalizeReconciliationDate(record.date) !== normalizeReconciliationDate(booking.date)) diffs.push(`日期：约课端“${booking.date}” / 账本“${record.date || '未填写'}”`);
     if (booking.hours > 0 && Math.abs(Number(record.hours) - Number(booking.hours)) >= 0.01) diffs.push(`课时：约课端“${Number(booking.hours).toFixed(2)}” / 账本“${Number(record.hours || 0).toFixed(2)}”`);
+    const profile = getStudentProfile(booking.studentName || record.studentName);
+    if (!record.amountConfirmedAt && options.amountMode === 'integrity') {
+        const recordRate = Number(record.rate);
+        const expectedTotal = Number((recordRate * Number(record.hours || 0)).toFixed(2));
+        if (!Number.isFinite(recordRate) || recordRate < 0 || !Number.isFinite(Number(record.total))
+            || Math.abs(Number(record.total) - expectedTotal) >= 0.01) {
+            diffs.push('金额：账本单价、课时和总额无法互相核对');
+        } else if (recordRate === 0 && (!profile || Number(profile.rate) !== 0)) {
+            diffs.push('金额：该记录仍为 ¥0，需要补齐学生档案或人工确认');
+        }
+    } else if (!record.amountConfirmedAt && !profile) {
+        diffs.push('金额：学生尚未建档，不能把 ¥0 记录自动标记为已入账');
+    } else if (!record.amountConfirmedAt) {
+        const expectedRate = Number(profile.rate);
+        const expectedHours = Number(booking.hours > 0 ? booking.hours : record.hours || 0);
+        const expectedTotal = Number((expectedRate * expectedHours).toFixed(2));
+        if (!Number.isFinite(Number(record.rate)) || Math.abs(Number(record.rate) - expectedRate) >= 0.01) {
+            diffs.push(`单价：学生档案“¥${expectedRate.toFixed(2)}” / 账本“¥${Number(record.rate || 0).toFixed(2)}”`);
+        }
+        if (!Number.isFinite(Number(record.total)) || Math.abs(Number(record.total) - expectedTotal) >= 0.01) {
+            diffs.push(`金额：应为“¥${expectedTotal.toFixed(2)}” / 账本“¥${Number(record.total || 0).toFixed(2)}”`);
+        }
+    }
     return diffs;
 }
 
@@ -2695,6 +2999,45 @@ function findLessonConflicts(lesson, includePending) {
     return conflicts;
 }
 
+async function applyReservationFeeUpdatesSafely(updates) {
+    const groups = {};
+    Object.keys(updates || {}).forEach(path => {
+        const match = path.match(/^years\/([^/]+)\/reservations\/([^/]+)\/([^/]+)$/);
+        if (!match) return;
+        const [, year, key, field] = match;
+        const groupKey = `${year}/${key}`;
+        if (!groups[groupKey]) groups[groupKey] = { year, key, fields: {} };
+        groups[groupKey].fields[field] = updates[path];
+    });
+    const results = await Promise.all(Object.values(groups).map(async group => {
+        const result = await db.ref(`years/${group.year}/reservations/${group.key}`).transaction(current => {
+            if (!current || current.status !== 'completed') return;
+            const nextStatus = group.fields.feeStatus;
+            if (nextStatus === 'posted') {
+                const nextRecordId = String(group.fields.feeRecordId || '');
+                if (!nextRecordId) return;
+                if (current.feeStatus === 'posted' && current.feeRecordId
+                    && String(current.feeRecordId) !== nextRecordId) return;
+            }
+            if (Object.prototype.hasOwnProperty.call(group.fields, 'feeRecordId')
+                && group.fields.feeRecordId && current.feeRecordId
+                && String(current.feeRecordId) !== String(group.fields.feeRecordId)) return;
+            if (['pending', 'dismissed'].includes(nextStatus)
+                && (current.feeStatus === 'posted' || current.feeRecordId)) return;
+            Object.keys(group.fields).forEach(field => { current[field] = group.fields[field]; });
+            return current;
+        });
+        return { ...group, committed: result.committed };
+    }));
+    const failed = results.filter(result => !result.committed);
+    if (failed.length > 0) {
+        const error = new Error(`${failed.length} 条预约状态已变化，未覆盖`);
+        error.failed = failed;
+        throw error;
+    }
+    return true;
+}
+
 async function refreshPendingList(options = {}) {
     if (pendingRefreshInProgress) {
         reservationRefreshQueued = true;
@@ -2717,6 +3060,21 @@ async function refreshPendingList(options = {}) {
     try {
         const ok = await ensureCloudReady();
         if (!ok) { statusEl.textContent = '无法连接云端（请检查网络）'; listEl.innerHTML = ''; return; }
+        const pendingLedgerSync = getYearSyncState(activeYear);
+        if (pendingLedgerSync.dirty) {
+            statusEl.textContent = '正在重试同步本机账本…';
+            const ledgerSynced = await pushCloud();
+            if (!ledgerSynced) {
+                statusEl.textContent = `本机账本已保留，云端同步后才能更新预约状态：${lastCloudPushError || '请稍后重试'}`;
+                listEl.innerHTML = '<div class="text-center text-amber-600 py-4 text-sm">账本存在待同步修改。请先处理上方同步提示，再刷新待入账列表。</div>';
+                return false;
+            }
+        }
+        const unlinksSynced = await flushPendingFeeUnlinks();
+        const unlinkSyncFailed = !unlinksSynced;
+        if (!unlinksSynced) {
+            statusEl.textContent = '部分已删除账本记录的预约关联仍待同步，系统会继续重试。';
+        }
         const snap = await db.ref(`years/${activeYear}/reservations`).once('value');
         const res = snap.val() || {};
         pendingLessons = [];
@@ -2729,6 +3087,19 @@ async function refreshPendingList(options = {}) {
         let legacyLinked = false;
         const legacyLinkTargets = [];
         const queuePostedStatus = (key, lesson, candidate) => {
+            const validationDiffs = getReconciliationDiffs(lesson, candidate && candidate.record);
+            if (validationDiffs.length > 0) {
+                addReconciliationCase({
+                    type: 'amountMismatch',
+                    resKey: key,
+                    sourceId: lesson.sourceId,
+                    reservation: res[key],
+                    booking: lesson,
+                    candidates: candidate ? [candidate] : [],
+                    message: validationDiffs.join('；')
+                });
+                return false;
+            }
             const recordId = candidate && candidate.record ? String(candidate.record.id || '') : '';
             const postedAt = candidate && candidate.record
                 ? Number(candidate.record.postedAt || candidate.record.createdAt || Date.now())
@@ -2739,6 +3110,7 @@ async function refreshPendingList(options = {}) {
             reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
             autoReconciledTargets.push({ key, lesson, candidate, recordId });
             reconciledImportedCount++;
+            return true;
         };
         Object.keys(res).forEach(key => {
             const r = res[key];
@@ -2786,6 +3158,13 @@ async function refreshPendingList(options = {}) {
                         candidates,
                         message: '约课端已忽略，但本地账本仍存在对应记录'
                     });
+                } else {
+                    // 本机已经恢复该时间段且账本中没有对应流水，补齐约课端的 pending 状态。
+                    reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeStatus`] = 'pending';
+                    reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeDismissedAt`] = null;
+                    reconciliationUpdates[`years/${activeYear}/reservations/${key}/feePostedAt`] = null;
+                    reconciliationUpdates[`years/${activeYear}/reservations/${key}/feeRecordId`] = null;
+                    reconciledDismissedCount++;
                 }
                 return;
             }
@@ -2806,7 +3185,7 @@ async function refreshPendingList(options = {}) {
                         message: '约课端已标记入账，但本地账本找不到对应记录'
                     });
                 } else {
-                    const diffs = getReconciliationDiffs(lesson, postedCandidate.record);
+                    const diffs = getReconciliationDiffs(lesson, postedCandidate.record, { amountMode: 'integrity' });
                     // 强匹配（sourceId / feeRecordId 精确命中）且字段一致 → 已入账状态成立，无需人工核对；
                     // 只有字段不一致或只是模糊匹配时才需要确认，避免大量重复弹核对
                     const strongMatch = postedCandidate.matchType === 'sourceId'
@@ -2898,6 +3277,19 @@ async function refreshPendingList(options = {}) {
             if (legacyCandidates.length === 1 && !consumedRecordIndexes.has(legacyCandidates[0].index)) {
                 // 只有一条 姓名+日期+课时 完全一致的旧记录 → 自动关联为已入账（补齐 sourceId，避免反复人工核对）
                 const legacy = legacyCandidates[0];
+                const legacyDiffs = getReconciliationDiffs(lesson, legacy.record);
+                if (legacyDiffs.length > 0) {
+                    addReconciliationCase({
+                        type: 'amountMismatch',
+                        resKey: key,
+                        sourceId,
+                        reservation: r,
+                        booking: lesson,
+                        candidates,
+                        message: legacyDiffs.join('；')
+                    });
+                    return;
+                }
                 consumedRecordIndexes.add(legacy.index);
                 if (legacy.record && typeof legacy.record === 'object' && !legacy.record.sourceId) {
                     legacy.record.sourceId = sourceId; // 直接改 data.records 中的对象，随后 saveData 持久化
@@ -2928,7 +3320,7 @@ async function refreshPendingList(options = {}) {
                     reservation: r,
                     booking: lesson,
                     candidates,
-                    message: '本地存在姓名、日期或课时相近的记录，需要确认是否为同一节课'
+                    message: '本地存在姓名和日期一致、但课时不同的记录，需要确认是否为同一节课'
                 });
                 return;
             }
@@ -2945,7 +3337,6 @@ async function refreshPendingList(options = {}) {
             if (!linkedInCloud) {
                 ledgerLinkSyncFailed = true;
                 legacyLinkTargets.forEach(target => {
-                    if (target.record.sourceId === target.sourceId) delete target.record.sourceId;
                     const prefix = `years/${activeYear}/reservations/${target.key}/`;
                     Object.keys(reconciliationUpdates).forEach(path => {
                         if (path.startsWith(prefix)) delete reconciliationUpdates[path];
@@ -2961,14 +3352,14 @@ async function refreshPendingList(options = {}) {
                     });
                 });
                 reconciledImportedCount = Math.max(0, reconciledImportedCount - legacyLinkTargets.length);
-                renderLedgerWithoutCloudPush();
+                persistLocalLedgerSnapshot();
             }
         }
 
-        let reconciliationSyncFailed = ledgerLinkSyncFailed;
+        let reconciliationSyncFailed = ledgerLinkSyncFailed || unlinkSyncFailed;
         if (Object.keys(reconciliationUpdates).length > 0) {
             try {
-                await db.ref().update(reconciliationUpdates);
+                await applyReservationFeeUpdatesSafely(reconciliationUpdates);
             } catch (error) {
                 console.error('历史课时费状态同步失败:', error);
                 reconciliationSyncFailed = true;
@@ -3055,7 +3446,9 @@ function renderReconciliationCases() {
         const booking = item.booking || {};
         const candidates = Array.isArray(item.candidates) ? item.candidates : [];
         const primaryCandidate = candidates.find(candidate => ['sourceId', 'feeRecordId', 'legacyExact'].includes(candidate.matchType)) || candidates[0];
-        const diffs = primaryCandidate ? getReconciliationDiffs(booking, primaryCandidate.record) : [];
+        const diffs = primaryCandidate ? getReconciliationDiffs(booking, primaryCandidate.record, {
+            amountMode: item.type === 'postedMismatch' ? 'integrity' : 'profile'
+        }) : [];
         const bookingHours = booking.hours > 0 ? `${Number(booking.hours).toFixed(2)} 小时` : '无法解析';
         const bookingRows = reconciliationRows([
             ['学生', booking.studentName],
@@ -3253,6 +3646,13 @@ function upsertReconciliationLedgerRecord(item, canonical, candidate) {
         ? Number(canonical.rate)
         : Number(existing && existing.rate || profile && profile.rate || 0);
     const recordId = String(existing && existing.id || `booking_${item.sourceId}`);
+    const startTime = normalizeClockValue(canonical.startTime);
+    const endTime = normalizeClockValue(canonical.endTime || addHoursToClock(startTime, canonical.hours));
+    if (!startTime || !endTime) throw new Error('起止时间不完整或课程跨越午夜，请手动调整日期和时间。');
+    const clockHours = calculateClockHours(startTime, endTime);
+    if (!(clockHours > 0) || Math.abs(clockHours - Number(canonical.hours)) >= 0.01) {
+        throw new Error('起止时间与课时不一致，请使用手动填写。');
+    }
     const nextRecord = {
         ...(existing || {}),
         id: recordId,
@@ -3260,18 +3660,40 @@ function upsertReconciliationLedgerRecord(item, canonical, candidate) {
         studentId: profile ? profile.id : String(existing && existing.studentId || ''),
         studentName: canonical.studentName,
         date: canonical.date,
-        startTime: normalizeClockValue(canonical.startTime),
-        endTime: normalizeClockValue(canonical.endTime || addHoursToClock(canonical.startTime, canonical.hours)),
+        startTime,
+        endTime,
         hours: Number(Number(canonical.hours).toFixed(2)),
         rate,
         total: Number((rate * Number(canonical.hours)).toFixed(2)),
-        postedAt: Number(existing && existing.postedAt || Date.now())
+        postedAt: Number(existing && existing.postedAt || Date.now()),
+        amountConfirmedAt: Date.now()
     };
     if (!(nextRecord.hours > 0) || !isValidLedgerDate(nextRecord.date, activeYear) || !nextRecord.studentName) throw new Error('账本数据不完整，请使用手动填写。');
     if (targetIndex >= 0) records[targetIndex] = nextRecord;
     else records.push(nextRecord);
     data.records = records;
     return { recordId, record: nextRecord };
+}
+
+async function applyReconciliationPlanSafely(item, updates, recordId) {
+    const reservation = (await db.ref(`years/${activeYear}/reservations/${item.resKey}`).once('value')).val();
+    if (!reservation || reservation.status !== 'completed') throw new Error('预约状态已经变化');
+    if (reservation.feeStatus === 'posted' && reservation.feeRecordId
+        && String(reservation.feeRecordId) !== String(recordId || '')) {
+        throw new Error('该预约已经关联另一条账本记录');
+    }
+    const slotIds = [...new Set(Object.keys(updates || {}).map(path => {
+        const match = path.match(new RegExp(`^years/${activeYear}/slots/([^/]+)/`));
+        return match ? match[1] : '';
+    }).filter(Boolean))];
+    for (const slotId of slotIds) {
+        const slot = (await db.ref(`years/${activeYear}/slots/${slotId}`).once('value')).val();
+        if (!slot || slot.reservationId !== item.resKey) throw new Error('排班所有权已经变化');
+    }
+    // 多路径 update 让预约字段与排班字段一起提交；上面的复核用于避免覆盖已知的新状态。
+    // 在无服务端函数的免费架构下，若极短窗口内仍发生并发变化，刷新核对会继续修复。
+    await db.ref().update(updates);
+    return true;
 }
 
 function renderReconciliationFailure(item, message) {
@@ -3303,7 +3725,7 @@ async function commitReconciliation(caseIndex, canonical, candidate, syncBooking
             return;
         }
         try {
-            await db.ref().update(reservationPlan.updates);
+            await applyReconciliationPlanSafely(item, reservationPlan.updates, ledgerResult.recordId);
         } catch (error) {
             console.error('人工核对后的预约同步失败:', error);
             renderReconciliationFailure(item, '账本已保存，但约课端同步失败，请重试。');
@@ -3485,11 +3907,10 @@ async function importPendingLessons(lessons, options = {}) {
         cloudSaved = await appendImportedRecordsAfterConflict(importedRecords);
     }
     if (!cloudSaved) {
-        const addedIds = new Set(importedRecords.map(item => item.recordId));
-        data.records = (data.records || []).filter(record => !addedIds.has(record.id));
-        renderLedgerWithoutCloudPush();
-        const message = `入账未完成：加密账本云端同步失败${lastCloudPushError ? `（${lastCloudPushError}）` : ''}`;
-        if (auto) showToast(message); else alert(message + '，本次没有改变预约状态。');
+        // 账本已先写入本机 WAL。云端失败时保留记录和脏标记，刷新后仍可重试，
+        // 预约端在账本真正上传成功前不会标记为已入账。
+        const message = `账本已保存在本机，等待云端重试${lastCloudPushError ? `（${lastCloudPushError}）` : ''}`;
+        if (auto) showToast(message); else alert(message + '。本次没有改变预约状态，请勿删除本机浏览器数据。');
         return false;
     }
 
@@ -3499,6 +3920,10 @@ async function importPendingLessons(lessons, options = {}) {
         const postedAt = Date.now();
         const results = await Promise.all(importedRecords.map(async item => {
             try {
+                const ledgerRecord = (data.records || []).find(record => record.id === item.recordId);
+                if (!ledgerRecord || getReconciliationDiffs(item.lesson, ledgerRecord).length > 0) {
+                    return { ...item, committed: false, reason: 'amount-not-ready' };
+                }
                 const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
                     if (!current || current.status !== 'completed') return;
                     current.feeStatus = 'posted';
@@ -3517,25 +3942,19 @@ async function importPendingLessons(lessons, options = {}) {
         const failedImports = results.filter(item => !item.committed);
         if (failedImports.length > 0) {
             statusSynced = false;
-            const failedIds = new Set(failedImports.map(item => item.recordId));
-            data.records = (data.records || []).filter(record => !failedIds.has(record.id));
-            saveData();
-            const rollbackSaved = await cloudPushChain.catch(() => false);
-            if (!rollbackSaved) {
-                console.error('未完成入账的账本记录云端回滚失败:', lastCloudPushError);
-            }
         }
     }
     const importedCount = successfulImports.length;
+    const ledgerImportedCount = importedRecords.length;
     const warn = noProfile.size > 0
         ? `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ${[...noProfile].join('、')}`
         : '';
-    const syncMessage = statusSynced ? '' : '\n\n部分预约状态在入账时发生变化，相关账本记录已撤回，请刷新后重试。';
+    const syncMessage = statusSynced ? '' : '\n\n账本记录已安全保留；部分预约状态尚未标记为已入账，刷新后系统会继续核对。未建档或金额不一致的记录需要先补齐学生档案。';
     if (auto) {
         if (importedCount > 0) showToast(`已自动入账 ${importedCount} 条完成课程${noProfile.size ? `；${noProfile.size} 名学生未建档` : ''}`);
-        if (!statusSynced) showToast('部分课程状态已变化，未自动入账');
+        if (!statusSynced) showToast('部分账本已保存，预约状态待核对');
     } else {
-        alert(`约课入账成功！已导入 ${importedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
+        alert(`账本已保存 ${ledgerImportedCount} 条，预约端已标记入账 ${importedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
     }
     await refreshPendingList(statusSynced ? {} : { skipAutoPost: true });
     return statusSynced;
@@ -3705,9 +4124,7 @@ async function dismissPendingLesson(i) {
     saveData();
     const ledgerSaved = await cloudPushChain.catch(() => false);
     if (!ledgerSaved) {
-        data.dismissedLessons = data.dismissedLessons.filter(item => item.resKey !== p.resKey);
-        renderLedgerWithoutCloudPush();
-        return showToast('忽略失败：加密账本云端未更新');
+        return showToast('忽略操作已保存在本机，云端恢复后会继续同步');
     }
     try {
         const result = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).transaction(current => {
@@ -3720,11 +4137,8 @@ async function dismissPendingLesson(i) {
         });
         if (!result.committed) throw new Error('课程状态已经变化');
     } catch (error) {
-        data.dismissedLessons = data.dismissedLessons.filter(item => item.resKey !== p.resKey);
-        saveData();
-        await cloudPushChain.catch(() => false);
         console.error('忽略状态同步失败:', error);
-        return showToast('忽略失败，已恢复原状态，请刷新后重试');
+        return showToast('忽略记录已保存，预约状态将在刷新后继续同步');
     }
     showToast('已忽略该时间段');
     await refreshPendingList();
@@ -3767,9 +4181,7 @@ async function restoreDismissed(idx) {
     saveData();
     const ledgerSaved = await cloudPushChain.catch(() => false);
     if (!ledgerSaved) {
-        data.dismissedLessons.splice(Math.min(idx, data.dismissedLessons.length), 0, item);
-        renderLedgerWithoutCloudPush();
-        return showToast('恢复失败：加密账本云端未更新');
+        return showToast('恢复操作已保存在本机，云端恢复后会继续同步');
     }
     const canResetReservation = reservation && reservation.status === 'completed'
         && reservation.feeStatus !== 'posted' && !reservation.feeRecordId;
@@ -3785,11 +4197,8 @@ async function restoreDismissed(idx) {
             });
             if (!result.committed) throw new Error('课程状态已经变化');
         } catch (error) {
-            data.dismissedLessons.splice(Math.min(idx, data.dismissedLessons.length), 0, item);
-            saveData();
-            await cloudPushChain.catch(() => false);
             console.error('恢复状态同步失败:', error);
-            return showToast('恢复失败，已保留忽略状态，请刷新后重试');
+            return showToast('恢复记录已保存，预约状态将在刷新后继续同步');
         }
     }
     showToast(canResetReservation ? '已恢复为待入账' : '课程状态已变化，已清理旧的忽略记录');
@@ -3807,23 +4216,62 @@ async function changeFeePassphrase() {
     const newPass = pass.trim();
     feePassphraseChanging = true;
     try {
-        // 先等待旧口令的排队上传完成，避免旧任务在新口令下重新加密。
-        await cloudPushChain.catch(() => false);
+        // 先完成旧口令下的待同步修改，再一次性轮换所有已有年份。
+        const queued = await cloudPushChain.catch(() => false);
+        if (!queued || getYearSyncState(activeYear).dirty) throw new Error('当前账本仍有待同步修改，请先完成同步');
+        const yearsSnapshot = await db.ref('years').once('value');
+        const yearsValue = yearsSnapshot.val() || {};
+        const vaultEntries = Object.keys(yearsValue).map(year => ({ year, vault: yearsValue[year] && yearsValue[year].feeVault }))
+            .filter(entry => entry.vault && entry.vault.cipher);
+        const decryptedEntries = [];
+        for (const entry of vaultEntries) {
+            const decrypted = await decryptFeeData(entry.vault.cipher, entry.vault.salt, entry.vault.kdfIterations);
+            decryptedEntries.push({ ...entry, data: decrypted });
+        }
         sessionStorage.setItem(FEE_PASSPHRASE_KEY, newPass);
+        showToast(`正在重新加密 ${decryptedEntries.length || 0} 个年份…`);
+        const encryptedEntries = [];
+        for (const entry of decryptedEntries) {
+            const encrypted = await encryptFeeDataWithPass(entry.data, newPass);
+            encryptedEntries.push({ ...entry, encrypted });
+        }
+
+        // 写入前再核对 revision 和密文，避免轮换期间覆盖另一台设备的新修改。
+        const updates = {};
+        const rotatedAt = Date.now();
+        for (const entry of encryptedEntries) {
+            const latest = (await vaultRefFor(entry.year).once('value')).val();
+            if (!latest || Number(latest.revision || 0) !== Number(entry.vault.revision || 0)
+                || String(latest.cipher || '') !== String(entry.vault.cipher || '')) {
+                throw new Error(`${entry.year} 年账本在口令更新期间发生变化，请重试`);
+            }
+            updates[`years/${entry.year}/feeVault`] = {
+                schemaVersion: 3,
+                updatedAt: rotatedAt,
+                revision: Number(entry.vault.revision || 0) + 1,
+                cipher: entry.encrypted.cipher,
+                salt: entry.encrypted.salt,
+                kdfIterations: entry.encrypted.kdfIterations
+            };
+        }
+        if (Object.keys(updates).length > 0) await db.ref().update(updates);
+        encryptedEntries.forEach(entry => {
+            const version = { revision: Number(entry.vault.revision || 0) + 1, updatedAt: rotatedAt };
+            cloudVersionsByYear[entry.year] = version;
+            cloudDecryptedByYear[entry.year] = { ...version, data: cloneForCloud(entry.data) };
+            if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version);
+        });
         const remembered = await rememberFeePassphrase(newPass);
         if (!remembered) clearRememberedFeePassphrase();
-        showToast('口令已更新，正在重新加密上传…');
-        const rotationJob = { year: activeYear, slice: cloneForCloud(getYearSlice(activeYear)) };
-        cloudPushChain = cloudPushChain.then(() => pushCloudNow(rotationJob, { force: true }), () => pushCloudNow(rotationJob, { force: true }));
-        const ok = await cloudPushChain;
-        if (!ok) throw new Error('云端重新加密失败');
+        showToast(`云端口令已更新，共重新加密 ${encryptedEntries.length} 个年份`);
     } catch (e) {
         sessionStorage.setItem(FEE_PASSPHRASE_KEY, oldPass);
         try {
             if (oldRememberedCipher) localStorage.setItem(FEE_REMEMBERED_CIPHER_KEY, oldRememberedCipher);
             else clearRememberedFeePassphrase();
         } catch (restoreError) {}
-        showToast('新口令上传失败，已恢复原口令');
+        console.error('云端口令更新失败:', e);
+        showToast(`新口令上传失败，已恢复原口令：${e.message || e}`);
     } finally {
         feePassphraseChanging = false;
     }

@@ -822,9 +822,10 @@
 
     function exportTutorFeeJSON() {
         if (reservationsData.length === 0) return alert('当前没有预约记录可以导出！');
-        // 只有「已完成」才算有效课时
-        const validReservations = reservationsData.filter(r => r.status === "completed");
-        if (validReservations.length === 0) return alert('当前没有已完成的课时可用于记账。');
+        // 只导出尚未处理的已完成课程，避免已入账/已忽略记录再次进入旧版导入流程。
+        const validReservations = reservationsData.filter(r => r.status === "completed"
+            && !['posted', 'dismissed'].includes(String(r.feeStatus || 'pending')));
+        if (validReservations.length === 0) return alert('当前没有待入账的已完成课时。');
 
         const outputRecords = [];
         let skippedInvalidCount = 0;
