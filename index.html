@@ -5,30 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>专业课辅导</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="student.css">
 </head>
-<body>
+<body class="student-page">
     <div id="sync-overlay">
         <div class="spinner"></div>
         <div id="sync-text">正在连接，请稍候...</div>
     </div>
 
-    <div class="container" id="app-container">
-        <h1 id="main-title">专业课辅导</h1>
+    <div class="container student-shell" id="app-container">
+        <h1 class="student-title" id="main-title">专业课辅导</h1>
         <div id="message"></div>
 
-        <div class="nav-btn-container">
-            <button id="nav-booking-btn" onclick="switchView('booking')">我要约课</button>
-            <button id="nav-history-btn" style="background: #67c23a;" onclick="switchView('history')">历史记录</button>
-            <button id="nav-exam-btn" style="background: #e6a23c;" onclick="window.location.href='exam_student.html'">模拟考试</button>
+        <div class="nav-btn-container student-nav">
+            <button id="nav-booking-btn" class="active" onclick="switchView('booking')">我要约课</button>
+            <button id="nav-history-btn" onclick="switchView('history')">历史记录</button>
+            <button id="nav-exam-btn" class="student-nav-exam" onclick="window.location.href='exam_student.html'">模拟考试</button>
         </div>
 
-        <div id="booking-section">
+        <div id="booking-section" class="booking-section">
             <div class="notice-board" id="notice-board" style="display: none;">
                 <h4>系统公告：</h4>
                 <div id="notice-content">加载中...</div>
             </div>
 
-            <div id="booking-form" style="display: none;">
+            <div id="booking-form" class="student-panel" style="display: none;">
                 <div class="form-group">
                     <label for="nickname">请输入姓名：</label>
                     <input type="text" id="nickname" placeholder="例如：张三" required>
@@ -41,7 +42,7 @@
                     <label>请选择辅导时间：</label>
                     <div id="slots-container">正在调取排班...</div>
                 </div>
-                <button id="submit-btn" onclick="submitBooking()">提交预约申请</button>
+                <button id="submit-btn" class="student-submit-btn" onclick="submitBooking()">提交预约申请</button>
             </div>
 
             <section id="booking-receipt" class="booking-receipt" style="display:none;" aria-live="polite">
@@ -61,13 +62,13 @@
             </section>
         </div>
 
-        <div id="history-section" style="display: none;">
-            <div class="form-group" style="background: #fdfdfe; padding: 15px; border: 1px dashed #ccc; border-radius: 8px; margin-bottom: 20px;">
-                <label style="font-size: 14px; color: #555; font-weight: bold;">历史约课身份验证：</label>
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+        <div id="history-section" class="student-history-section" style="display: none;">
+            <div class="form-group student-panel student-history-verify">
+                <label>历史约课身份验证：</label>
+                <div class="student-history-fields">
                     <input type="text" id="history-search-name" placeholder="请输入预约时填写的真实姓名">
                     <input type="text" id="history-search-code" placeholder="请输入任意一次约课的凭证码（大写5位）">
-                    <button onclick="loadMyHistory()" style="background: #409eff; font-size: 15px; font-weight: bold; padding: 10px 0;">验证并调取记录</button>
+                    <button onclick="loadMyHistory()">验证并调取记录</button>
                 </div>
             </div>
             <div id="history-container"><p style="text-align: center; color: #999; padding: 20px;">请输入姓名与凭证码进行查询。</p></div>

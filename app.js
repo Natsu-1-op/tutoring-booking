@@ -475,6 +475,10 @@ async function submitBooking() {
 }
 
 function switchView(view) {
+    const bookingButton = document.getElementById('nav-booking-btn');
+    const historyButton = document.getElementById('nav-history-btn');
+    if (bookingButton) bookingButton.classList.toggle('active', view === 'booking');
+    if (historyButton) historyButton.classList.toggle('active', view === 'history');
     if (view === 'booking') {
         document.getElementById('booking-section').style.display = 'block';
         document.getElementById('history-section').style.display = 'none';

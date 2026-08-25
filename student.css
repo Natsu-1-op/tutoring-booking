@@ -1,0 +1,273 @@
+/* 同学预约端：与教师工作台统一的页面基调，保持预约逻辑和原有选择器不变。 */
+.student-page {
+    max-width: none;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background: #f5f7fb;
+    color: #334155;
+}
+
+.student-shell {
+    width: min(960px, 100%);
+    min-height: 100vh;
+    box-sizing: border-box;
+    margin: 0 auto;
+    padding: 28px 24px 48px;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.student-title {
+    margin: 0;
+    padding: 0 2px 14px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    text-align: left;
+}
+
+.student-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin: 18px 0;
+    padding: 4px;
+    background: #eaf0f7;
+    border-radius: 8px;
+}
+
+.student-nav button {
+    width: 100%;
+    min-height: 40px;
+    margin: 0;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.student-nav button:hover {
+    background: #fff;
+    color: #2563eb;
+    filter: none;
+    transform: none;
+}
+
+.student-nav button.active {
+    background: #2563eb;
+    color: #fff;
+}
+
+.student-nav button.active:hover {
+    background: #1d4ed8;
+    color: #fff;
+}
+
+.student-nav .student-nav-exam {
+    color: #64748b;
+}
+
+.student-panel {
+    box-sizing: border-box;
+    margin-bottom: 16px;
+    padding: 18px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, .03);
+}
+
+.student-panel .form-group:last-of-type {
+    margin-bottom: 18px;
+}
+
+.student-page .form-group {
+    margin-bottom: 16px;
+}
+
+.student-page .form-group label,
+.student-history-verify > label {
+    display: block;
+    margin-bottom: 7px;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.student-page input[type="text"],
+.student-page input[type="password"],
+.student-page input[type="date"],
+.student-page input[type="datetime-local"] {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    background: #fff;
+    color: #334155;
+    font-size: 14px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.student-page input:focus {
+    border-color: #60a5fa;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+}
+
+.student-page input::placeholder {
+    color: #94a3b8;
+}
+
+.student-page #slots-container {
+    display: grid;
+    gap: 8px;
+}
+
+.student-page .slot-item {
+    box-sizing: border-box;
+    padding: 12px 13px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    color: #475569;
+    transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.student-page .slot-item:not(.disabled):hover {
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+.student-page .slot-item.selected {
+    background: #eff6ff;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, .08);
+}
+
+.student-page .notice-board {
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    box-shadow: none;
+    color: #1e40af;
+}
+
+.student-page .notice-board h4 {
+    color: #1d4ed8;
+}
+
+.student-submit-btn {
+    width: 100%;
+    min-height: 42px;
+    margin-top: 2px;
+    background: #2563eb;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.student-submit-btn:hover {
+    background: #1d4ed8;
+    filter: none;
+}
+
+.student-history-verify {
+    border-style: solid;
+}
+
+.student-history-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.student-history-fields button {
+    width: 100%;
+    min-height: 40px;
+    margin-top: 2px;
+    padding: 9px 12px;
+    background: #2563eb;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.student-history-fields button:hover {
+    background: #1d4ed8;
+    filter: none;
+}
+
+.student-page .history-card {
+    margin-bottom: 12px;
+    padding: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+.student-page .history-summary {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #475569;
+}
+
+.student-page .booking-receipt {
+    background: #fff;
+    border-color: #bfdbfe;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, .05);
+}
+
+.student-page #sync-overlay {
+    background: rgba(245, 247, 251, .96);
+    color: #2563eb;
+}
+
+@media screen and (max-width: 640px) {
+    .student-shell {
+        width: 100%;
+        padding: 16px 12px 32px;
+    }
+
+    .student-title {
+        padding-bottom: 12px;
+        font-size: 20px;
+    }
+
+    .student-nav {
+        gap: 4px;
+        margin: 14px 0;
+    }
+
+    .student-nav button {
+        min-height: 38px;
+        padding: 8px 4px;
+        font-size: 12px;
+    }
+
+    .student-panel {
+        padding: 14px;
+    }
+
+    .student-page .booking-receipt-actions {
+        flex-direction: column;
+    }
+
+    .student-page .booking-receipt-actions button {
+        width: 100%;
+    }
+}
