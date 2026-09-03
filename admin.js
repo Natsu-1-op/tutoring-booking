@@ -171,6 +171,28 @@
         return typeof name === 'string' && name.length > 0 && name.length <= 50 && !INVALID_FIREBASE_KEY_CHARS.test(name) && !name.includes(',');
     }
 
+    function normalizeStudentName(name) {
+        return typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+    }
+
+    // 只处理名单本身，避免在新增一名同学时重写整学年（排班、预约和加密账本都在该节点下）。
+    function addStudentToWhitelistSnapshot(currentWhitelist, studentKey, name) {
+        const next = currentWhitelist && typeof currentWhitelist === 'object' && !Array.isArray(currentWhitelist)
+            ? { ...currentWhitelist }
+            : {};
+        const normalizedName = normalizeStudentName(name);
+        const duplicate = Object.values(next).some(value => normalizeStudentName(value) === normalizedName);
+        if (!duplicate) next[studentKey] = normalizedName;
+        return { duplicate, whitelist: next, name: normalizedName };
+    }
+
+    function studentWriteErrorMessage(error, fallback) {
+        const code = String(error && error.code || '').toUpperCase();
+        if (code.includes('PERMISSION_DENIED')) return '保存被数据库拒绝，请确认已使用教师工作台登录并刷新后重试。';
+        if (code.includes('NETWORK')) return '网络连接失败，请检查网络后重试。';
+        return fallback;
+    }
+
     function generateSecureCode(length) {
         const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         const bytes = new Uint8Array(length);
@@ -492,12 +514,18 @@
                     SystemRouter.getLogsRef(viewingYear).push({
                         action: `清除了学生 [${name}] 的总时长限制`, timestamp: firebase.database.ServerValue.TIMESTAMP
                     });
+                }).catch(error => {
+                    console.error('清除学生总时长失败:', error);
+                    alert(studentWriteErrorMessage(error, '清除总时长失败，请重试。'));
                 });
             } else if (v <= 10000) {
                 hoursRef.set(v).then(() => {
                     SystemRouter.getLogsRef(viewingYear).push({
                         action: `设置学生 [${name}] 总时长为 ${v} 小时`, timestamp: firebase.database.ServerValue.TIMESTAMP
                     });
+                }).catch(error => {
+                    console.error('设置学生总时长失败:', error);
+                    alert(studentWriteErrorMessage(error, '保存总时长失败，请重试。'));
                 });
             } else {
                 alert('总时长不能超过 10000 小时。');
@@ -743,8 +771,9 @@
         });
     }
 
-    function addNewStudentToWhitelist() {
-        const input = document.getElementById('new-student-name'); const name = input.value.trim();
+    async function addNewStudentToWhitelist() {
+        const input = document.getElementById('new-student-name');
+        const name = normalizeStudentName(input.value);
         const hoursInput = document.getElementById('new-student-hours');
         if(!name) return alert('请输入名字！');
         if (!isValidStudentName(name)) return alert('姓名格式不合法（最多50字，不能包含逗号或路径特殊字符）！');
@@ -754,27 +783,55 @@
             return alert('总时长需为大于 0 且不超过 10000 的数字，或留空表示不限制。');
         }
         const validHours = parsedHours !== null;
-        const studentKey = db.ref(`years/${viewingYear}/studentWhitelist`).push().key;
-        let duplicateFound = false;
-        db.ref(`years/${viewingYear}`).transaction(yearData => {
-            const next = yearData || {};
-            next.studentWhitelist = next.studentWhitelist || {};
-            duplicateFound = Object.values(next.studentWhitelist).some(value => value === name);
-            if (duplicateFound) return;
-            next.studentWhitelist[studentKey] = name;
-            if (validHours) {
-                next.studentHours = next.studentHours || {};
-                next.studentHours[name] = parsedHours;
+        const button = document.getElementById('btn-add-student');
+        if (button && button.disabled) return;
+        const originalButtonText = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = '添加中…';
+        }
+
+        try {
+            const listRef = db.ref(`years/${viewingYear}/studentWhitelist`);
+            const studentKey = listRef.push().key;
+            let duplicateFound = false;
+            const result = await listRef.transaction(currentWhitelist => {
+                const next = addStudentToWhitelistSnapshot(currentWhitelist, studentKey, name);
+                duplicateFound = next.duplicate;
+                return next.duplicate ? undefined : next.whitelist;
+            });
+            if (!result.committed) {
+                alert(duplicateFound ? '该同学已经在名单中了！' : '新增学生失败，请刷新名单后重试。');
+                return;
             }
-            return next;
-        }).then(result => {
-            if (!result.committed) return alert(duplicateFound ? '该同学已经在名单中了！' : '新增学生失败，请重试。');
+
+            let hoursSaveFailed = false;
+            if (validHours) {
+                try {
+                    await db.ref(`years/${viewingYear}/studentHours/${name}`).set(parsedHours);
+                } catch (error) {
+                    // 名单已经成功写入，不能把成功结果误报为失败；课时上限可从名单标签再次设置。
+                    hoursSaveFailed = true;
+                    console.error('新增学生后的总时长保存失败:', error);
+                }
+            }
             SystemRouter.getLogsRef(viewingYear).push({
                 action: `新增准入白名单学生：[${name}]${validHours ? `，总时长 ${parsedHours} 小时` : ''}`, timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
+            }).catch(error => console.error('新增学生日志写入失败:', error));
             input.value = '';
             if (hoursInput) hoursInput.value = '';
-        }).catch(() => alert('新增学生失败，请重试。'));
+            if (hoursSaveFailed) {
+                alert(`同学 [${name}] 已加入名单，但总时长未保存。请点击名单中的“未设”重新设置。`);
+            }
+        } catch (error) {
+            console.error('新增学生失败:', error);
+            alert(studentWriteErrorMessage(error, '新增学生失败，请重试。'));
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalButtonText;
+            }
+        }
     }
 
     // 显示/隐藏每学生课时统计
