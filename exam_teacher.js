@@ -13,6 +13,23 @@ let firebaseRankList = [];
 let rankingListenerRef = null; // 排名监听器引用，防止重复绑定
 const STEALTH_SECRET_SALT = "ClassOpticSecurePaperKey2026";
 
+function firebaseTitleKey(title) {
+    const text = String(title ?? '');
+    const legacyKey = encodeURIComponent(text).replace(/\./g, '%2E');
+    if (legacyKey.length <= 700) return legacyKey;
+
+    // Reversible fallback for long CJK titles; at most 400 bytes for the
+    // validated 200-code-unit title, below the Realtime Database key limit.
+    let binary = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const code = text.charCodeAt(i);
+        binary += String.fromCharCode(code >>> 8, code & 0xff);
+    }
+    // A raw "%u16_" prefix cannot be produced by encodeURIComponent, so this
+    // fallback namespace cannot collide with any legacy title key.
+    return `%u16_${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+}
+
 function safeImageDataUrl(value) {
     return typeof value === 'string' && /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(value) ? value : '';
 }
@@ -1451,7 +1468,7 @@ function saveStudentScoreAndPackage() {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => { URL.revokeObjectURL(dlUrl); }, 1000);
 
-    const safePaperKey = encodeURIComponent(masterPaper.paperTitle).replace(/\./g, '%2E');
+    const safePaperKey = firebaseTitleKey(masterPaper.paperTitle);
     const safeStudentKey = encodeURIComponent(studentPaper.studentName).replace(/\./g, '%2E');
 
     db.ref(`examRankings/${safePaperKey}/${safeStudentKey}`).set({
@@ -1489,7 +1506,7 @@ function renderGlobalScoreSummaryTable() {
 
 // 汇总表记录对应的云端排名节点（与 saveStudentScoreAndPackage 相同的路径编码）
 function rankingRefFor(record) {
-    const safePaperKey = encodeURIComponent(record.paperTitle).replace(/\./g, '%2E');
+    const safePaperKey = firebaseTitleKey(record.paperTitle);
     const safeStudentKey = encodeURIComponent(record.name).replace(/\./g, '%2E');
     return db.ref(`examRankings/${safePaperKey}/${safeStudentKey}`);
 }
@@ -1544,10 +1561,18 @@ function listenFirebasePaperTitles() {
             firebaseRankList = [];
             return;
         }
-        Object.keys(snapshot.val()).forEach(encKey => {
+        const paperGroups = snapshot.val();
+        Object.keys(paperGroups).forEach(encKey => {
             const opt = document.createElement('option');
             opt.value = encKey;
-            opt.textContent = decodeURIComponent(encKey);
+            const paperRecord = Object.values(paperGroups[encKey] || {}).find(record =>
+                record && typeof record.paperTitle === 'string' && record.paperTitle.length > 0);
+            if (paperRecord) {
+                opt.textContent = paperRecord.paperTitle;
+            } else {
+                try { opt.textContent = decodeURIComponent(encKey); }
+                catch (e) { opt.textContent = encKey; }
+            }
             selector.appendChild(opt);
         });
         if (cachedSelectedValue && snapshot.val()[cachedSelectedValue]) {

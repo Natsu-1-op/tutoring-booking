@@ -5,6 +5,10 @@ let currentBookingReceipt = null;
 
 const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
 
+function normalizeStudentName(name) {
+    return typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+}
+
 function isValidStudentName(name) {
     return typeof name === 'string' && name.length > 0 && name.length <= 50 && !INVALID_FIREBASE_KEY_CHARS.test(name) && !name.includes(',');
 }
@@ -298,7 +302,7 @@ function downloadBookingReceipt() {
 async function submitBooking() {
     if (isSubmitting) return;
 
-    const nickname = document.getElementById('nickname').value.trim();
+    const nickname = normalizeStudentName(document.getElementById('nickname').value);
     const accessCode = document.getElementById('access-code').value.trim();
     const selectedSlot = document.querySelector('input[name="slot"]:checked');
 
@@ -331,7 +335,10 @@ async function submitBooking() {
             showMessage('抱歉，本学年暂未录入任何准入学生名单！', false);
             return;
         }
-        if (!Object.values(whitelist).some(approvedName => approvedName === nickname)) {
+        const approvedName = Object.values(whitelist)
+            .map(normalizeStudentName)
+            .find(name => name === nickname);
+        if (!approvedName) {
             showMessage('预约拦截：您不在本期专业课辅导学生名单中，请输入标准姓名！', false);
             return;
         }

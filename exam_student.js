@@ -31,6 +31,27 @@ const MAX_QUESTIONS = 200;
 const MAX_TEXT_LENGTH = 20000;
 const ALLOWED_QUESTION_TYPES = new Set(['choice', 'judge', 'blank-auto', 'blank-hand', 'calculation']);
 const INVALID_FIREBASE_KEY_CHARS = /[.#$\/\[\]<>\u0000-\u001F\u007F]/;
+
+function normalizeExamStudentName(name) {
+    return typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+}
+
+function firebaseTitleKey(title) {
+    const text = String(title ?? '');
+    const legacyKey = encodeURIComponent(text).replace(/\./g, '%2E');
+    if (legacyKey.length <= 700) return legacyKey;
+
+    // Keep long CJK titles reversible while staying below Realtime Database's
+    // per-key size limit. UTF-16 uses at most 400 bytes for the validated title.
+    let binary = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const code = text.charCodeAt(i);
+        binary += String.fromCharCode(code >>> 8, code & 0xff);
+    }
+    // A raw "%u16_" prefix cannot be produced by encodeURIComponent, so this
+    // fallback namespace cannot collide with any legacy title key.
+    return `%u16_${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+}
 const activeYearReady = SystemRouter.system().once('value').then(snapshot => {
     const sys = snapshot.val();
     if (sys && /^\d{4}$/.test(String(sys.activeYear || ''))) SystemRouter.activeYear = String(sys.activeYear);
@@ -276,14 +297,14 @@ document.getElementById('input-paper-json').onchange = function(e) {
 };
 
 async function verifyAndStartExam() {
-    const nameInput = document.getElementById('student-name').value.trim();
+    const nameInput = normalizeExamStudentName(document.getElementById('student-name').value);
     if (!nameInput) return alert("请输入姓名！");
     if (!isValidStudentName(nameInput)) return alert('姓名格式不合法（最多50字，不能包含路径特殊字符）！');
     if (!examPaperData || validateMasterPaperShape(examPaperData)) return alert('试卷状态无效，请重新导入。');
     await activeYearReady;
     const targetYear = SystemRouter.activeYear || "2026";
 
-    const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
+    const safePaperPath = firebaseTitleKey(examPaperData.paperTitle);
     const safeStudentPath = encodeURIComponent(nameInput).replace(/\./g, '%2E');
 
     db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`).once('value').then((lockSnapshot) => {
@@ -304,10 +325,12 @@ async function verifyAndStartExam() {
         }
 
         db.ref(`years/${targetYear}/studentWhitelist`).once('value').then((snapshot) => {
-            const isAllowed = snapshot.exists() && Object.values(snapshot.val()).includes(nameInput);
-            if (!isAllowed) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
+            const approvedName = snapshot.exists()
+                ? Object.values(snapshot.val()).map(normalizeExamStudentName).find(name => name === nameInput)
+                : '';
+            if (!approvedName) { document.getElementById('auth-error').textContent = "验证失败：您不在学生白名单内。"; return; }
 
-            studentNameVerified = nameInput;
+            studentNameVerified = approvedName;
             examSubmitToken = getExamSubmitToken(examPaperData.paperTitle, studentNameVerified);
             document.getElementById('meta-paper-title').textContent = examPaperData.paperTitle;
             document.getElementById('meta-student-name').textContent = studentNameVerified;
@@ -664,7 +687,7 @@ async function triggerManualSubmit(isForceSystemTimeout) {
     if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
     if (!examPaperData || !studentNameVerified) return alert('考试状态已失效，请保留本地答案并联系老师。');
 
-    const safePaperPath = encodeURIComponent(examPaperData.paperTitle).replace(/\./g, '%2E');
+    const safePaperPath = firebaseTitleKey(examPaperData.paperTitle);
     const safeStudentPath = encodeURIComponent(studentNameVerified).replace(/\./g, '%2E');
     const lockRef = db.ref(`submittedExamLocks/${safePaperPath}/${safeStudentPath}`);
     const submitToken = examSubmitToken || getExamSubmitToken(examPaperData.paperTitle, studentNameVerified);
