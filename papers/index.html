@@ -8,15 +8,11 @@
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../student.css">
   <style>
-    .paper-intro { margin: 18px 0 16px; padding: 16px 18px; }
-    .paper-intro h2, .paper-panel h2 { margin: 0 0 8px; padding: 0; border: 0; color: #1e293b; font-size: 16px; }
-    .paper-intro p, .paper-panel p { margin: 0; color: #64748b; font-size: 14px; line-height: 1.7; }
-    .paper-notice { margin-bottom: 16px; }
-    .paper-notice h4 { margin-bottom: 3px; }
-    .paper-panel { margin-bottom: 16px; }
+    .paper-panel h2 { margin: 0 0 8px; padding: 0; border: 0; color: #1e293b; font-size: 16px; }
+    .paper-panel p { margin: 0; color: #64748b; font-size: 14px; line-height: 1.7; }
+    .paper-panel { margin: 18px 0 16px; }
     .paper-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
     .paper-heading h2 { margin: 0; }
-    .paper-badge { flex-shrink: 0; padding: 3px 9px; background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; border-radius: 5px; font-size: 12px; font-weight: 600; }
     .paper-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
     .paper-choice { display: flex; flex-direction: column; min-width: 0; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
     .paper-choice h3 { margin: 0 0 6px; color: #334155; font-size: 15px; }
@@ -29,22 +25,14 @@
     .paper-tips li:last-child { padding-bottom: 0; border-bottom: 0; }
     .paper-tips strong { display: block; margin-bottom: 4px; color: #475569; font-size: 13px; }
     .paper-footer { margin: 20px 0 0; text-align: center; color: #94a3b8; font-size: 12px; }
-    @media (max-width:640px) { .paper-intro { margin-top: 14px; padding: 14px; } .paper-choices { grid-template-columns: 1fr; gap: 10px; } .paper-choice { padding: 14px; } }
+    @media (max-width:640px) { .paper-choices { grid-template-columns: 1fr; gap: 10px; } .paper-choice { padding: 14px; } }
   </style>
 </head>
 <body class="student-page">
   <main class="container student-shell">
     <h1 class="student-title">华科 839 模拟卷领取登记</h1>
-    <section class="student-panel paper-intro">
-      <h2>模拟卷分享</h2>
-      <p>整理了两套模拟卷，希望大家在考前检验一下自己。请根据领取方式填写对应的登记表。</p>
-    </section>
-    <div class="notice-board paper-notice">
-      <h4>登记说明</h4>
-      <div>目前两份收集表暂未开放提交，具体开放时间请关注群内通知。</div>
-    </div>
     <section class="student-panel paper-panel" aria-labelledby="methods-title">
-      <div class="paper-heading"><h2 id="methods-title">选择领取方式</h2><span class="paper-badge">免费分享</span></div>
+      <div class="paper-heading"><h2 id="methods-title">选择领取方式</h2></div>
       <p>请只填写与你的领取方式对应的一份表单。</p>
       <div class="paper-choices">
         <article class="paper-choice">
