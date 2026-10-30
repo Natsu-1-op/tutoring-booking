@@ -1,33 +1,76 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f6f7f2">
-  <meta name="description" content="华科 839 模拟卷领取登记：武汉、长春自取及邮寄说明。">
-  <title>华科 839 模拟卷领取</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="华科 839 模拟卷领取登记与填写说明">
+  <title>华科 839 模拟卷领取登记</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../student.css">
   <style>
-    :root{color-scheme:light;--ink:#20342f;--muted:#687a70;--green:#285d49;--paper:#fffefb;--line:#dce5dc;--bg:#f6f7f2}
-    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}a{color:inherit}a:focus-visible{outline:3px solid #d99749;outline-offset:4px}.wrap{width:min(960px,calc(100% - 40px));margin:auto}header{padding:27px 0;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;letter-spacing:.06em}.mark{width:28px;height:28px;display:grid;place-items:center;background:var(--green);color:white;border-radius:8px;font-size:14px}.hero{padding:72px 0 50px;display:grid;grid-template-columns:1fr auto;gap:35px;align-items:end}.eyebrow{color:var(--green);font-size:13px;letter-spacing:.13em;font-weight:700}.hero h1{font-size:clamp(38px,6vw,64px);line-height:1.18;letter-spacing:-.045em;margin:12px 0 18px}.hero p{color:var(--muted);font-size:17px;max-width:570px;margin:0}.number{font-family:Georgia,serif;font-size:clamp(100px,17vw,190px);line-height:.75;color:#e1e9dc;letter-spacing:-.09em;user-select:none}.notice{background:#edf1e8;border:1px solid #dae4d7;border-radius:14px;padding:16px 20px;color:#405c4b;font-size:14px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:15px;margin:48px 0 18px}.section-head h2{font-size:25px;line-height:1.3;margin:0}.section-head span{color:var(--muted);font-size:13px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:28px;display:flex;flex-direction:column;min-height:310px;box-shadow:0 8px 28px rgba(46,75,53,.035)}.tag{font-size:12px;letter-spacing:.08em;color:var(--green);font-weight:700}.card h3{font-size:24px;margin:12px 0 5px}.card p{margin:0 0 18px;color:var(--muted);font-size:15px}.card ul{padding-left:20px;margin:0 0 26px;color:#475d50;font-size:14px}.button{margin-top:auto;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:10px;background:var(--green);color:white;text-decoration:none;font-size:14px;font-weight:700}.button:hover{background:#1c4838}.button.secondary{background:#e8eee7;color:#264b39}.button.secondary:hover{background:#dce8dc}.details{display:grid;grid-template-columns:1fr 1fr;gap:16px 44px;padding-bottom:68px}.detail{border-top:1px solid var(--line);padding-top:18px}.detail h3{font-size:16px;margin:0 0 6px}.detail p{font-size:14px;color:var(--muted);margin:0}footer{border-top:1px solid var(--line);padding:25px 0 40px;color:var(--muted);font-size:13px}@media(max-width:640px){.wrap{width:min(100% - 32px,960px)}.hero{padding:52px 0 36px}.number{display:none}.cards,.details{grid-template-columns:1fr}.card{min-height:0}.section-head{align-items:start;flex-direction:column;gap:3px}.section-head h2{font-size:22px}.details{gap:20px}.hero p{font-size:16px}}
+    .paper-intro { margin: 18px 0 16px; padding: 16px 18px; }
+    .paper-intro h2, .paper-panel h2 { margin: 0 0 8px; padding: 0; border: 0; color: #1e293b; font-size: 16px; }
+    .paper-intro p, .paper-panel p { margin: 0; color: #64748b; font-size: 14px; line-height: 1.7; }
+    .paper-notice { margin-bottom: 16px; }
+    .paper-notice h4 { margin-bottom: 3px; }
+    .paper-panel { margin-bottom: 16px; }
+    .paper-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .paper-heading h2 { margin: 0; }
+    .paper-badge { flex-shrink: 0; padding: 3px 9px; background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; border-radius: 5px; font-size: 12px; font-weight: 600; }
+    .paper-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+    .paper-choice { display: flex; flex-direction: column; min-width: 0; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    .paper-choice h3 { margin: 0 0 6px; color: #334155; font-size: 15px; }
+    .paper-choice ul { flex: 1; margin: 8px 0 18px; padding-left: 19px; color: #64748b; font-size: 13px; line-height: 1.8; }
+    .paper-action { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 7px; background: #2563eb; color: #fff; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .paper-action:hover { background: #1d4ed8; }
+    .paper-action:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+    .paper-tips { margin: 0; padding: 0; list-style: none; }
+    .paper-tips li { padding: 12px 0; border-bottom: 1px solid #eef2f7; }
+    .paper-tips li:last-child { padding-bottom: 0; border-bottom: 0; }
+    .paper-tips strong { display: block; margin-bottom: 4px; color: #475569; font-size: 13px; }
+    .paper-footer { margin: 20px 0 0; text-align: center; color: #94a3b8; font-size: 12px; }
+    @media (max-width:640px) { .paper-intro { margin-top: 14px; padding: 14px; } .paper-choices { grid-template-columns: 1fr; gap: 10px; } .paper-choice { padding: 14px; } }
   </style>
 </head>
-<body>
-<header><div class="wrap brand"><span class="mark">N</span><span>NATSU · 839 模拟卷</span></div></header>
-<main class="wrap">
-  <section class="hero"><div><div class="eyebrow">给备考的你 · MOCK EXAMS</div><h1>华科 839<br>模拟卷领取登记</h1><p>整理了两套模拟卷，希望能陪你在考前再检验一次自己。选择适合你的领取方式，填写对应的登记表即可。</p></div><div class="number" aria-hidden="true">839</div></section>
-  <div class="notice"><strong>登记前请注意：</strong>目前两份收集表暂未开放提交，具体开放时间请关注群内通知。</div>
-  <div class="section-head"><h2>选择领取方式</h2><span>请只填写与你的领取方式对应的一份表单</span></div>
-  <section class="cards" aria-label="领取方式">
-    <article class="card"><div class="tag">01 / SELF PICKUP</div><h3>武汉 · 长春自取</h3><p>适合方便在武汉或长春领取的同学。</p><ul><li>登记份数不限</li><li>武汉在工位领取，来之前先联系确认</li><li>长春的具体领取安排另行通知</li></ul><a class="button" href="https://docs.qq.com/form/page/DRk9yS3RpaWROVXhR" target="_blank" rel="noopener noreferrer">填写自取登记表 <span aria-hidden="true">↗</span></a></article>
-    <article class="card"><div class="tag">02 / DELIVERY</div><h3>邮寄领取</h3><p>不方便自取的同学，可以登记邮寄。</p><ul><li>所有地区统一限提交 10 份</li><li>提交成功不等于审核通过</li><li>邮寄安排和运费另行通知</li></ul><a class="button secondary" href="https://docs.qq.com/form/page/DRlFkcVdZTG1NUXRx" target="_blank" rel="noopener noreferrer">填写邮寄登记表 <span aria-hidden="true">↗</span></a></article>
-  </section>
-  <div class="section-head"><h2>填写前看这里</h2><span>几件小事，方便大家顺利领取</span></div>
-  <section class="details" aria-label="填写说明">
-    <div class="detail"><h3>01 · 报名信息截图</h3><p>上传前请先打码，遮住完整报名号、身份证号、考生编号和手机号等信息。按表单要求保留核对所需的信息。</p></div>
-    <div class="detail"><h3>02 · 填写领取码</h3><p>自取填写 A 加报名号后六位，邮寄填写 B 加报名号后六位。提交后请将小红书群昵称改为同一领取码，方便对照；重复时会联系调整。</p></div>
-    <div class="detail"><h3>03 · 关于邮寄名额</h3><p>邮寄表最多接收 10 份提交，提交后还需审核。具体寄送时间、收件信息收集和运费安排会在群里另行通知。</p></div>
-    <div class="detail"><h3>04 · 试卷和答案</h3><p>模拟卷免费分享；答案将在题目发出后发至群文件。请关注群内通知，有问题也可以在群里联系我。</p></div>
-  </section>
-</main>
-<footer><div class="wrap">Natsu · 祝大家备考顺利，考试加油。</div></footer>
-</body></html>
+<body class="student-page">
+  <main class="container student-shell">
+    <h1 class="student-title">华科 839 模拟卷领取登记</h1>
+    <section class="student-panel paper-intro">
+      <h2>模拟卷分享</h2>
+      <p>整理了两套模拟卷，希望大家在考前检验一下自己。请根据领取方式填写对应的登记表。</p>
+    </section>
+    <div class="notice-board paper-notice">
+      <h4>登记说明</h4>
+      <div>目前两份收集表暂未开放提交，具体开放时间请关注群内通知。</div>
+    </div>
+    <section class="student-panel paper-panel" aria-labelledby="methods-title">
+      <div class="paper-heading"><h2 id="methods-title">选择领取方式</h2><span class="paper-badge">免费分享</span></div>
+      <p>请只填写与你的领取方式对应的一份表单。</p>
+      <div class="paper-choices">
+        <article class="paper-choice">
+          <h3>武汉 / 长春自取</h3>
+          <p>方便在武汉或长春领取的同学</p>
+          <ul><li>登记份数不限</li><li>武汉来工位领取前请先联系确认</li><li>长春领取安排另行通知</li></ul>
+          <a class="paper-action" href="https://docs.qq.com/form/page/DRk9yS3RpaWROVXhR" target="_blank" rel="noopener noreferrer">填写自取登记表</a>
+        </article>
+        <article class="paper-choice">
+          <h3>邮寄领取</h3>
+          <p>不方便自取的同学</p>
+          <ul><li>所有地区统一限提交 10 份</li><li>提交成功不等于审核通过</li><li>邮寄安排和运费另行通知</li></ul>
+          <a class="paper-action" href="https://docs.qq.com/form/page/DRlFkcVdZTG1NUXRx" target="_blank" rel="noopener noreferrer">填写邮寄登记表</a>
+        </article>
+      </div>
+    </section>
+    <section class="student-panel paper-panel" aria-labelledby="help-title">
+      <h2 id="help-title">填写须知</h2>
+      <ul class="paper-tips">
+        <li><strong>报名信息截图</strong><p>上传前先打码，遮住完整报名号、身份证号、考生编号和手机号等信息，按表单要求保留核对所需的信息。</p></li>
+        <li><strong>领取码与群昵称</strong><p>自取填写 A 加报名号后六位，邮寄填写 B 加报名号后六位。提交后请将小红书群昵称改成同一领取码；如有重复会联系调整。</p></li>
+        <li><strong>邮寄名额</strong><p>邮寄表最多接收 10 份提交，之后需要审核。寄送时间、收件信息收集及运费安排会在群里另行通知。</p></li>
+        <li><strong>答案发放</strong><p>答案会在题目发出后发至群文件。请留意群内通知，有问题可以在群里联系我。</p></li>
+      </ul>
+    </section>
+    <p class="paper-footer">祝大家备考顺利，考试加油！</p>
+  </main>
+</body>
+</html>
