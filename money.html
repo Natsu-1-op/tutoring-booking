@@ -657,7 +657,9 @@
                         rateSyncCompleted = true;
                     } catch (error) {
                         console.error('学生课时费同步失败:', error);
-                        showToast(`课时费未修改：${error.message || error}`);
+                        const message = `课时费同步未完成：${error.message || error}`;
+                        if (String(error.message || error).includes('已更新')) alert(message);
+                        else showToast(message);
                         return;
                     } finally {
                         if (btn) btn.disabled = false;
@@ -683,7 +685,9 @@
                     rateSyncCompleted = true;
                 } catch (error) {
                     console.error('新建学生的历史课时费同步失败:', error);
-                    showToast(`学生未添加：${error.message || error}`);
+                    const message = `学生未添加：${error.message || error}`;
+                    if (String(error.message || error).includes('已更新')) alert(message);
+                    else showToast(message);
                     return;
                 } finally {
                     if (btn) btn.disabled = false;
@@ -1542,7 +1546,7 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-08-23d'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-11-03a'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
@@ -2001,6 +2005,9 @@ async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
     }
     const yearsSnapshot = await db.ref('years').once('value');
     const yearsValue = yearsSnapshot.val() || {};
+    if (yearsValue[activeYear] && yearsValue[activeYear].feeVaultDeletedAt) {
+        throw new Error('当前学年云端账本已删除，请先明确恢复账本');
+    }
     const entries = [];
     let activeVaultSeen = false;
     for (const year of Object.keys(yearsValue)) {
@@ -2017,24 +2024,24 @@ async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
         const applied = applyStudentProfileToLedgerData(getYearSlice(activeYear), previousStudent, nextStudent, { ensureStudent: true });
         entries.push({ year: String(activeYear), vault: null, data: applied.data });
     }
+    for (const entry of entries) {
+        if (getYearSyncState(entry.year).dirty || getCloudConflict(entry.year)) {
+            throw new Error(`${entry.year} 年存在未同步修改或冲突，请先处理`);
+        }
+    }
+    // 活跃学年最后写入；历史年份遇到冲突时，本机仍保留原档案，可安全重试。
+    entries.sort((a, b) => Number(String(a.year) === String(activeYear)) - Number(String(b.year) === String(activeYear)));
+    const activeChangeId = getYearSyncState(activeYear).changeId;
     const encryptedEntries = [];
     for (const entry of entries) {
         const encrypted = await encryptFeeData(entry.data);
         encryptedEntries.push({ ...entry, encrypted });
     }
     const updatedAt = Date.now();
-    const updates = {};
+    const completedYears = [];
     for (const entry of encryptedEntries) {
-        const latest = (await vaultRefFor(entry.year).once('value')).val();
-        if (entry.vault) {
-            if (!latest || Number(latest.revision || 0) !== Number(entry.vault.revision || 0)
-                || String(latest.cipher || '') !== String(entry.vault.cipher || '')) {
-                throw new Error(`${entry.year} 年账本在修改期间已变化，请刷新后重试`);
-            }
-        } else if (latest && latest.cipher) {
-            throw new Error(`${entry.year} 年账本刚被其他设备创建，请刷新后重试`);
-        }
-        updates[`years/${entry.year}/feeVault`] = {
+        const ref = vaultRefFor(entry.year);
+        const payload = {
             schemaVersion: 3,
             updatedAt,
             revision: Number(entry.vault && entry.vault.revision || 0) + 1,
@@ -2042,14 +2049,32 @@ async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
             salt: entry.encrypted.salt,
             kdfIterations: entry.encrypted.kdfIterations
         };
-    }
-    if (Object.keys(updates).length > 0) await db.ref().update(updates);
-    encryptedEntries.forEach(entry => {
-        const version = { revision: Number(entry.vault && entry.vault.revision || 0) + 1, updatedAt };
+        let result;
+        try {
+            // 预读使事务有本地快照；版本与密文校验仍在事务内完成。
+            await ref.once('value');
+            const currentLocalState = getYearSyncState(activeYear);
+            if (currentLocalState.dirty || currentLocalState.changeId !== activeChangeId) {
+                throw new Error('本机账本在修改期间发生变化');
+            }
+            result = await ref.transaction(current => {
+                if (entry.vault) {
+                    if (!current || Number(current.revision || 0) !== Number(entry.vault.revision || 0)
+                        || String(current.cipher || '') !== String(entry.vault.cipher || '')) return;
+                } else if (current) return;
+                return payload;
+            });
+            if (!result.committed) throw new Error(`${entry.year} 年账本已变化`);
+        } catch (error) {
+            const partial = completedYears.length ? `；已更新 ${completedYears.join('、')} 年` : '';
+            throw new Error(`${error.message || error}${partial}，请刷新后重试`);
+        }
+        const version = { revision: payload.revision, updatedAt };
         cloudVersionsByYear[entry.year] = version;
         cloudDecryptedByYear[entry.year] = { ...version, data: cloneForCloud(entry.data) };
-        if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version);
-    });
+        if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version, activeChangeId);
+        completedYears.push(entry.year);
+    }
 }
 
 let cloudPushChain = Promise.resolve(true);
@@ -2405,12 +2430,15 @@ async function readRemoteLedgerData(year, remote) {
     const revision = Number(remote.revision || 0);
     const updatedAt = Number(remote.updatedAt || 0);
     const cached = cloudDecryptedByYear[key];
-    if (cached && cached.revision === revision && cached.updatedAt === updatedAt && cached.data) {
+    if (cached && cached.revision === revision && cached.updatedAt === updatedAt
+        && cached.cipher === remote.cipher && cached.salt === remote.salt
+        && cached.kdfIterations === remote.kdfIterations && cached.data) {
         return cloneForCloud(cached.data);
     }
     try {
         const remoteData = await decryptFeeData(remote.cipher, remote.salt, remote.kdfIterations);
-        cloudDecryptedByYear[key] = { revision, updatedAt, data: cloneForCloud(remoteData) };
+        cloudDecryptedByYear[key] = { revision, updatedAt, cipher: remote.cipher, salt: remote.salt,
+            kdfIterations: remote.kdfIterations, data: cloneForCloud(remoteData) };
         return remoteData;
     } catch (error) {
         const mismatch = new Error('云端账本口令不一致或密文已损坏');
@@ -3237,6 +3265,7 @@ async function applyReservationFeeUpdatesSafely(updates) {
             if (nextStatus === 'posted') {
                 const nextRecordId = String(group.fields.feeRecordId || '');
                 if (!nextRecordId) return;
+                if (current.feeStatus === 'dismissed' || (current.feeStatus === 'posted' && !current.feeRecordId)) return;
                 if (current.feeStatus === 'posted' && current.feeRecordId
                     && String(current.feeRecordId) !== nextRecordId) return;
             }
@@ -3344,7 +3373,7 @@ async function refreshPendingList(options = {}) {
             const legacyCandidates = candidates.filter(candidate => candidate.matchType === 'legacyExact'
                 && (!candidate.record.sourceId || candidate.record.sourceId === sourceId));
             const similarCandidates = candidates.filter(candidate => candidate.matchType === 'sameNameDate');
-            const lesson = { ...booking, resKey: key, sourceId, feeStatus: r.feeStatus || 'pending' };
+            const lesson = { ...booking, resKey: key, sourceId, feeStatus: r.feeStatus || 'pending', reservationFingerprint: reservationImportFingerprint(r) };
             // 应用教师修改过的时间（覆盖约课系统里填错的时间）
             const ov = (data.lessonOverrides || {})[key];
             if (ov) {
@@ -4061,6 +4090,25 @@ async function saveManualReconciliation() {
     await commitReconciliation(caseIndex, { studentName, date, startTime, endTime, hours, rate }, candidate, true);
 }
 
+function reservationImportFingerprint(reservation) {
+    if (!reservation) return '';
+    return ledgerFingerprint({
+        nickname: reservation.nickname || '', time: reservation.time || '', slotId: reservation.slotId || '',
+        slotSnapshot: reservation.slotSnapshot || null, status: reservation.status || '',
+        feeStatus: reservation.feeStatus || 'pending', feeRecordId: reservation.feeRecordId || ''
+    });
+}
+
+function canPostImportedReservation(current, original, recordId) {
+    if (!current || !original || current.status !== 'completed') return false;
+    if (current.nickname !== original.nickname || current.time !== original.time
+        || current.slotId !== original.slotId
+        || ledgerFingerprint(current.slotSnapshot || null) !== ledgerFingerprint(original.slotSnapshot || null)) return false;
+    if (current.feeStatus === 'dismissed') return false;
+    if (current.feeRecordId && current.feeRecordId !== recordId) return false;
+    return !(current.feeStatus === 'posted' && !current.feeRecordId);
+}
+
 async function importPendingLessons(lessons, options = {}) {
     const auto = options.auto === true;
     let checked = Array.isArray(lessons) ? lessons.filter(Boolean) : [];
@@ -4068,11 +4116,13 @@ async function importPendingLessons(lessons, options = {}) {
     if (!auto && !confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return false;
 
     // 入账前重新读取预约，避免把已经删除、取消或尚未完成的旧页面数据写进账本。
+    let latestReservations;
     try {
-        const latestReservations = (await db.ref(`years/${activeYear}/reservations`).once('value')).val() || {};
+        latestReservations = (await db.ref(`years/${activeYear}/reservations`).once('value')).val() || {};
         checked = checked.filter(lesson => {
             const current = latestReservations[lesson.resKey];
-            return current && current.status === 'completed';
+            return current && current.status === 'completed'
+                && reservationImportFingerprint(current) === lesson.reservationFingerprint;
         });
     } catch (error) {
         console.error('入账前复核预约失败:', error);
@@ -4147,7 +4197,8 @@ async function importPendingLessons(lessons, options = {}) {
                     return { ...item, committed: false, reason: 'amount-not-ready' };
                 }
                 const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
-                    if (!current || current.status !== 'completed') return;
+                    const original = latestReservations[item.lesson.resKey];
+                    if (!canPostImportedReservation(current, original, item.recordId)) return;
                     current.feeStatus = 'posted';
                     current.feePostedAt = postedAt;
                     current.feeRecordId = item.recordId;

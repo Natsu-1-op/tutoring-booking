@@ -58,6 +58,14 @@ test('duplicate students are rejected after whitespace normalization', () => {
     assert.equal(result.whitelist['new-key'], undefined);
 });
 
+test('adding a student preserves an existing array-form whitelist', () => {
+    const context = createContext();
+    const result = context.addStudentToWhitelistSnapshot(['小明', '小红'], 'new-key', '小华');
+    assert.equal(result.whitelist['0'], '小明');
+    assert.equal(result.whitelist['1'], '小红');
+    assert.equal(result.whitelist['new-key'], '小华');
+});
+
 test('student creation no longer opens a transaction on the entire academic-year node', () => {
     const addFunction = extractFunction('addNewStudentToWhitelist');
 

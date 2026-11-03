@@ -360,7 +360,13 @@ async function verifyAndStartExam() {
             document.getElementById('auth-overlay').style.display = 'none';
             document.getElementById('exam-app').style.display = 'flex';
             initExamEngine(false);
+        }).catch(error => {
+            console.error('读取考试名单失败:', error);
+            document.getElementById('auth-error').textContent = '无法读取学生名单，请检查网络后重试。';
         });
+    }).catch(error => {
+        console.error('读取考试交卷状态失败:', error);
+        document.getElementById('auth-error').textContent = '无法读取交卷状态，请检查网络后重试。';
     });
 }
 
@@ -654,7 +660,7 @@ function startCountUpTimer() {
             clearInterval(timerInterval);
             timerEl.textContent = "考试时间到！";
             timerEl.style.color = "red";
-            alert("考试时间已到，已自动交卷并生成答案包。");
+            alert("考试时间已到，正在尝试交卷，请按提示确认答案文件已保存。");
             triggerManualSubmit(true);
             return;
         }

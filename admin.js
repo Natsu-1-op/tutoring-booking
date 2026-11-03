@@ -177,7 +177,7 @@
 
     // 只处理名单本身，避免在新增一名同学时重写整学年（排班、预约和加密账本都在该节点下）。
     function addStudentToWhitelistSnapshot(currentWhitelist, studentKey, name) {
-        const next = currentWhitelist && typeof currentWhitelist === 'object' && !Array.isArray(currentWhitelist)
+        const next = currentWhitelist && typeof currentWhitelist === 'object'
             ? { ...currentWhitelist }
             : {};
         const normalizedName = normalizeStudentName(name);

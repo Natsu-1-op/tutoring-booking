@@ -202,7 +202,15 @@ test('rate changes update every affected encrypted year before local success', a
                         return match ? remote[match[1]].feeVault : null;
                     }
                 }),
-                update: async updates => { written = updates; }
+                transaction: async updater => {
+                    const match = String(pathname || '').match(/^years\/(\d{4})\/feeVault$/);
+                    const next = updater(match ? remote[match[1]].feeVault : null);
+                    if (next === undefined) return { committed: false };
+                    written = written || {};
+                    written[pathname] = next;
+                    remote[match[1]].feeVault = next;
+                    return { committed: true };
+                }
             };
         }
     };
@@ -215,6 +223,7 @@ test('rate changes update every affected encrypted year before local success', a
         ensureFeePassphrase: async () => true,
         getYearSyncState: () => ({ dirty: false }),
         hasCloudConflictState: () => false,
+        getCloudConflict: () => null,
         readRemoteLedgerData: async (year, vault) => JSON.parse(JSON.stringify(vault.data)),
         encryptFeeData: async value => ({ cipher: JSON.stringify(value), salt: 'salt', kdfIterations: 250000 }),
         vaultRefFor: year => db.ref(`years/${year}/feeVault`),
@@ -240,4 +249,82 @@ test('legacy manual records without times block silent duplicate charging', () =
     };
     const conflicts = context.findLessonConflicts({ studentName: '小明', date: '2026-02-10', startTime: '14:00', endTime: '15:00', hours: 1 }, false);
     assert.equal(conflicts[0].kind, 'exact');
+});
+
+test('a concurrent ledger update is not overwritten by a rate change', async () => {
+    const vault = { revision: 1, cipher: 'original' };
+    let wrote = false;
+    const context = createContext({
+        db: { ref: () => ({ once: async () => ({ val: () => ({ 2026: { feeVault: vault } }) }) }) },
+        cloudPushChain: Promise.resolve(true), cloudVersionsByYear: {}, cloudDecryptedByYear: {},
+        ensureCloudReady: async () => true, ensureFeePassphrase: async () => true,
+        getYearSyncState: () => ({ dirty: false, changeId: 1 }),
+        hasCloudConflictState: () => false, getCloudConflict: () => null,
+        readRemoteLedgerData: async () => ({ students: [{ id: 's1', name: '小明', rate: 150 }], records: [] }),
+        encryptFeeData: async () => ({ cipher: 'new', salt: 'salt', kdfIterations: 250000 }),
+        vaultRefFor: () => ({
+            once: async () => ({ val: () => vault }),
+            transaction: async updater => {
+                const next = updater({ revision: 2, cipher: 'other-device' });
+                wrote = next !== undefined;
+                return { committed: wrote };
+            }
+        }),
+        markYearSynced: () => {}
+    });
+    vm.runInContext(extractFunction('syncStudentRateAcrossYears'), context);
+    await assert.rejects(context.syncStudentRateAcrossYears(
+        { id: 's1', name: '小明', rate: 150 }, { id: 's1', name: '小明', rate: 200 }
+    ), /账本已变化/);
+    assert.equal(wrote, false);
+});
+
+test('a cross-year conflict reports which earlier year already changed', async () => {
+    const vault2025 = { revision: 1, cipher: 'old-2025' };
+    const vault2026 = { revision: 1, cipher: 'old-2026' };
+    const writtenYears = [];
+    const context = createContext({
+        db: { ref: () => ({ once: async () => ({ val: () => ({ 2025: { feeVault: vault2025 }, 2026: { feeVault: vault2026 } }) }) }) },
+        cloudPushChain: Promise.resolve(true), cloudVersionsByYear: {}, cloudDecryptedByYear: {},
+        ensureCloudReady: async () => true, ensureFeePassphrase: async () => true,
+        getYearSyncState: () => ({ dirty: false, changeId: 1 }),
+        hasCloudConflictState: () => false, getCloudConflict: () => null,
+        readRemoteLedgerData: async () => ({ students: [{ id: 's1', name: '小明', rate: 150 }], records: [] }),
+        encryptFeeData: async () => ({ cipher: 'new', salt: 'salt', kdfIterations: 250000 }),
+        vaultRefFor: year => ({
+            once: async () => ({ val: () => year === '2025' ? vault2025 : vault2026 }),
+            transaction: async updater => {
+                const value = year === '2025' ? vault2025 : { revision: 2, cipher: 'other-device' };
+                const next = updater(value);
+                if (next === undefined) return { committed: false };
+                writtenYears.push(year);
+                return { committed: true };
+            }
+        }),
+        markYearSynced: () => {}
+    });
+    vm.runInContext(extractFunction('syncStudentRateAcrossYears'), context);
+    await assert.rejects(context.syncStudentRateAcrossYears(
+        { id: 's1', name: '小明', rate: 150 }, { id: 's1', name: '小明', rate: 200 }
+    ), /已更新 2025 年/);
+    assert.deepEqual(writtenYears, ['2025']);
+});
+
+test('posting an import refuses a changed booking or a different ledger link', () => {
+    const context = createContext();
+    vm.runInContext(extractFunction('canPostImportedReservation'), context);
+    const original = { status: 'completed', nickname: '小明', time: '6/19 09:00-10:00', slotId: 's1', feeStatus: 'pending' };
+    assert.equal(context.canPostImportedReservation({ ...original }, original, 'r1'), true);
+    assert.equal(context.canPostImportedReservation({ ...original, feeStatus: 'posted', feeRecordId: 'r2' }, original, 'r1'), false);
+    assert.equal(context.canPostImportedReservation({ ...original, feeStatus: 'dismissed' }, original, 'r1'), false);
+    assert.equal(context.canPostImportedReservation({ ...original, time: '6/19 10:00-11:00' }, original, 'r1'), false);
+});
+
+test('the import snapshot changes when the reservation is modified', () => {
+    const context = createContext();
+    vm.runInContext(extractFunction('reservationImportFingerprint'), context);
+    const original = { status: 'completed', nickname: '小明', time: '6/19 09:00-10:00', slotId: 's1' };
+    assert.equal(context.reservationImportFingerprint(original), context.reservationImportFingerprint({ ...original }));
+    assert.notEqual(context.reservationImportFingerprint(original), context.reservationImportFingerprint({ ...original, time: '6/19 10:00-11:00' }));
+    assert.notEqual(context.reservationImportFingerprint(original), context.reservationImportFingerprint({ ...original, feeStatus: 'posted', feeRecordId: 'other' }));
 });

@@ -302,7 +302,7 @@ function downloadBookingReceipt() {
 async function submitBooking() {
     if (isSubmitting) return;
 
-    const nickname = normalizeStudentName(document.getElementById('nickname').value);
+    let nickname = normalizeStudentName(document.getElementById('nickname').value);
     const accessCode = document.getElementById('access-code').value.trim();
     const selectedSlot = document.querySelector('input[name="slot"]:checked');
 
@@ -336,12 +336,13 @@ async function submitBooking() {
             return;
         }
         const approvedName = Object.values(whitelist)
-            .map(normalizeStudentName)
-            .find(name => name === nickname);
+            .find(name => typeof name === 'string' && normalizeStudentName(name) === nickname);
         if (!approvedName) {
             showMessage('预约拦截：您不在本期专业课辅导学生名单中，请输入标准姓名！', false);
             return;
         }
+        // 旧名单可能保留了连续空格。查询历史课时和写入预约时沿用名单原名。
+        nickname = approvedName;
 
         const existing = (await SystemRouter.getReservationsRef(year)
             .orderByChild('nickname').equalTo(nickname).once('value')).val();
@@ -496,7 +497,7 @@ function switchView(view) {
 }
 
 function loadMyHistory() {
-    const searchName = document.getElementById('history-search-name').value.trim();
+    let searchName = document.getElementById('history-search-name').value.trim();
     const searchCode = document.getElementById('history-search-code').value.trim().toUpperCase();
     const container = document.getElementById('history-container');
     
@@ -507,10 +508,15 @@ function loadMyHistory() {
 
     container.innerHTML = '<p class="msg-hint">正在查询...</p>';
 
-    SystemRouter.getReservationsRef(SystemRouter.activeYear)
-        .orderByChild('nickname')
-        .equalTo(searchName)
-        .once('value').then((snapshot) => {
+    db.ref(`years/${SystemRouter.activeYear}/studentWhitelist`).once('value').then(snapshot => {
+        const names = Object.values(snapshot.val() || {});
+        const match = names.find(name => typeof name === 'string'
+            && normalizeStudentName(name) === normalizeStudentName(searchName));
+        if (match) searchName = match;
+    }).catch(() => {
+        // 名单暂不可用或学生已移除时，仍允许用原姓名和凭证查询。
+    }).then(() => SystemRouter.getReservationsRef(SystemRouter.activeYear)
+        .orderByChild('nickname').equalTo(searchName).once('value')).then((snapshot) => {
             const reservations = snapshot.val();
             const isAuthPassed = reservations ? Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode) : false;
             if (!isAuthPassed) {
