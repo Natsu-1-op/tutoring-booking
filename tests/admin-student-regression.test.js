@@ -131,3 +131,14 @@ test('student creation writes only the whitelist and optional hour limit paths',
     assert.equal(elements['btn-add-student'].disabled, false);
     assert.deepEqual(alerts, []);
 });
+
+test('legacy slot ownership is assigned only if the slot is still unchanged', () => {
+    const context = {};
+    vm.createContext(context);
+    vm.runInContext(extractFunction('attachLegacySlotOwner'), context);
+    const slot = { time: '11/4 09:00-10:00', reserved: true, status: 'active' };
+    assert.equal(context.attachLegacySlotOwner(slot, slot.time, 'r1').reservationId, 'r1');
+    assert.equal(context.attachLegacySlotOwner({ ...slot, time: '11/4 10:00-11:00' }, slot.time, 'r1'), undefined);
+    assert.equal(context.attachLegacySlotOwner({ ...slot, reservationId: 'other' }, slot.time, 'r1'), undefined);
+    assert.equal(context.attachLegacySlotOwner({ ...slot, reserved: false }, slot.time, 'r1'), undefined);
+});

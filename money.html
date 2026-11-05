@@ -110,6 +110,8 @@
             <div class="flex gap-2 flex-wrap">
                 <button id="feeLedgerRetryButton" type="button" onclick="retryCloudLedgerLoad()" class="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 text-sm font-medium">刷新重试</button>
                 <button id="feeLedgerForceUploadButton" type="button" onclick="forceUploadCloud()" class="hidden bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-2 text-sm font-medium">明确上传本机账本</button>
+                <button type="button" onclick="retryWithFeePassphrase()" class="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium">重新输入云端口令</button>
+                <button type="button" onclick="recoverFeePassphraseRotation()" class="bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium">恢复中断的口令更新</button>
             </div>
             <div id="feeLedgerConflictActions" class="hidden mt-3 flex gap-2 flex-wrap">
                 <button type="button" onclick="resolveCloudConflict('remote')" class="text-xs bg-white border border-amber-300 rounded px-2 py-1">采用云端版本</button>
@@ -1546,15 +1548,18 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-11-03a'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-11-03b'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
+const FEE_ROTATION_JOURNAL_KEY = 'fee_vault_rotation_wrapped_v1';
 const FEE_PASSPHRASE_DB = 'class-optic-fee-vault';
 const FEE_PASSPHRASE_STORE = 'device-secrets';
 let cloudVersionsByYear = {};
 let cloudDecryptedByYear = {};
 let lastLocalPersistError = '';
 let feePassphraseChanging = false;
+let feeRotationPreparing = false;
+let feeRotationInProgress = false;
 let feePassphrasePromise = null;
 
 function getYearSyncState(year) {
@@ -1886,6 +1891,9 @@ async function encryptFeeDataWithPass(obj, pass) {
 async function decryptFeeData(b64, saltB64, iterationValue) {
     const pass = await ensureFeePassphrase();
     if (!pass) throw new Error('未设置加密口令');
+    return decryptFeeDataWithPass(b64, saltB64, iterationValue, pass);
+}
+async function decryptFeeDataWithPass(b64, saltB64, iterationValue, pass) {
     const iterations = saltB64 ? Number(iterationValue) : 100000;
     if (!Number.isInteger(iterations) || iterations < 100000 || iterations > 1000000) throw new Error('云端加密参数不合法');
     const salt = saltB64
@@ -2128,7 +2136,33 @@ function finishFeeLedgerLoad() {
 async function retryCloudLedgerLoad() {
     if (!window.__moneyPageAccessGranted || cloudLedgerLoading) return;
     showFeeLedgerPending('正在重新读取云端账本…');
+    if (!await resumeFeePassphraseRotation()) return;
     await pullCloud({ retry: true });
+}
+
+async function retryWithFeePassphrase() {
+    if (!window.__moneyPageAccessGranted || cloudLedgerLoading || feeRotationInProgress) return;
+    if (localStorage.getItem(FEE_ROTATION_JOURNAL_KEY)) {
+        showFeeLedgerPending('本机有尚未完成的口令更新，请先点击刷新重试。');
+        return;
+    }
+    const input = prompt('请输入当前云端账本口令（取消则退出）');
+    if (input === null || !input.trim()) return;
+    const pass = input.trim();
+    showFeeLedgerPending('正在验证云端口令…');
+    try {
+        if (!await ensureCloudReady()) throw new Error('云端未连接');
+        const vault = (await vaultRefFor(activeYear).once('value')).val();
+        if (!vault || !vault.cipher) throw new Error('当前年份没有可验证的云端账本');
+        await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, pass);
+        sessionStorage.setItem(FEE_PASSPHRASE_KEY, pass);
+        await rememberFeePassphrase(pass);
+        delete cloudDecryptedByYear[activeYear];
+        await pullCloud({ retry: true });
+    } catch (error) {
+        console.error('验证云端账本口令失败:', error);
+        showFeeLedgerPending('无法使用该口令读取当前年份账本，请确认口令及网络后重试。本机账本未被覆盖。');
+    }
 }
 
 function cloudConflictStorageKey(year) {
@@ -2182,10 +2216,13 @@ async function resolveCloudConflict(mode) {
     if (!activeYear) return;
     if (mode === 'local') {
         await forceUploadCloud();
-        return;
-    }
-    if (mode === 'remote') {
+    } else if (mode === 'remote') {
         await pullCloud({ acceptRemote: true });
+    } else return;
+    if (!getCloudConflict(activeYear)) {
+        let pendingRotation = false;
+        try { pendingRotation = !!localStorage.getItem(FEE_ROTATION_JOURNAL_KEY); } catch (e) {}
+        if (pendingRotation && await resumeFeePassphraseRotation()) await pullCloud({ retry: true });
     }
 }
 
@@ -2285,6 +2322,10 @@ async function pushCloudNow(job, options) {
             let conflictReason = '';
             const result = await ref.transaction(existing => {
                 conflictReason = '';
+                if (!options.force && !known && existing) {
+                    conflictReason = 'remote-created';
+                    return;
+                }
                 if (!options.force && existing && known && Number(existing.revision || 0) !== Number(known.revision || 0)) {
                     conflictReason = 'remote-changed';
                     return;
@@ -2346,7 +2387,11 @@ async function pushCloudNow(job, options) {
 }
 
 function pushCloud() {
-    if (feePassphraseChanging) return cloudPushChain;
+    if (feePassphraseChanging) {
+        // 不能把口令轮换期间的本机修改误报为已上传；保留脏标记供恢复流程处理。
+        cloudPushChain = cloudPushChain.then(() => false, () => false);
+        return cloudPushChain;
+    }
     // 删除流程需要先排空已有写入，再原子删除并写墓碑；此期间不应把新本地修改误报为已同步。
     if (cloudDeleteInProgress) return Promise.resolve(false);
     const year = activeYear;
@@ -2937,7 +2982,7 @@ async function pullCloud(options) {
         } catch (e) {
             console.error('云端拉取失败', e);
             const message = e && e.code === 'fee-passphrase-mismatch'
-                ? '云端账本口令与本机不一致。已保留本机账本，不会覆盖云端；请在“云端口令”中输入正确口令后重试。'
+                ? '云端账本口令与本机不一致。已保留本机账本，不会覆盖云端；请点击“重新输入云端口令”后重试。'
                 : '云端账本读取失败：' + (e.message || e) + '。本机待同步账本已保留。';
             showFeeLedgerPending(message);
             showToast(message);
@@ -3871,6 +3916,10 @@ async function buildReconciliationReservationUpdates(item, canonical, recordId, 
             const slot = slotSnapshot.val();
             if (slot && slot.reservationId === item.resKey) {
                 updates[`years/${activeYear}/slots/${reservation.slotId}/time`] = formattedTime;
+                // 与排班及预约同一提交，标明这是教师主动核对已入账课程。
+                if (reservation.feeStatus === 'posted' || reservation.feeRecordId) {
+                    updates[`years/${activeYear}/metadata/feeReconcileToken`] = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                }
             } else {
                 warnings.push('排班所有权发生变化，未修改原排班时间');
             }
@@ -4478,75 +4527,177 @@ async function restoreDismissed(idx) {
     await refreshPendingList();
 }
 
-async function changeFeePassphrase() {
-    const oldPass = await ensureFeePassphrase();
-    if (!oldPass) return;
-    let oldRememberedCipher = null;
-    try { oldRememberedCipher = localStorage.getItem(FEE_REMEMBERED_CIPHER_KEY); } catch (e) {}
-    const pass = prompt('输入新的云端加密口令（留空 = 取消）：');
-    if (pass === null) return;
-    if (!pass.trim()) { showToast('已取消'); return; }
-    const newPass = pass.trim();
+async function resumeFeePassphraseRotation() {
+    if (feeRotationInProgress) return false;
+    let wrapped;
+    try { wrapped = localStorage.getItem(FEE_ROTATION_JOURNAL_KEY); } catch (e) {
+        showFeeLedgerPending('无法读取本机口令恢复记录，请检查浏览器存储设置后重试。');
+        return false;
+    }
+    if (!wrapped) return true;
+    feeRotationInProgress = true;
     feePassphraseChanging = true;
+    showFeeLedgerPending('正在恢复云端口令更新，请保持页面打开…');
     try {
-        // 先完成旧口令下的待同步修改，再一次性轮换所有已有年份。
-        const queued = await cloudPushChain.catch(() => false);
-        if (!queued || getYearSyncState(activeYear).dirty) throw new Error('当前账本仍有待同步修改，请先完成同步');
-        const yearsSnapshot = await db.ref('years').once('value');
-        const yearsValue = yearsSnapshot.val() || {};
-        const vaultEntries = Object.keys(yearsValue).map(year => ({ year, vault: yearsValue[year] && yearsValue[year].feeVault }))
-            .filter(entry => entry.vault && entry.vault.cipher);
-        const decryptedEntries = [];
-        for (const entry of vaultEntries) {
-            const decrypted = await decryptFeeData(entry.vault.cipher, entry.vault.salt, entry.vault.kdfIterations);
-            decryptedEntries.push({ ...entry, data: decrypted });
-        }
-        sessionStorage.setItem(FEE_PASSPHRASE_KEY, newPass);
-        showToast(`正在重新加密 ${decryptedEntries.length || 0} 个年份…`);
-        const encryptedEntries = [];
-        for (const entry of decryptedEntries) {
-            const encrypted = await encryptFeeDataWithPass(entry.data, newPass);
-            encryptedEntries.push({ ...entry, encrypted });
-        }
-
-        // 写入前再核对 revision 和密文，避免轮换期间覆盖另一台设备的新修改。
-        const updates = {};
-        const rotatedAt = Date.now();
-        for (const entry of encryptedEntries) {
-            const latest = (await vaultRefFor(entry.year).once('value')).val();
-            if (!latest || Number(latest.revision || 0) !== Number(entry.vault.revision || 0)
-                || String(latest.cipher || '') !== String(entry.vault.cipher || '')) {
-                throw new Error(`${entry.year} 年账本在口令更新期间发生变化，请重试`);
+        const journal = JSON.parse(await unwrapRememberedFeePassphrase(wrapped));
+        if (!journal || !journal.oldPass || !journal.newPass) throw new Error('本机恢复记录无效');
+        if (!await ensureCloudReady()) throw new Error('云端未连接');
+        await cloudPushChain.catch(() => false);
+        if (getYearSyncState(activeYear).dirty) {
+            // 先安全提交中断前的本机修改；若云端已变，正常 CAS 会停止并保留本机 WAL。
+            const activeVault = (await vaultRefFor(activeYear).once('value')).val();
+            let currentPass = journal.oldPass;
+            if (activeVault && activeVault.cipher) {
+                try {
+                    await decryptFeeDataWithPass(activeVault.cipher, activeVault.salt, activeVault.kdfIterations, journal.newPass);
+                    currentPass = journal.newPass;
+                } catch (e) {
+                    await decryptFeeDataWithPass(activeVault.cipher, activeVault.salt, activeVault.kdfIterations, journal.oldPass);
+                }
             }
-            updates[`years/${entry.year}/feeVault`] = {
-                schemaVersion: 3,
-                updatedAt: rotatedAt,
-                revision: Number(entry.vault.revision || 0) + 1,
-                cipher: entry.encrypted.cipher,
-                salt: entry.encrypted.salt,
-                kdfIterations: entry.encrypted.kdfIterations
-            };
+            sessionStorage.setItem(FEE_PASSPHRASE_KEY, currentPass);
+            feePassphraseChanging = false;
+            const saved = await pushCloud();
+            feePassphraseChanging = true;
+            if (!saved || getYearSyncState(activeYear).dirty) throw new Error('本机账本尚未同步，请先处理多设备冲突');
         }
-        if (Object.keys(updates).length > 0) await db.ref().update(updates);
-        encryptedEntries.forEach(entry => {
-            const version = { revision: Number(entry.vault.revision || 0) + 1, updatedAt: rotatedAt };
-            cloudVersionsByYear[entry.year] = version;
-            cloudDecryptedByYear[entry.year] = { ...version, data: cloneForCloud(entry.data) };
-            if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version);
-        });
-        const remembered = await rememberFeePassphrase(newPass);
-        if (!remembered) clearRememberedFeePassphrase();
-        showToast(`云端口令已更新，共重新加密 ${encryptedEntries.length} 个年份`);
-    } catch (e) {
-        sessionStorage.setItem(FEE_PASSPHRASE_KEY, oldPass);
-        try {
-            if (oldRememberedCipher) localStorage.setItem(FEE_REMEMBERED_CIPHER_KEY, oldRememberedCipher);
-            else clearRememberedFeePassphrase();
-        } catch (restoreError) {}
-        console.error('云端口令更新失败:', e);
-        showToast(`新口令上传失败，已恢复原口令：${e.message || e}`);
+        const years = (await db.ref('years').once('value')).val() || {};
+        const vaultYears = Object.keys(years).filter(year => years[year] && years[year].feeVault && years[year].feeVault.cipher);
+        vaultYears.sort((a, b) => Number(a === String(activeYear)) - Number(b === String(activeYear)));
+        for (const year of vaultYears) {
+            const ref = vaultRefFor(year);
+            let done = false;
+            for (let attempt = 0; attempt < 3 && !done; attempt++) {
+                const vault = (await ref.once('value')).val();
+                if (!vault || !vault.cipher) throw new Error(`${year} 年账本已被删除`);
+                let decoded;
+                try {
+                    decoded = await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, journal.newPass);
+                    done = true;
+                    continue;
+                } catch (e) {}
+                try { decoded = await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, journal.oldPass); }
+                catch (e) { throw new Error(`${year} 年账本无法使用新旧口令读取`); }
+                const encrypted = await encryptFeeDataWithPass(decoded, journal.newPass);
+                const updatedAt = Date.now();
+                const payload = { schemaVersion: 3, updatedAt, revision: Number(vault.revision || 0) + 1,
+                    cipher: encrypted.cipher, salt: encrypted.salt, kdfIterations: encrypted.kdfIterations };
+                const result = await ref.transaction(current => {
+                    if (!current || Number(current.revision || 0) !== Number(vault.revision || 0)
+                        || current.cipher !== vault.cipher || current.salt !== vault.salt
+                        || current.kdfIterations !== vault.kdfIterations) return;
+                    return payload;
+                });
+                if (!result.committed) continue;
+                // 不提前改变本机基线：轮换期间若有新修改，必须经版本冲突检查。
+                delete cloudDecryptedByYear[year];
+                done = true;
+            }
+            if (!done) throw new Error(`${year} 年账本持续发生变化`);
+        }
+        // 再次读取，确认轮换期间没有新增或回退的年份。
+        const finalYears = (await db.ref('years').once('value')).val() || {};
+        for (const year of vaultYears) {
+            if (!finalYears[year] || !finalYears[year].feeVault || !finalYears[year].feeVault.cipher) {
+                throw new Error(`${year} 年账本在口令更新期间被删除`);
+            }
+        }
+        for (const year of Object.keys(finalYears)) {
+            const vault = finalYears[year] && finalYears[year].feeVault;
+            if (vault && vault.cipher) await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, journal.newPass);
+        }
+        if (getYearSyncState(activeYear).dirty) throw new Error('本机账本在更新期间发生变化，请保留本机数据并联系管理员处理');
+        sessionStorage.setItem(FEE_PASSPHRASE_KEY, journal.newPass);
+        if (!await rememberFeePassphrase(journal.newPass)) throw new Error('无法保存本机恢复口令');
+        localStorage.removeItem(FEE_ROTATION_JOURNAL_KEY);
+        showToast('云端口令已更新');
+        return true;
+    } catch (error) {
+        console.error('云端口令更新待恢复:', error);
+        const conflict = activeYear && getCloudConflict(activeYear);
+        showFeeLedgerPending(`云端口令更新尚未完成：${error.message || error}。本机已保存加密恢复信息，请保留新旧口令、不要清理本机浏览器数据，检查网络后点击重试。`, { conflict: !!conflict });
+        return false;
     } finally {
         feePassphraseChanging = false;
+        feeRotationInProgress = false;
+    }
+}
+
+async function changeFeePassphrase() {
+    if (feeRotationPreparing || feeRotationInProgress || feePassphraseChanging) return;
+    feeRotationPreparing = true;
+    try { await changeFeePassphraseImpl(); }
+    finally { feeRotationPreparing = false; }
+}
+
+// 设备丢失恢复记录时，使用两次口令验证所有年份，再建立本机加密恢复记录。
+async function recoverFeePassphraseRotation() {
+    if (feeRotationPreparing || feeRotationInProgress || feePassphraseChanging) return;
+    if (localStorage.getItem(FEE_ROTATION_JOURNAL_KEY)) return retryCloudLedgerLoad();
+    const oldInput = prompt('请输入更新前的云端账本口令（取消则退出）');
+    if (oldInput === null || !oldInput.trim()) return;
+    const newInput = prompt('请输入更新后的云端账本口令（取消则退出）');
+    if (newInput === null || !newInput.trim()) return;
+    const oldPass = oldInput.trim(), newPass = newInput.trim();
+    if (oldPass === newPass) return alert('新旧口令相同，无需恢复。');
+    feeRotationPreparing = true;
+    showFeeLedgerPending('正在验证各年份账本口令…');
+    try {
+        if (!await ensureCloudReady()) throw new Error('云端未连接');
+        const years = (await db.ref('years').once('value')).val() || {};
+        let count = 0;
+        for (const year of Object.keys(years)) {
+            const vault = years[year] && years[year].feeVault;
+            if (!vault || !vault.cipher) continue;
+            count++;
+            try { await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, newPass); }
+            catch (e) {
+                try { await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, oldPass); }
+                catch (error) { throw new Error(`${year} 年账本无法使用新旧口令读取，请检查口令`); }
+            }
+        }
+        if (!count) throw new Error('云端没有可恢复的账本');
+        const wrapped = await wrapRememberedFeePassphrase(JSON.stringify({ oldPass, newPass }));
+        localStorage.setItem(FEE_ROTATION_JOURNAL_KEY, wrapped);
+        if (await resumeFeePassphraseRotation()) await pullCloud({ retry: true });
+    } catch (error) {
+        console.error('无法恢复云端口令更新:', error);
+        showFeeLedgerPending(`无法恢复口令更新：${error.message || error}。本机数据已保留，请核对口令后重试。`);
+    } finally { feeRotationPreparing = false; }
+}
+
+async function changeFeePassphraseImpl() {
+    const oldPass = await ensureFeePassphrase();
+    if (!oldPass) return;
+    const pass = prompt('输入新的云端加密口令（留空 = 取消）。\n更新完成前请保留新旧口令，不要清理本机浏览器数据。');
+    if (pass === null || !pass.trim()) return;
+    const newPass = pass.trim();
+    if (newPass === oldPass) return showToast('新口令与原口令相同');
+    showFeeLedgerPending('正在准备更新云端口令…');
+    try {
+        if (!await ensureCloudReady()) throw new Error('云端未连接');
+        const queued = await cloudPushChain.catch(() => false);
+        if (!queued || getYearSyncState(activeYear).dirty) throw new Error('当前账本仍有待同步修改，请先完成同步');
+        const years = (await db.ref('years').once('value')).val() || {};
+        for (const year of Object.keys(years)) {
+            const vault = years[year] && years[year].feeVault;
+            if (vault && vault.cipher) await decryptFeeDataWithPass(vault.cipher, vault.salt, vault.kdfIterations, oldPass);
+        }
+        if (!await cloudPushChain.catch(() => false) || getYearSyncState(activeYear).dirty) {
+            throw new Error('本机账本在准备期间发生变化，请先完成同步');
+        }
+        const wrapped = await wrapRememberedFeePassphrase(JSON.stringify({ oldPass, newPass }));
+        localStorage.setItem(FEE_ROTATION_JOURNAL_KEY, wrapped);
+        if (await resumeFeePassphraseRotation()) await pullCloud({ retry: true });
+    } catch (error) {
+        console.error('无法开始更新云端口令:', error);
+        let pending = true;
+        try { pending = !!localStorage.getItem(FEE_ROTATION_JOURNAL_KEY); } catch (e) {}
+        if (pending) showFeeLedgerPending(`云端口令更新可能尚未完成：${error.message || error}。请保留新旧口令并点击刷新重试。`);
+        else {
+            finishFeeLedgerLoad();
+            alert(`未开始更新云端口令：${error.message || error}`);
+        }
     }
 }
 
@@ -4580,7 +4731,7 @@ function onReady() {
     data.updatedAt = data.updatedAt || 0;
     data.lessonOverrides = data.lessonOverrides || {};
     data.dismissedLessons = data.dismissedLessons || [];
-    pullCloud();
+    resumeFeePassphraseRotation().then(ok => { if (ok) pullCloud(); });
 }
 function initializeMoneyPageAccess() {
     setupMoneyPageGate();

@@ -328,3 +328,163 @@ test('the import snapshot changes when the reservation is modified', () => {
     assert.notEqual(context.reservationImportFingerprint(original), context.reservationImportFingerprint({ ...original, time: '6/19 10:00-11:00' }));
     assert.notEqual(context.reservationImportFingerprint(original), context.reservationImportFingerprint({ ...original, feeStatus: 'posted', feeRecordId: 'other' }));
 });
+
+test('interrupted password rotation resumes without replacing newer vaults', async () => {
+    const vaults = {
+        2025: { revision: 1, cipher: 'old:2025', salt: 's', kdfIterations: 250000 },
+        2026: { revision: 1, cipher: 'old:2026', salt: 's', kdfIterations: 250000 }
+    };
+    let journal = JSON.stringify({ oldPass: 'old', newPass: 'new' });
+    let block2026 = true;
+    let remembered = '';
+    const context = createContext({
+        FEE_ROTATION_JOURNAL_KEY: 'rotation', FEE_PASSPHRASE_KEY: 'pass',
+        feePassphraseChanging: false, feeRotationInProgress: false, cloudPushChain: Promise.resolve(true),
+        cloudVersionsByYear: {}, cloudDecryptedByYear: {},
+        localStorage: { getItem: () => journal, removeItem: () => { journal = null; } },
+        sessionStorage: { setItem: () => {} },
+        unwrapRememberedFeePassphrase: async x => x,
+        showFeeLedgerPending: () => {}, showToast: () => {},
+        ensureCloudReady: async () => true, getYearSyncState: () => ({ dirty: false }), getCloudConflict: () => null,
+        db: { ref: () => ({ once: async () => ({ val: () => Object.fromEntries(Object.entries(vaults).map(([year, vault]) => [year, { feeVault: vault }])) }) }) },
+        vaultRefFor: year => ({
+            once: async () => ({ val: () => vaults[year] }),
+            transaction: async update => {
+                if (year === '2026' && block2026) return { committed: false };
+                const next = update(vaults[year]);
+                if (!next) return { committed: false };
+                vaults[year] = next;
+                return { committed: true };
+            }
+        }),
+        decryptFeeDataWithPass: async (cipher, salt, iterations, pass) => {
+            if (!cipher.startsWith(`${pass}:`)) throw new Error('wrong pass');
+            return { year: cipher.split(':')[1] };
+        },
+        encryptFeeDataWithPass: async (value, pass) => ({ cipher: `${pass}:${value.year}`, salt: 's', kdfIterations: 250000 }),
+        rememberFeePassphrase: async pass => { remembered = pass; return true; }
+    });
+    vm.runInContext(extractFunction('resumeFeePassphraseRotation'), context);
+    assert.equal(await context.resumeFeePassphraseRotation(), false);
+    assert.equal(vaults[2025].cipher, 'new:2025');
+    assert.equal(vaults[2026].cipher, 'old:2026');
+    assert.ok(journal);
+    block2026 = false;
+    assert.equal(await context.resumeFeePassphraseRotation(), true);
+    assert.equal(vaults[2025].revision, 2);
+    assert.equal(vaults[2026].cipher, 'new:2026');
+    assert.equal(remembered, 'new');
+    assert.equal(journal, null);
+});
+
+test('fee vault encryption can be decrypted only with the matching password', async () => {
+    const context = createContext({
+        crypto: require('node:crypto').webcrypto,
+        TextEncoder, TextDecoder, Uint8Array, btoa, atob,
+        FEE_KDF_ITERATIONS: 100000, LEGACY_FEE_SALT: 'class-optic-fee-vault-v1'
+    });
+    ['deriveFeeKey', 'bufToB64', 'encryptFeeDataWithPass', 'decryptFeeDataWithPass']
+        .forEach(name => vm.runInContext(extractFunction(name), context));
+    const encrypted = await context.encryptFeeDataWithPass({ records: [{ id: 'r1', total: 200 }] }, 'old-pass');
+    const decrypted = await context.decryptFeeDataWithPass(encrypted.cipher, encrypted.salt, encrypted.kdfIterations, 'old-pass');
+    assert.equal(decrypted.records[0].total, 200);
+    await assert.rejects(context.decryptFeeDataWithPass(encrypted.cipher, encrypted.salt, encrypted.kdfIterations, 'wrong-pass'));
+});
+
+test('first upload does not overwrite a vault created during the transaction', async () => {
+    let overwritten = false;
+    let conflict = null;
+    const ref = {
+        once: async () => ({ val: () => null }),
+        transaction: async update => {
+            const next = update({ revision: 1, cipher: 'other-device' });
+            overwritten = next !== undefined;
+            return { committed: overwritten };
+        }
+    };
+    const context = createContext({
+        db: { ref: () => ({ once: async () => ({ val: () => null }) }) },
+        cloudDeleteInProgress: false, cloudVersionsByYear: {}, cloudDecryptedByYear: {},
+        getCloudConflict: () => null, vaultRefFor: () => ref,
+        encryptFeeData: async () => ({ cipher: 'mine', salt: 's', kdfIterations: 250000 }),
+        setCloudConflict: (year, value) => { conflict = value; },
+        markYearSyncError: () => {}, showToast: () => {}, setLedgerSaveStatus: () => {},
+        lastCloudPushError: ''
+    });
+    vm.runInContext(extractFunction('pushCloudNow'), context);
+    const result = await context.pushCloudNow({ year: '2026', slice: { students: [], records: [] }, changeId: 1 });
+    assert.equal(result, false);
+    assert.equal(overwritten, false);
+    assert.equal(conflict.reason, 'remote-created');
+});
+
+test('password rotation retries a concurrent change without losing real encrypted records', async () => {
+    let journal = JSON.stringify({ oldPass: 'old-pass', newPass: 'new-pass' });
+    let injectConcurrent = true;
+    let currentVault;
+    const context = createContext({
+        crypto: require('node:crypto').webcrypto, TextEncoder, TextDecoder, Uint8Array, btoa, atob,
+        FEE_KDF_ITERATIONS: 100000, LEGACY_FEE_SALT: 'class-optic-fee-vault-v1',
+        FEE_ROTATION_JOURNAL_KEY: 'rotation', FEE_PASSPHRASE_KEY: 'pass',
+        feePassphraseChanging: false, feeRotationInProgress: false, cloudPushChain: Promise.resolve(true),
+        cloudVersionsByYear: {}, cloudDecryptedByYear: {},
+        localStorage: { getItem: () => journal, removeItem: () => { journal = null; } },
+        sessionStorage: { setItem: () => {} }, unwrapRememberedFeePassphrase: async x => x,
+        showFeeLedgerPending: () => {}, showToast: () => {}, ensureCloudReady: async () => true,
+        getYearSyncState: () => ({ dirty: false }), getCloudConflict: () => null,
+        db: { ref: () => ({ once: async () => ({ val: () => ({ 2026: { feeVault: currentVault } }) }) }) },
+        vaultRefFor: () => ({
+            once: async () => ({ val: () => currentVault }),
+            transaction: async update => {
+                if (injectConcurrent) {
+                    injectConcurrent = false;
+                    const encrypted = await context.encryptFeeDataWithPass({ records: [{ id: 'old' }, { id: 'new' }] }, 'old-pass');
+                    currentVault = { ...encrypted, revision: 2, updatedAt: 2 };
+                }
+                const next = update(currentVault);
+                if (!next) return { committed: false };
+                currentVault = next;
+                return { committed: true };
+            }
+        }),
+        rememberFeePassphrase: async () => true
+    });
+    ['deriveFeeKey', 'bufToB64', 'encryptFeeDataWithPass', 'decryptFeeDataWithPass', 'resumeFeePassphraseRotation']
+        .forEach(name => vm.runInContext(extractFunction(name), context));
+    const original = await context.encryptFeeDataWithPass({ records: [{ id: 'old' }] }, 'old-pass');
+    currentVault = { ...original, revision: 1, updatedAt: 1 };
+    assert.equal(await context.resumeFeePassphraseRotation(), true);
+    const result = await context.decryptFeeDataWithPass(currentVault.cipher, currentVault.salt, currentVault.kdfIterations, 'new-pass');
+    assert.deepEqual(Array.from(result.records, record => record.id), ['old', 'new']);
+    assert.equal(currentVault.revision, 3);
+    assert.equal(journal, null);
+});
+
+test('rotation recovery validates every year before saving a recovery journal', async () => {
+    let journal = null;
+    let resumed = 0;
+    let years = { 2025: { feeVault: { cipher: 'old:2025' } }, 2026: { feeVault: { cipher: 'new:2026' } } };
+    const context = createContext({
+        feeRotationPreparing: false, feeRotationInProgress: false, feePassphraseChanging: false,
+        FEE_ROTATION_JOURNAL_KEY: 'rotation',
+        localStorage: { getItem: () => journal, setItem: (_, value) => { journal = value; } },
+        prompt: (() => { let i = 0; return () => (++i % 2 ? 'old' : 'new'); })(),
+        alert: () => {}, showFeeLedgerPending: () => {}, ensureCloudReady: async () => true,
+        db: { ref: () => ({ once: async () => ({ val: () => years }) }) },
+        decryptFeeDataWithPass: async (cipher, salt, iterations, pass) => {
+            if (!cipher.startsWith(`${pass}:`)) throw new Error('wrong pass');
+            return {};
+        },
+        wrapRememberedFeePassphrase: async value => value,
+        resumeFeePassphraseRotation: async () => { resumed++; return true; }, pullCloud: async () => {}
+    });
+    vm.runInContext(extractFunction('recoverFeePassphraseRotation'), context);
+    years[2024] = { feeVault: { cipher: 'unknown:2024' } };
+    await context.recoverFeePassphraseRotation();
+    assert.equal(journal, null);
+    assert.equal(resumed, 0);
+    delete years[2024];
+    await context.recoverFeePassphraseRotation();
+    assert.deepEqual(JSON.parse(journal), { oldPass: 'old', newPass: 'new' });
+    assert.equal(resumed, 1);
+});

@@ -952,22 +952,28 @@
             </div>`;
     }
 
-    function scheduleTimesOverlap(timeA, timeB) {
-        const a = TimeParser.parseRawText(timeA, viewingYear);
-        const b = TimeParser.parseRawText(timeB, viewingYear);
+    function scheduleTimesOverlap(timeA, timeB, year = viewingYear) {
+        const a = TimeParser.parseRawText(timeA, year);
+        const b = TimeParser.parseRawText(timeB, year);
         return !!(a && b && a.date === b.date && TimeParser.rangesOverlap(a.startTime, a.endTime, b.startTime, b.endTime));
     }
 
+    function attachLegacySlotOwner(slot, expectedTime, ownerKey) {
+        if (!slot || slot.status === 'hidden' || slot.time !== expectedTime || !slot.reserved || slot.reservationId) return;
+        return { ...slot, reservationId: ownerKey };
+    }
+
     window.saveEditedSlot = function(slotId) {
+        const year = viewingYear;
         const input = document.getElementById('edit-input-' + slotId);
         if (!input) return alert('排班编辑状态已失效，请刷新后重试。');
         const newTime = input.value.trim();
-        const validationParser = TimeParser.parseRawText(newTime, viewingYear);
+        const validationParser = TimeParser.parseRawText(newTime, year);
         if (!validationParser) return alert('格式错误（例：6/19 1400-1500）');
 
         // 只读取并更新排班与预约节点，不在学年根节点上做大事务；根节点还包含
         // 课时费云端密文，部分数据库状态下会导致整个排班保存被拒绝。
-        const slotsRef = SystemRouter.getSlotsRef(viewingYear);
+        const slotsRef = SystemRouter.getSlotsRef(year);
         slotsRef.once('value').then(slotSnapshot => {
             const slots = slotSnapshot.val() || {};
             const currentSlot = slots[slotId];
@@ -975,11 +981,11 @@
             const overlap = Object.keys(slots).some(id => {
                 const slot = slots[id];
                 return id !== slotId && slot && slot.status !== 'hidden'
-                    && scheduleTimesOverlap(slot.time, validationParser.formattedSlotText);
+                    && scheduleTimesOverlap(slot.time, validationParser.formattedSlotText, year);
             });
             if (overlap) throw new Error('该时间段与现有排班重叠！');
 
-            return SystemRouter.getReservationsRef(viewingYear).once('value').then(resSnapshot => {
+            return SystemRouter.getReservationsRef(year).once('value').then(resSnapshot => {
                 const reservations = resSnapshot.val() || {};
                 const feeConflict = Object.values(reservations).some(reservation => reservation
                     && reservation.slotId === slotId
@@ -988,22 +994,36 @@
                 if (feeConflict) throw new Error('该排班已有课程完成并入账，请先在课时费页面处理对应记录。');
 
                 const updates = {};
-                updates[`years/${viewingYear}/slots/${slotId}/time`] = validationParser.formattedSlotText;
+                updates[`years/${year}/slots/${slotId}/time`] = validationParser.formattedSlotText;
                 Object.keys(reservations).forEach(resKey => {
                     const reservation = reservations[resKey];
                     // 已取消记录保留当时的历史时间，不随后来重新开放的排班一起变化。
                     if (!reservation || reservation.slotId !== slotId || reservation.status === 'canceled') return;
-                    updates[`years/${viewingYear}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
-                    updates[`years/${viewingYear}/reservations/${resKey}/slotSnapshot`] = { ...validationParser };
+                    updates[`years/${year}/reservations/${resKey}/time`] = validationParser.formattedSlotText;
+                    updates[`years/${year}/reservations/${resKey}/slotSnapshot`] = { ...validationParser };
                 });
-                return db.ref().update(updates);
+                let ownerReady = Promise.resolve();
+                if (currentSlot.reserved && !currentSlot.reservationId) {
+                    const activeOwners = Object.keys(reservations).filter(key => {
+                        const reservation = reservations[key];
+                        return reservation && reservation.slotId === slotId && reservation.status !== 'canceled';
+                    });
+                    if (activeOwners.length !== 1) throw new Error('旧排班缺少预约关联，且无法唯一确定对应预约，请先核对该时段。');
+                    ownerReady = slotsRef.child(slotId).transaction(slot =>
+                        attachLegacySlotOwner(slot, currentSlot.time, activeOwners[0])
+                    ).then(result => {
+                        if (!result.committed) throw new Error('排班刚刚发生变化，请刷新后重试。');
+                    });
+                }
+                return ownerReady.then(() => db.ref().update(updates));
             });
         }).then(() => {
-            SystemRouter.getLogsRef(viewingYear).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
+            SystemRouter.getLogsRef(year).push({ action: `修改排班时间并同步了历史预约 -> ${validationParser.formattedSlotText}`, timestamp: firebase.database.ServerValue.TIMESTAMP });
             alert('排班已修改。');
         }).catch(error => {
             console.error('修改排班失败:', error);
-            alert(error.message || '修改排班失败，请重试。');
+            const denied = String(error && error.code || '').toUpperCase().includes('PERMISSION_DENIED');
+            alert(denied ? '保存被数据库拒绝：排班或对应预约可能刚刚变化，请刷新后重试；如果一直失败，请检查该时段的预约关联。' : error.message || '修改排班失败，请重试。');
         });
     };
 
@@ -1438,7 +1458,14 @@
                         restoreUpdates[`years/${y}`] = null;
                     });
                     // 写入备份中的学年
-                    backupYears.forEach(y => { restoreUpdates[`years/${y}`] = parsed.years[y]; });
+                    backupYears.forEach(y => {
+                        const year = parsed.years[y];
+                        if (!year || typeof year !== 'object' || Array.isArray(year)) throw new Error(`${y} 年备份数据格式不合法`);
+                        restoreUpdates[`years/${y}`] = { ...year, metadata: {
+                            ...(year.metadata && typeof year.metadata === 'object' ? year.metadata : {}),
+                            restoreToken: `${Date.now()}-${Math.random().toString(36).slice(2)}`
+                        } };
+                    });
                     if (hasSystem) restoreUpdates.system = parsed.system;
                     // 单次多路径更新，避免 Promise.all 造成“恢复一半”的混合数据库。
                     return db.ref().update(restoreUpdates);
