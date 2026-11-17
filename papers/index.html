@@ -79,10 +79,14 @@
     const answersNotice = document.getElementById('answers-notice');
     const answersPreview = document.getElementById('answers-preview');
     const answersOpenAt = Date.parse(answersNotice.querySelector('time').dateTime);
+    const previewRequested = new URLSearchParams(window.location.search).get('preview') === 'answers';
+    const previewEndsAt = Date.parse('2026-11-18T00:00:00+08:00');
 
     function openAnswersWhenReady() {
-      const remaining = answersOpenAt - Date.now();
-      if (remaining > 0) {
+      const now = Date.now();
+      const remaining = answersOpenAt - now;
+      const previewIsOpen = previewRequested && now < previewEndsAt;
+      if (remaining > 0 && !previewIsOpen) {
         setTimeout(openAnswersWhenReady, Math.min(remaining, 60_000));
         return;
       }
