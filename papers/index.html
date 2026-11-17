@@ -20,6 +20,10 @@
     .paper-action { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 7px; background: #2563eb; color: #fff; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700; }
     .paper-action:hover { background: #1d4ed8; }
     .paper-action:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+    button.paper-action { border: 0; cursor: pointer; }
+    button.paper-action[aria-pressed="false"] { background: #e2e8f0; color: #334155; }
+    .paper-viewer { display: block; width: 100%; height: 75vh; min-height: 380px; margin-top: 16px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    [data-registration][hidden] { display: none; }
     .paper-tips { margin: 0; padding: 0; list-style: none; }
     .paper-tips li { padding: 12px 0; border-bottom: 1px solid #eef2f7; }
     .paper-tips li:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -30,8 +34,8 @@
 </head>
 <body class="student-page">
   <main class="container student-shell">
-    <h1 class="student-title">华科 839 模拟卷领取登记</h1>
-    <section class="student-panel paper-panel" aria-labelledby="methods-title">
+    <h1 class="student-title" id="page-title">华科 839 模拟卷领取登记</h1>
+    <section class="student-panel paper-panel" aria-labelledby="methods-title" data-registration>
       <div class="paper-heading"><h2 id="methods-title">选择领取方式</h2></div>
       <p>请只填写与你的领取方式对应的一份表单。</p>
       <div class="paper-choices">
@@ -51,16 +55,17 @@
     </section>
     <section class="student-panel paper-panel" aria-labelledby="answers-title">
       <h2 id="answers-title">参考答案</h2>
-      <p id="answers-notice" aria-live="polite">A 卷、B 卷参考答案将于 <time datetime="2026-11-21T00:00:00+08:00">11 月 21 日 00:00（北京时间）</time>开放免费下载。</p>
-      <template id="answers-downloads">
-        <div class="paper-choices">
-          <a class="paper-action" href="./aans.pdf" download>下载 A 卷参考答案</a>
-          <a class="paper-action" href="./bans.pdf" download>下载 B 卷参考答案</a>
+      <p id="answers-notice">A 卷、B 卷参考答案将于 <time datetime="2026-11-20T00:00:00+08:00">11 月 20 日 00:00（北京时间）</time>开放在线查看。</p>
+      <template id="answers-preview">
+        <div class="paper-choices" role="group" aria-label="选择参考答案">
+          <button type="button" class="paper-action" data-answer="aans.pdf" aria-pressed="true">查看 A 卷参考答案</button>
+          <button type="button" class="paper-action" data-answer="bans.pdf" aria-pressed="false">查看 B 卷参考答案</button>
         </div>
+        <iframe class="paper-viewer" title="A 卷参考答案" src="./aans.pdf#toolbar=0"></iframe>
       </template>
-      <noscript><p>请启用 JavaScript 以显示下载按钮。</p></noscript>
+      <noscript><p>请启用 JavaScript 以查看参考答案。</p></noscript>
     </section>
-    <section class="student-panel paper-panel" aria-labelledby="help-title">
+    <section class="student-panel paper-panel" aria-labelledby="help-title" data-registration>
       <h2 id="help-title">填写须知</h2>
       <ul class="paper-tips">
         <li><strong>报名信息截图</strong><p>上传前先打码，遮住完整报名号、身份证号、考生编号和手机号等信息，按表单要求保留核对所需的信息。</p></li>
@@ -68,25 +73,44 @@
         <li><strong>邮寄名额</strong><p>邮寄表最多接收 10 份提交，之后需要审核。寄送时间、收件信息收集及运费安排会在群里另行通知。</p></li>
       </ul>
     </section>
-    <p class="paper-footer">祝大家备考顺利，考试加油！</p>
+    <p class="paper-footer" data-registration>祝大家备考顺利，考试加油！</p>
   </main>
   <script>
     const answersNotice = document.getElementById('answers-notice');
-    const answersDownloads = document.getElementById('answers-downloads');
+    const answersPreview = document.getElementById('answers-preview');
     const answersOpenAt = Date.parse(answersNotice.querySelector('time').dateTime);
 
-    function updateAnswerDownloads() {
+    function openAnswersWhenReady() {
       const remaining = answersOpenAt - Date.now();
       if (remaining > 0) {
-        setTimeout(updateAnswerDownloads, Math.min(remaining, 60_000));
+        setTimeout(openAnswersWhenReady, Math.min(remaining, 60_000));
         return;
       }
 
-      answersDownloads.replaceWith(answersDownloads.content);
-      answersNotice.textContent = 'A 卷、B 卷参考答案已开放免费下载。';
+      for (const element of document.querySelectorAll('[data-registration]')) {
+        element.hidden = true;
+      }
+      document.title = '华科 839 模拟卷参考答案';
+      document.getElementById('page-title').textContent = '华科 839 模拟卷';
+
+      const preview = answersPreview.content;
+      const viewer = preview.querySelector('iframe');
+      const buttons = preview.querySelectorAll('[data-answer]');
+      for (const button of buttons) {
+        button.addEventListener('click', () => {
+          if (button.getAttribute('aria-pressed') === 'true') return;
+          for (const choice of buttons) {
+            choice.setAttribute('aria-pressed', String(choice === button));
+          }
+          viewer.title = button.textContent.replace('查看 ', '');
+          viewer.src = './' + button.dataset.answer + '#toolbar=0';
+        });
+      }
+      answersNotice.replaceWith(preview);
+      answersPreview.remove();
     }
 
-    updateAnswerDownloads();
+    openAnswersWhenReady();
   </script>
 </body>
 </html>
