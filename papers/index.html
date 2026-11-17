@@ -51,7 +51,14 @@
     </section>
     <section class="student-panel paper-panel" aria-labelledby="answers-title">
       <h2 id="answers-title">参考答案</h2>
-      <p>A 卷、B 卷参考答案将于 <time datetime="2026-11-21T00:00:00+08:00">11 月 21 日 00:00（北京时间）</time>开放免费下载。</p>
+      <p id="answers-notice" aria-live="polite">A 卷、B 卷参考答案将于 <time datetime="2026-11-21T00:00:00+08:00">11 月 21 日 00:00（北京时间）</time>开放免费下载。</p>
+      <template id="answers-downloads">
+        <div class="paper-choices">
+          <a class="paper-action" href="./aans.pdf" download>下载 A 卷参考答案</a>
+          <a class="paper-action" href="./bans.pdf" download>下载 B 卷参考答案</a>
+        </div>
+      </template>
+      <noscript><p>请启用 JavaScript 以显示下载按钮。</p></noscript>
     </section>
     <section class="student-panel paper-panel" aria-labelledby="help-title">
       <h2 id="help-title">填写须知</h2>
@@ -63,5 +70,23 @@
     </section>
     <p class="paper-footer">祝大家备考顺利，考试加油！</p>
   </main>
+  <script>
+    const answersNotice = document.getElementById('answers-notice');
+    const answersDownloads = document.getElementById('answers-downloads');
+    const answersOpenAt = Date.parse(answersNotice.querySelector('time').dateTime);
+
+    function updateAnswerDownloads() {
+      const remaining = answersOpenAt - Date.now();
+      if (remaining > 0) {
+        setTimeout(updateAnswerDownloads, Math.min(remaining, 60_000));
+        return;
+      }
+
+      answersDownloads.replaceWith(answersDownloads.content);
+      answersNotice.textContent = 'A 卷、B 卷参考答案已开放免费下载。';
+    }
+
+    updateAnswerDownloads();
+  </script>
 </body>
 </html>
