@@ -81,7 +81,7 @@
     const answersPreview = document.getElementById('answers-preview');
     const answersOpenAt = Date.parse(answersNotice.querySelector('time').dateTime);
     const previewRequested = new URLSearchParams(window.location.search).get('preview') === 'answers';
-    const previewEndsAt = Date.parse('2026-11-18T00:00:00+08:00');
+    const previewEndsAt = answersOpenAt;
 
     function openAnswersWhenReady() {
       const now = Date.now();
