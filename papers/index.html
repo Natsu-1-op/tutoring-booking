@@ -24,7 +24,7 @@
     button.paper-action[aria-pressed="false"] { background: #e2e8f0; color: #334155; }
     .paper-pages { margin-top: 16px; }
     .paper-pages img { display: block; box-sizing: border-box; width: 100%; height: auto; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
-    .paper-panel .paper-answer-note { margin-top: 12px; }
+    .paper-supplement { display: grid; gap: 8px; padding: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
     [data-registration][hidden] { display: none; }
     .paper-tips { margin: 0; padding: 0; list-style: none; }
     .paper-tips li { padding: 12px 0; border-bottom: 1px solid #eef2f7; }
@@ -59,9 +59,10 @@
       <h2 id="answers-title">参考答案</h2>
       <p id="answers-notice">A 卷、B 卷参考答案将于 <time datetime="2026-11-20T00:00:00+08:00">11 月 20 日 00:00（北京时间）</time>开放在线查看。</p>
       <template id="answers-preview">
-        <a class="paper-action" href="https://docs.qq.com/form/page/DRk9yS3RpaWROVXhR" target="_blank" rel="noopener noreferrer">武汉自取登记</a>
-        <p class="paper-answer-note">简要答案由人工撰写，详细解答由 AI 根据简答生成。人工核对后整体没发现大问题。如有出入，请相信自己的判断。</p>
-        <p class="paper-answer-note">这套模拟卷的计算题确实比早些年的真题难一些。去年都出了那种「雷霆题」，大家也可以试着做做这种知识点都学过、看起来却很新鲜的题。不确定今年会不会考，万一呢？</p>
+        <div class="paper-supplement">
+          <a class="paper-action" href="./ab-supplement.pdf" download="华科839_AB卷补充习题册.pdf">下载 A、B 卷补充习题册</a>
+          <p>本习题册补充了华科 839 模拟 A、B 卷未涉及的内容。</p>
+        </div>
         <div class="paper-choices" role="group" aria-label="选择参考答案">
           <button type="button" class="paper-action" aria-controls="answer-a" aria-pressed="true">查看 A 卷参考答案</button>
           <button type="button" class="paper-action" aria-controls="answer-b" aria-pressed="false">查看 B 卷参考答案</button>
