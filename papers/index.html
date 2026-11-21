@@ -22,7 +22,8 @@
     .paper-action:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
     button.paper-action { border: 0; cursor: pointer; }
     button.paper-action[aria-pressed="false"] { background: #e2e8f0; color: #334155; }
-    .paper-viewer { display: block; width: 100%; height: 75vh; min-height: 380px; margin-top: 16px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .paper-pages { margin-top: 16px; }
+    .paper-pages img { display: block; box-sizing: border-box; width: 100%; height: auto; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
     .paper-panel .paper-answer-note { margin-top: 12px; }
     [data-registration][hidden] { display: none; }
     .paper-tips { margin: 0; padding: 0; list-style: none; }
@@ -62,10 +63,21 @@
         <p class="paper-answer-note">简要答案由人工撰写，详细解答由 AI 根据简答生成。人工核对后整体没发现大问题。如有出入，请相信自己的判断。</p>
         <p class="paper-answer-note">这套模拟卷的计算题确实比早些年的真题难一些。去年都出了那种「雷霆题」，大家也可以试着做做这种知识点都学过、看起来却很新鲜的题。不确定今年会不会考，万一呢？</p>
         <div class="paper-choices" role="group" aria-label="选择参考答案">
-          <button type="button" class="paper-action" data-answer="aans.pdf?v=674bb4cb" aria-pressed="true">查看 A 卷参考答案</button>
-          <button type="button" class="paper-action" data-answer="bans.pdf" aria-pressed="false">查看 B 卷参考答案</button>
+          <button type="button" class="paper-action" aria-controls="answer-a" aria-pressed="true">查看 A 卷参考答案</button>
+          <button type="button" class="paper-action" aria-controls="answer-b" aria-pressed="false">查看 B 卷参考答案</button>
         </div>
-        <iframe class="paper-viewer" title="A 卷参考答案" src="./aans.pdf?v=674bb4cb#toolbar=0"></iframe>
+        <div class="paper-pages" id="answer-a">
+          <img src="./answer-pages/a-1.png" width="1191" height="1684" alt="A 卷参考答案第 1 页" loading="eager">
+          <img src="./answer-pages/a-2.png" width="1191" height="1684" alt="A 卷参考答案第 2 页" loading="lazy">
+          <img src="./answer-pages/a-3.png" width="1191" height="1684" alt="A 卷参考答案第 3 页" loading="lazy">
+          <img src="./answer-pages/a-4.png" width="1191" height="1684" alt="A 卷参考答案第 4 页" loading="lazy">
+        </div>
+        <div class="paper-pages" id="answer-b" hidden>
+          <img src="./answer-pages/b-1.png" width="1191" height="1684" alt="B 卷参考答案第 1 页" loading="lazy">
+          <img src="./answer-pages/b-2.png" width="1191" height="1684" alt="B 卷参考答案第 2 页" loading="lazy">
+          <img src="./answer-pages/b-3.png" width="1191" height="1684" alt="B 卷参考答案第 3 页" loading="lazy">
+          <img src="./answer-pages/b-4.png" width="1191" height="1684" alt="B 卷参考答案第 4 页" loading="lazy">
+        </div>
       </template>
       <noscript><p>请启用 JavaScript 以查看参考答案。</p></noscript>
     </section>
@@ -102,16 +114,17 @@
       document.getElementById('page-title').textContent = '华科 839 模拟卷';
 
       const preview = answersPreview.content;
-      const viewer = preview.querySelector('iframe');
-      const buttons = preview.querySelectorAll('[data-answer]');
-      for (const button of buttons) {
+      const answers = Array.from(preview.querySelectorAll('[aria-controls]'), button => ({
+        button,
+        pages: preview.getElementById(button.getAttribute('aria-controls')),
+      }));
+      for (const { button } of answers) {
         button.addEventListener('click', () => {
-          if (button.getAttribute('aria-pressed') === 'true') return;
-          for (const choice of buttons) {
-            choice.setAttribute('aria-pressed', String(choice === button));
+          for (const answer of answers) {
+            const selected = answer.button === button;
+            answer.button.setAttribute('aria-pressed', String(selected));
+            answer.pages.hidden = !selected;
           }
-          viewer.title = button.textContent.replace('查看 ', '');
-          viewer.src = './' + button.dataset.answer + '#toolbar=0';
         });
       }
       answersNotice.replaceWith(preview);
