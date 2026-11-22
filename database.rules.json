@@ -1,5 +1,22 @@
 {
   "rules": {
+    "questionBankWhitelist": {
+      ".read": false,
+      ".write": false
+    },
+    "questionBankPrivate": {
+      ".write": false,
+      "bank_v1": {
+        "index": {
+          ".read": "auth != null && root.child('questionBankWhitelist').child(auth.uid).val() === true"
+        },
+        "assets": {
+          "$asset": {
+            ".read": "auth != null && root.child('questionBankWhitelist').child(auth.uid).val() === true"
+          }
+        }
+      }
+    },
     "system": {
       ".read": true,
       ".write": true,
