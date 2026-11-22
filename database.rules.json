@@ -1,5 +1,45 @@
 {
   "rules": {
+  "questionBankAccess": {
+    "settings": {
+      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'"
+    },
+    "links": {
+      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      "$token": {
+        ".write": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+        ".validate": "$token.matches(/^[A-Za-z0-9_-]{32}$/) && newData.hasChildren(['label','createdAt','delivery'])",
+        "label": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() >= now - 120000 && newData.val() <= now + 120000))"
+        },
+        "delivery": {
+          ".read": "data.exists() && data.child('revoked').val() === false && data.child('expiresAt').val() > now && data.child('release').val() === root.child('questionBankAccess/settings').child('release').val()",
+          ".validate": "newData.hasChildren(['expiresAt','revoked','release','key'])",
+          "expiresAt": {
+            ".validate": "newData.isNumber() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() > now && newData.val() <= now + 2592120000))"
+          },
+          "revoked": {
+            ".validate": "newData.isBoolean() && (data.val() !== true || newData.val() === true)"
+          },
+          "release": {
+            ".validate": "newData.isString() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() === root.child('questionBankAccess/settings').child('release').val()))"
+          },
+          "key": {
+            ".validate": "newData.isString() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() === root.child('questionBankAccess/settings').child('key').val()))"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  },
     "system": {
       ".read": true,
       ".write": true,
