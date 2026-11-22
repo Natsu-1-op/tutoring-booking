@@ -700,8 +700,8 @@ $("viewer").addEventListener("close",() => {
 });
 $("about-open").addEventListener("click",() => $("about").showModal());
 const descriptions = element("dl");
-for (const title of ["范围依据","是否考察过","有没有可能考","题库完整度"]) {
-    descriptions.append(element("dt",title),element("dd",bank.rules[title]));
+for (const title of ["范围依据","是否考察过","有没有可能考","波带片备考口径","题库完整度"]) {
+    if (bank.rules[title]) descriptions.append(element("dt",title),element("dd",bank.rules[title]));
 }
 $("about-body").append(descriptions);
 if (bank.rules["大纲附件"]) $("about-body").append(button("查看内嵌考试大纲",() => {
@@ -725,5 +725,5 @@ readHash();
 
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"}</script><script src="access.js?v=internal-v2"></script></body>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-9703722616498763"}</script><script src="access.js?v=internal-v2-index"></script></body>
 </html>

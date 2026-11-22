@@ -82,7 +82,7 @@
         if (!grant) { status.textContent = denied; return; }
         expiresAt = grant.expiresAt;
         key = await crypto.subtle.importKey("raw",fromBase64(grant.key),{name:"AES-GCM"},false,["decrypt"]);
-        const raw = await decrypt("index");
+        const raw = await decrypt(config.indexPath || "index");
         const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("gzip"));
         const text = await new Response(stream).text();
         bank = JSON.parse(text);
