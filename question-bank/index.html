@@ -58,6 +58,7 @@ dialog header{color:var(--ink);border-bottom:1px solid var(--line);background:#f
 @media(min-width:821px){aside{top:12px;height:calc(100dvh - 24px);max-height:calc(100dvh - 24px)}}
 @media(max-width:820px){body>header{height:58px;padding:0 16px}.layout{padding:10px 10px 22px}.subject-tabs button{font-size:14px}aside,main{border:1px solid var(--line)}main{padding:17px 13px 24px}header h1{font-size:19px}}
 body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-items:center;gap:8px}#sidebar-toggle{min-width:108px}.layout[data-sidebar="collapsed"]{grid-template-columns:minmax(0,1fr)}
+.preview-body img:not([src]){min-height:48px}
 @media(min-width:821px){aside{top:78px;height:calc(100dvh - 90px);max-height:calc(100dvh - 90px)}.layout[data-sidebar="collapsed"] aside{display:none}}
 @media(max-width:820px){#sidebar-toggle{min-width:0}.header-actions{gap:5px}header button{font-size:13px;padding:6px 8px}}
 </style>
@@ -312,7 +313,7 @@ function selectQuestion(id, push = true) {
     }
     const pos = filtered.findIndex(q => q["编号"] === id);
     if (pos >= 0) page = Math.floor(pos / limits);
-    renderDetail(id);
+    if (id !== current) renderDetail(id);
     renderList();
     $("layout").dataset.mobile = "detail";
     syncSidebar();
@@ -483,8 +484,20 @@ function inlineOriginal(links, initialLink) {
         img.alt = bank.assets[key].name + (pages ? " 第 " + page + " 页" : "");
         img.loading = "lazy";
         stage.replaceChildren(img);
-        loadImage(img,pages ? pages[page] : key,pages ? "image/webp" : MIME[extension(bank.assets[key].name)],
-            AbortSignal.any([images.signal,stageRequest.signal]));
+        const url = pages ? pages[page] : key;
+        const type = pages ? "image/webp" : MIME[extension(bank.assets[key].name)];
+        const signal = AbortSignal.any([images.signal,stageRequest.signal]);
+        if (window.loadProtectedAsset && "IntersectionObserver" in window) {
+            const observer = new IntersectionObserver(entries => {
+                if (!entries.some(entry => entry.isIntersecting)) return;
+                observer.disconnect();
+                if (!signal.aborted) loadImage(img,url,type,signal);
+            },{rootMargin:"160px"});
+            observer.observe(img);
+            signal.addEventListener("abort",()=>observer.disconnect(),{once:true});
+        } else {
+            loadImage(img,url,type,signal);
+        }
     }
     page = numericPages(links[initialLink]["页码或位置"])[0] || 1;
     draw();

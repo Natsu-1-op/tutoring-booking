@@ -5,6 +5,9 @@
     const message = document.getElementById("access-message");
     const config = JSON.parse(document.getElementById("access-config").textContent);
     const root = config.database + "/questionBankPrivate/bank_v1/";
+    const assetCache = new Map();
+    const cacheLimit = 16 * 1024 * 1024;
+    let cacheSize = 0;
     let session = null;
     let refreshTask = null;
     let bank;
@@ -60,9 +63,31 @@
     window.loadProtectedAsset = async (id,type,signal) => {
         const name = bank.assetPaths[id];
         if (!name) throw new Error("未找到该题的图片。");
+        const cached = assetCache.get(id);
+        if (cached) {
+            assetCache.delete(id);
+            cacheSize -= cached.blob.size;
+            if (Date.now() < cached.expires) {
+                assetCache.set(id,cached);
+                cacheSize += cached.blob.size;
+                return URL.createObjectURL(cached.blob);
+            }
+        }
         const key = name.split("/").at(-1).replace(".","_");
         const data = await read("assets/" + encodeURIComponent(key),signal);
-        return URL.createObjectURL(new Blob([fromBase64(data)],{type}));
+        const blob = new Blob([fromBase64(data)],{type});
+        if (!signal?.aborted && blob.size <= cacheLimit) {
+            const prior = assetCache.get(id);
+            if (prior) cacheSize -= prior.blob.size;
+            assetCache.set(id,{blob,expires:Date.now()+10*60*1000});
+            cacheSize += blob.size;
+            while (cacheSize > cacheLimit) {
+                const oldest = assetCache.keys().next().value;
+                cacheSize -= assetCache.get(oldest).blob.size;
+                assetCache.delete(oldest);
+            }
+        }
+        return URL.createObjectURL(blob);
     };
     form.addEventListener("submit",async event=>{
         event.preventDefault();
