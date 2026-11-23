@@ -433,6 +433,42 @@
         return `${year}-${month}-${day}`;
     }
 
+    // --- 金额与时间口径：全部走「分」的整数运算，避免逐笔 toFixed(2) 后浮点累加产生分位偏差 ---
+    function toCents(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? Math.round(num * 100) : 0;
+    }
+    function fromCents(cents) {
+        const num = Number(cents);
+        return (Number.isFinite(num) ? Math.round(num) : 0) / 100;
+    }
+    function moneySum(values) {
+        let cents = 0;
+        for (const value of values) cents += toCents(value);
+        return fromCents(cents);
+    }
+    function moneyText(value) {
+        return fromCents(toCents(value)).toFixed(2);
+    }
+    // 课时保留两位小数（半小时粒度足够，仍统一走分位）
+    function roundHours(value) {
+        return fromCents(toCents(value));
+    }
+    // 单条金额的唯一算法：rate × hours 四舍五入到分
+    function computeTotal(rate, hours) {
+        return fromCents(Math.round(Number(rate || 0) * Number(hours || 0) * 100));
+    }
+    // 记录归属学年只看 date 的年份；页面只处理 activeYear 一本账
+    function ledgerYearOf(date) {
+        const match = String(date || '').match(/^(\d{4})-/);
+        return match ? match[1] : '';
+    }
+    function recordBelongsToActiveYear(record) {
+        const active = String(activeYear || '');
+        const year = ledgerYearOf(record && record.date);
+        return !!year && (!active || year === active);
+    }
+
     function normalizeStudent(raw) {
         if (!raw || typeof raw !== 'object') return null;
         const name = String(raw.name ?? '').trim();
@@ -447,9 +483,20 @@
         const date = String(raw.date ?? '');
         const hours = Number(raw.hours);
         const rate = Number(raw.rate);
-        const total = Number(raw.total);
-        if (!studentName || !isValidLedgerDate(date) || !Number.isFinite(hours) || hours <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(total)) return null;
-        return { ...raw, id: String(raw.id ?? ('record_' + Date.now() + Math.random().toString(36).slice(2, 7))), studentName, date, hours, rate, total };
+        const rawTotal = Number(raw.total);
+        if (!studentName || !isValidLedgerDate(date) || !Number.isFinite(hours) || hours <= 0 || !Number.isFinite(rate) || rate < 0) return null;
+        // 金额与课时统一到分位；缺失 total 时按同一算法补算，不再让「单价×课时」和 total 各说各话
+        const normalizedHours = roundHours(hours);
+        const total = Number.isFinite(rawTotal) ? fromCents(toCents(rawTotal)) : computeTotal(rate, normalizedHours);
+        return {
+            ...raw,
+            id: String(raw.id ?? ('record_' + Date.now() + Math.random().toString(36).slice(2, 7))),
+            studentName,
+            date,
+            hours: normalizedHours,
+            rate: fromCents(toCents(rate)),
+            total
+        };
     }
 
     function init() {
@@ -706,7 +753,7 @@
                         || Number(record.rate) !== 0) return;
                     record.studentId = id;
                     record.rate = rate;
-                    record.total = Number((rate * Number(record.hours || 0)).toFixed(2));
+                    record.total = computeTotal(rate, record.hours);
                 });
             }
             showToast('学生添加成功');
@@ -849,18 +896,19 @@
                             skipCount++;
                         } else {
                             insertCount++;
-                            const rate = targetStudent ? targetStudent.rate : 0; 
-                            const total = Number((rate * hours).toFixed(2));
-                            
+                            const rate = fromCents(toCents(targetStudent ? targetStudent.rate : 0));
+                            const now = Date.now();
+
                             data.records.push({
-                                id: "booking_" + Date.now() + Math.random().toString(36).substring(2, 5),
+                                id: "booking_" + now + Math.random().toString(36).substring(2, 5),
                                 sourceId: sourceId || null,
                                 studentId: targetStudent ? targetStudent.id : "",
                                 studentName: studentName,
                                 date: date,
-                                hours: Number(hours.toFixed(2)),
+                                hours: roundHours(hours),
                                 rate: rate,
-                                total: total
+                                total: computeTotal(rate, hours),
+                                createdAt: now
                             });
                         }
                     });
@@ -1042,14 +1090,14 @@
         let val = parseFloat(input.value) || 0;
         val += delta;
         if (val < 0.01) val = 0.01;
-        input.value = Number(val.toFixed(2)); 
+        input.value = roundHours(val); 
     }
 
     function updateRecordHoursFromTimes() {
         const start = normalizeClockValue(document.getElementById('recordStartTime').value);
         const end = normalizeClockValue(document.getElementById('recordEndTime').value);
         const hours = calculateClockHours(start, end);
-        if (hours > 0) document.getElementById('recordHours').value = Number(hours.toFixed(2));
+        if (hours > 0) document.getElementById('recordHours').value = roundHours(hours);
     }
 
     function saveRecord() {
@@ -1078,29 +1126,32 @@
         if (editingRecordId) {
             const index = data.records.findIndex(r => r.id === editingRecordId);
             if (index !== -1) {
+                const now = Date.now();
                 data.records[index].date = date;
                 data.records[index].studentId = studentId;
                 data.records[index].studentName = student.name;
-                data.records[index].hours = Number(hours.toFixed(2));
+                data.records[index].hours = roundHours(hours);
                 data.records[index].startTime = startTime;
                 data.records[index].endTime = endTime;
-                data.records[index].rate = student.rate; 
-                data.records[index].total = Number((student.rate * hours).toFixed(2));
+                data.records[index].rate = fromCents(toCents(student.rate));
+                data.records[index].total = computeTotal(student.rate, hours);
+                data.records[index].updatedAt = now;
                 showToast('记录已更新');
             }
         } else {
-            const rate = student.rate; 
-            const total = Number((rate * hours).toFixed(2));
+            const rate = fromCents(toCents(student.rate));
+            const now = Date.now();
             const record = {
-                id: Date.now().toString(),
+                id: now.toString(),
                 studentId,
                 studentName: student.name,
                 date,
                 startTime,
                 endTime,
-                hours: Number(hours.toFixed(2)),
+                hours: roundHours(hours),
                 rate,
-                total
+                total: computeTotal(rate, hours),
+                createdAt: now
             };
             data.records.push(record);
             showToast('记录已保存');
@@ -1184,6 +1235,8 @@
                 return showToast('已在本机记录删除，云端恢复后会继续同步；预约关联暂未改变');
             }
             const unlinked = await flushPendingFeeUnlinks();
+            // 解除关联后立即重算待入账列表，避免日历里已删除、列表里还显示已入账
+            await refreshPendingList({ skipAutoPost: true }).catch(() => false);
             showToast(unlinked ? '已删除，相关预约已恢复为待入账' : '账本已删除，预约关联将在刷新后继续重试');
         } catch (error) {
             console.error('删除课时记录并解除预约关联失败', error);
@@ -1260,11 +1313,9 @@
             return;
         }
 
-        let dayTotal = 0;
         const fragment = document.createDocumentFragment();
 
         records.forEach(r => {
-            dayTotal += r.total;
             const div = document.createElement('div');
             div.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100';
             div.innerHTML = `
@@ -1286,7 +1337,8 @@
             fragment.appendChild(div);
         });
         list.appendChild(fragment);
-        totalLabel.innerText = `¥${dayTotal.toFixed(2)}`;
+        // 日合计同样走「分」累加，避免逐条浮点相加出现 0.30000000000000004
+        totalLabel.innerText = `¥${moneySum(records.map(record => record.total)).toFixed(2)}`;
     }
 
     // 统计页：从课时记录与当前年份汇总年份下拉，保留当前选择
@@ -1330,35 +1382,44 @@
             filteredRecords = data.records.filter(r => r.date.startsWith(year));
         }
 
-        let totalIncome = 0;
-        let totalHours = 0;
+        let incomeCents = 0;
+        let hoursCents = 0;
         let studentStats = Object.create(null);
 
         filteredRecords.forEach(r => {
-            totalIncome += r.total;
-            totalHours += r.hours;
-            
+            const income = toCents(r.total);
+            const hours = toCents(r.hours);
+            incomeCents += income;
+            hoursCents += hours;
+
             if (!studentStats[r.studentName]) {
-                studentStats[r.studentName] = { income: 0, hours: 0 };
+                studentStats[r.studentName] = { incomeCents: 0, hoursCents: 0 };
             }
-            studentStats[r.studentName].income += r.total;
-            studentStats[r.studentName].hours += r.hours;
+            studentStats[r.studentName].incomeCents += income;
+            studentStats[r.studentName].hoursCents += hours;
         });
 
+        const totalIncome = fromCents(incomeCents);
         document.getElementById('statsTotalIncome').innerText = `¥${totalIncome.toFixed(2)}`;
-        document.getElementById('statsTotalHours').innerHTML = `${totalHours.toFixed(2)} <span class="text-sm font-normal text-gray-400">小时</span>`;
+        document.getElementById('statsTotalHours').innerHTML = `${fromCents(hoursCents).toFixed(2)} <span class="text-sm font-normal text-gray-400">小时</span>`;
 
         const statsList = document.getElementById('statsList');
         if(!statsList) return;
         statsList.innerHTML = '';
         
-        const sortedStudents = Object.entries(studentStats).sort((a,b) => b[1].income - a[1].income);
+        const sortedStudents = Object.entries(studentStats)
+            .map(([name, stat]) => [name, {
+                income: fromCents(stat.incomeCents),
+                hours: fromCents(stat.hoursCents),
+                incomeCents: stat.incomeCents
+            }])
+            .sort((a,b) => b[1].incomeCents - a[1].incomeCents);
 
         if (sortedStudents.length === 0) {
             statsList.innerHTML = '<div class="text-center text-gray-400 py-4">该时间段无数据</div>';
         } else {
             sortedStudents.forEach(([name, stat]) => {
-                const percent = totalIncome > 0 ? Math.round((stat.income / totalIncome) * 100) : 0;
+                const percent = incomeCents > 0 ? Math.round((stat.incomeCents / incomeCents) * 100) : 0;
                 const hoursDisplay = stat.hours.toFixed(2);
                 const incomeDisplay = stat.income.toFixed(2);
 
@@ -1380,7 +1441,7 @@
                 statsList.appendChild(div);
             });
         }
-        renderChart(studentStats);
+        renderChart(Object.fromEntries(sortedStudents));
     }
 
     function renderChart(studentStats) {
@@ -1548,7 +1609,7 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-11-03b'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-11-23a'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_ROTATION_JOURNAL_KEY = 'fee_vault_rotation_wrapped_v1';
@@ -1573,6 +1634,8 @@ function getYearSyncState(year) {
         baseRevision: current.baseRevision === null || Number.isInteger(Number(current.baseRevision))
             ? (current.baseRevision === null ? null : Number(current.baseRevision)) : null,
         baseUpdatedAt: Number(current.baseUpdatedAt || 0),
+        // 上一次成功同步到云端的账本指纹：内容没变就不重新加密、不占新 revision
+        baseFingerprint: typeof current.baseFingerprint === 'string' ? current.baseFingerprint : '',
         dirtyAt: Number(current.dirtyAt || 0),
         lastSyncedAt: Number(current.lastSyncedAt || 0),
         lastError: String(current.lastError || '')
@@ -1606,12 +1669,14 @@ function markYearDirty(year) {
     return state.changeId;
 }
 
-function markYearSynced(year, version, changeId) {
+function markYearSynced(year, version, changeId, fingerprint) {
     const state = getYearSyncState(year);
     if (version) {
         state.baseRevision = Number(version.revision || 0);
         state.baseUpdatedAt = Number(version.updatedAt || 0);
     }
+    // 指纹缺省表示「与云端一致但内容未知」，清空即可让下一次保存正常推送
+    state.baseFingerprint = typeof fingerprint === 'string' ? fingerprint : '';
     if (changeId === undefined || changeId === null || Number(state.changeId) === Number(changeId)) {
         state.dirty = false;
         state.lastError = '';
@@ -1977,7 +2042,7 @@ function applyStudentProfileToLedgerData(ledgerData, previousStudent, nextStuden
             studentId: nextStudent.id || record.studentId || '',
             studentName: nextStudent.name,
             rate: Number(nextStudent.rate),
-            total: Number((Number(nextStudent.rate) * Number(record.hours || 0)).toFixed(2)),
+            total: computeTotal(nextStudent.rate, record.hours),
             amountConfirmed: true
         };
         delete replacement.amountConfirmedAt;
@@ -1995,7 +2060,7 @@ function applyStudentRateToLocalRecords(previousStudent, nextStudent) {
             studentId: nextStudent.id || record.studentId || '',
             studentName: nextStudent.name,
             rate: Number(nextStudent.rate),
-            total: Number((Number(nextStudent.rate) * Number(record.hours || 0)).toFixed(2)),
+            total: computeTotal(nextStudent.rate, record.hours),
             amountConfirmed: true
         };
         delete replacement.amountConfirmedAt;
@@ -2079,7 +2144,7 @@ async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
         }
         const version = { revision: payload.revision, updatedAt };
         cloudVersionsByYear[entry.year] = version;
-        cloudDecryptedByYear[entry.year] = { ...version, data: cloneForCloud(entry.data) };
+        cloudDecryptedByYear[entry.year] = { ...version, passUsed: currentFeePassphraseSync(), data: cloneForCloud(entry.data) };
         if (String(entry.year) === String(activeYear)) markYearSynced(entry.year, version, activeChangeId);
         completedYears.push(entry.year);
     }
@@ -2257,6 +2322,25 @@ async function pushCloudNow(job, options) {
             revision: Number(remote.revision || 0),
             updatedAt: Number(remote.updatedAt || 0)
         } : null;
+        const sliceFingerprint = job.fingerprint || ledgerSliceFingerprint(slice);
+        const syncState = getYearSyncState(year);
+        // 内容与上一次成功同步完全一致时直接返回：不重新加密、不消耗 revision。
+        // 重新加密只会换一段密文和新版本号，另一台设备会把它误判成「云端被改过」。
+        if (!options.force && !storedConflict && remote && known
+            && Number(remote.revision || 0) === Number(known.revision || 0)
+            && syncState.baseFingerprint && syncState.baseFingerprint === sliceFingerprint) {
+            cloudVersionsByYear[year] = remoteVersion;
+            clearCloudConflict(year);
+            lastCloudPushError = '';
+            markYearSynced(year, remoteVersion, job.changeId, sliceFingerprint);
+            setLedgerSaveStatus('已同步云端', true);
+            return true;
+        }
+        // 本机没内容、云端也没账本时不必建一个空账本
+        if (!options.force && !remote && !known && !hasLedgerSliceContent(slice)) {
+            markYearSynced(year, null, job.changeId, sliceFingerprint);
+            return true;
+        }
         // revision 变化不一定代表内容变化：删除后用同一份本机账本重传、
         // 或另一台设备重新加密上传，都会产生新 revision。先比较实际账本，
         // 避免把同一份数据误报为多设备冲突。
@@ -2265,7 +2349,7 @@ async function pushCloudNow(job, options) {
             cloudVersionsByYear[year] = remoteVersion;
             clearCloudConflict(year);
             lastCloudPushError = '';
-            markYearSynced(year, remoteVersion, job.changeId);
+            markYearSynced(year, remoteVersion, job.changeId, sliceFingerprint);
             return true;
         }
         // 已经展示给用户的冲突必须由用户明确选择，普通保存不能静默清除。
@@ -2293,7 +2377,7 @@ async function pushCloudNow(job, options) {
             if (equivalent) {
                 cloudVersionsByYear[year] = remoteVersion;
                 clearCloudConflict(year);
-                markYearSynced(year, remoteVersion, job.changeId);
+                markYearSynced(year, remoteVersion, job.changeId, sliceFingerprint);
                 return true;
             }
             const conflict = { reason: 'missing-base-revision', remoteRevision: Number(remote.revision || 0), localChangeId: Number(job.changeId || 0) };
@@ -2371,13 +2455,16 @@ async function pushCloudNow(job, options) {
         };
         clearCloudConflict(year);
         lastCloudPushError = '';
-        markYearSynced(year, cloudVersionsByYear[year], job.changeId);
+        markYearSynced(year, cloudVersionsByYear[year], job.changeId, sliceFingerprint);
         setLedgerSaveStatus('已同步云端', true);
         return true;
     } catch (e) {
         console.error('云端同步失败', e);
-        lastCloudPushError = e && e.code === 'fee-passphrase-mismatch'
-            ? '云端账本口令与本机不一致，请输入云端正在使用的口令后重试。'
+        const mismatch = e && e.code === 'fee-passphrase-mismatch';
+        if (mismatch && job && job.year) delete cloudDecryptedByYear[job.year];
+        // 口令不一致时绝不做任何覆盖：本机修改留在本机 WAL，等用户确认口令后重试。
+        lastCloudPushError = mismatch
+            ? '云端账本口令与本机不一致：本机修改已保留，不会覆盖云端。请点「重新输入云端口令」后重试。'
             : '云端同步失败：' + (e.message || e);
         markYearSyncError(job && job.year, lastCloudPushError);
         setLedgerSaveStatus('已保存本机，待同步', false);
@@ -2401,7 +2488,8 @@ function pushCloud() {
         year,
         slice: cloneForCloud(slice),
         changeId: Number(syncState.changeId || 0),
-        baseRevision: syncState.baseRevision
+        baseRevision: syncState.baseRevision,
+        fingerprint: ledgerSliceFingerprint(slice)
     };
     cloudPushChain = cloudPushChain.then(() => pushCloudNow(job), () => pushCloudNow(job));
     return cloudPushChain;
@@ -2469,23 +2557,33 @@ function ledgerSliceFingerprint(slice) {
     });
 }
 
+// 当前标签页正在使用的口令（同步读取，仅用于判断解密缓存是否还属于同一口令）
+function currentFeePassphraseSync() {
+    try { return sessionStorage.getItem(FEE_PASSPHRASE_KEY) || ''; } catch (e) { return ''; }
+}
+
 async function readRemoteLedgerData(year, remote) {
     if (!remote || !remote.cipher) throw new Error('云端账本数据缺失');
     const key = String(year || activeYear || '');
     const revision = Number(remote.revision || 0);
     const updatedAt = Number(remote.updatedAt || 0);
+    const passNow = currentFeePassphraseSync();
     const cached = cloudDecryptedByYear[key];
+    // 缓存必须绑定当时使用的口令：换了口令还命中的话，会出现「口令错了却读得到旧明文」
     if (cached && cached.revision === revision && cached.updatedAt === updatedAt
         && cached.cipher === remote.cipher && cached.salt === remote.salt
-        && cached.kdfIterations === remote.kdfIterations && cached.data) {
+        && cached.kdfIterations === remote.kdfIterations && cached.passUsed === passNow
+        && cached.data) {
         return cloneForCloud(cached.data);
     }
     try {
         const remoteData = await decryptFeeData(remote.cipher, remote.salt, remote.kdfIterations);
         cloudDecryptedByYear[key] = { revision, updatedAt, cipher: remote.cipher, salt: remote.salt,
-            kdfIterations: remote.kdfIterations, data: cloneForCloud(remoteData) };
+            kdfIterations: remote.kdfIterations, passUsed: currentFeePassphraseSync(), data: cloneForCloud(remoteData) };
         return remoteData;
     } catch (error) {
+        // 解密失败就把这一年的明文缓存丢掉，避免旧明文掩盖口令错误
+        delete cloudDecryptedByYear[key];
         const mismatch = new Error('云端账本口令不一致或密文已损坏');
         mismatch.code = 'fee-passphrase-mismatch';
         mismatch.cause = error;
@@ -2575,7 +2673,7 @@ function applyRemoteLedgerSlice(year, cloudData, remoteVersion, options) {
     };
     _applyingCloud = true;
     try { saveData(); } finally { _applyingCloud = false; }
-    markYearSynced(year, remoteVersion);
+    markYearSynced(year, remoteVersion, undefined, ledgerSliceFingerprint(remoteSlice));
     return changed;
 }
 
@@ -2815,6 +2913,7 @@ async function deleteCloudData() {
         const syncState = getYearSyncState(activeYear);
         syncState.baseRevision = null;
         syncState.baseUpdatedAt = 0;
+        syncState.baseFingerprint = '';
         syncState.dirty = false;
         syncState.lastError = '';
         persistLocalLedgerSnapshot();
@@ -2947,7 +3046,7 @@ async function pullCloud(options) {
             if (syncState.dirty) {
                 if (equivalent) {
                     cloudVersionsByYear[year] = remoteVersion;
-                    markYearSynced(year, remoteVersion);
+                    markYearSynced(year, remoteVersion, undefined, ledgerSliceFingerprint(localSlice));
                     finishFeeLedgerLoad();
                     return true;
                 }
@@ -3228,7 +3327,7 @@ function getReconciliationDiffs(booking, record, options) {
     const recordRate = Number(record.rate);
     const recordHours = Number(record.hours || 0);
     const recordTotal = Number(record.total);
-    const internallyExpectedTotal = Number((recordRate * recordHours).toFixed(2));
+    const internallyExpectedTotal = computeTotal(recordRate, recordHours);
     if (options.amountMode === 'integrity'
         && (!Number.isFinite(recordRate) || recordRate < 0 || !Number.isFinite(recordTotal)
             || Math.abs(recordTotal - internallyExpectedTotal) >= 0.01)) {
@@ -3239,7 +3338,7 @@ function getReconciliationDiffs(booking, record, options) {
     } else {
         const expectedRate = Number(profile.rate);
         const expectedHours = Number(booking.hours > 0 ? booking.hours : record.hours || 0);
-        const expectedTotal = Number((expectedRate * expectedHours).toFixed(2));
+        const expectedTotal = computeTotal(expectedRate, expectedHours);
         if (!Number.isFinite(recordRate) || Math.abs(recordRate - expectedRate) >= 0.01) {
             diffs.push(`单价：学生档案“¥${expectedRate.toFixed(2)}” / 账本“¥${Number(record.rate || 0).toFixed(2)}”`);
         }
@@ -3841,10 +3940,10 @@ function updateImportBtn() {
     const n = selected.length;
     btn.textContent = `导入选中 (${n})`;
     btn.disabled = n === 0;
-    const totalHours = selected.reduce((sum, lesson) => sum + Number(lesson.hours || 0), 0);
-    const totalAmount = selected.reduce((sum, lesson) => {
+    const totalHoursCents = selected.reduce((sum, lesson) => sum + toCents(lesson.hours), 0);
+    const totalAmountCents = selected.reduce((sum, lesson) => {
         const student = data.students.find(s => s.name === lesson.studentName);
-        return sum + Number((student ? Number(student.rate) : 0) * Number(lesson.hours || 0));
+        return sum + toCents(computeTotal(student ? Number(student.rate) : 0, lesson.hours));
     }, 0);
     const countEl = document.getElementById('pending-count');
     const selectedEl = document.getElementById('pending-selected-count');
@@ -3852,8 +3951,8 @@ function updateImportBtn() {
     const amountEl = document.getElementById('pending-selected-total');
     if (countEl) countEl.textContent = pendingLessons.length;
     if (selectedEl) selectedEl.textContent = n;
-    if (hoursEl) hoursEl.textContent = `${totalHours.toFixed(2)}h`;
-    if (amountEl) amountEl.textContent = `¥${totalAmount.toFixed(2)}`;
+    if (hoursEl) hoursEl.textContent = `${fromCents(totalHoursCents).toFixed(2)}h`;
+    if (amountEl) amountEl.textContent = `¥${fromCents(totalAmountCents).toFixed(2)}`;
 }
 
 function getSelectedReconciliationCandidate(caseIndex) {
@@ -3961,9 +4060,9 @@ function upsertReconciliationLedgerRecord(item, canonical, candidate) {
         date: canonical.date,
         startTime,
         endTime,
-        hours: Number(Number(canonical.hours).toFixed(2)),
+        hours: roundHours(canonical.hours),
         rate,
-        total: Number((rate * Number(canonical.hours)).toFixed(2)),
+        total: computeTotal(rate, canonical.hours),
         postedAt: Number(existing && existing.postedAt || Date.now()),
         amountConfirmed: true
     };
@@ -4158,11 +4257,28 @@ function canPostImportedReservation(current, original, recordId) {
     return !(current.feeStatus === 'posted' && !current.feeRecordId);
 }
 
+let importPendingBusy = false;
+
 async function importPendingLessons(lessons, options = {}) {
     const auto = options.auto === true;
     let checked = Array.isArray(lessons) ? lessons.filter(Boolean) : [];
     if (checked.length === 0) return false;
+    // 自动入账与手动导入可能同时触发：只允许一个流程写账本，另一个稍后由刷新补上
+    if (importPendingBusy) {
+        if (!auto) showToast('正在导入上一批记录，请稍候…');
+        return false;
+    }
     if (!auto && !confirm(`确定将 ${checked.length} 条已完成预约导入课时账本吗？`)) return false;
+    importPendingBusy = true;
+    try {
+        return await importPendingLessonsImpl(checked, options);
+    } finally {
+        importPendingBusy = false;
+    }
+}
+
+async function importPendingLessonsImpl(checked, options) {
+    const auto = options.auto === true;
 
     // 入账前重新读取预约，避免把已经删除、取消或尚未完成的旧页面数据写进账本。
     let latestReservations;
@@ -4182,6 +4298,18 @@ async function importPendingLessons(lessons, options = {}) {
         if (!auto) alert('所选课程状态已经变化，请刷新后重试。');
         return false;
     }
+
+    // 学年归属：账本只装 activeYear 一本账，跨年预约必须先在约课端切学年，
+    // 否则记录会写进内存却被云端切片过滤掉（列表有、云端没有）。
+    // 日期无法识别的记录同样拦下，避免空日期把日历与统计打崩。
+    const offYear = checked.filter(lesson => ledgerYearOf(lesson.date) !== String(activeYear));
+    if (offYear.length > 0) {
+        checked = checked.filter(lesson => ledgerYearOf(lesson.date) === String(activeYear));
+        const sample = offYear.slice(0, 3).map(lesson => `${lesson.date || '无日期'} ${lesson.studentName}`).join('、');
+        const message = `${offYear.length} 条预约的日期不属于 ${activeYear} 学年（${sample}${offYear.length > 3 ? ' 等' : ''}），已跳过；请先切换学年再入账。`;
+        if (auto) showToast(message); else alert(message);
+        if (checked.length === 0) return false;
+    }
     // 重合检查：自动入账只接收已提前确认无冲突的记录；手动导入仍二次提示。
     if (!options.skipConflictCheck) {
         const conflictLines = [];
@@ -4197,26 +4325,36 @@ async function importPendingLessons(lessons, options = {}) {
     const noProfile = new Set();
     const importedRecords = [];
     let alreadyImportedCount = 0;
+    let skippedPostedCount = 0;
     checked.forEach(p => {
         const recordId = `booking_${p.sourceId || p.resKey}`;
         // 防重复：手动删过账本记录后再次出现的预约，不能重复导入产生同 id 记录
         const probe = { id: recordId, sourceId: p.sourceId, studentName: p.studentName, date: p.date, hours: p.hours };
         if (isRecordExisting(probe)) { alreadyImportedCount++; return; }
+        // 预约端已经指向另一条存在的账本记录：说明别处已经入过账，本次不再产生第二条
+        const reservation = latestReservations[p.resKey] || {};
+        if (reservation.feeRecordId && reservation.feeRecordId !== recordId
+            && (data.records || []).some(record => record.id === reservation.feeRecordId)) {
+            skippedPostedCount++;
+            return;
+        }
         const targetStudent = data.students.find(s => s.name === p.studentName);
         if (!targetStudent) noProfile.add(p.studentName);
-        const rate = targetStudent ? targetStudent.rate : 0;
-        const total = Number((rate * p.hours).toFixed(2));
+        const rate = fromCents(toCents(targetStudent ? targetStudent.rate : 0));
+        const createdAt = Date.now();
         data.records.push({
             id: recordId,
             sourceId: p.sourceId,
+            reservationId: String(p.resKey || ''),
             studentId: targetStudent ? targetStudent.id : "",
             studentName: p.studentName,
             date: p.date,
             startTime: normalizeClockValue(p.startTime),
             endTime: normalizeClockValue(p.endTime),
-            hours: Number(Number(p.hours).toFixed(2)),
+            hours: roundHours(p.hours),
             rate: rate,
-            total: total
+            total: computeTotal(rate, p.hours),
+            createdAt
         });
         importedRecords.push({ lesson: p, recordId });
     });
@@ -4237,46 +4375,80 @@ async function importPendingLessons(lessons, options = {}) {
 
     let statusSynced = true;
     let successfulImports = importedRecords;
+    let rolledBackCount = 0;
     if (db && activeYear && importedRecords.length > 0) {
         const postedAt = Date.now();
-        const results = await Promise.all(importedRecords.map(async item => {
-            try {
-                const ledgerRecord = (data.records || []).find(record => record.id === item.recordId);
-                if (!ledgerRecord || getReconciliationDiffs(item.lesson, ledgerRecord).length > 0) {
-                    return { ...item, committed: false, reason: 'amount-not-ready' };
-                }
-                const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
-                    const original = latestReservations[item.lesson.resKey];
-                    if (!canPostImportedReservation(current, original, item.recordId)) return;
-                    current.feeStatus = 'posted';
-                    current.feePostedAt = postedAt;
-                    current.feeRecordId = item.recordId;
-                    current.feeDismissedAt = null;
-                    return current;
-                });
-                return { ...item, committed: result.committed };
-            } catch (error) {
-                console.error('预约入账状态同步失败:', error);
-                return { ...item, committed: false };
+        const results = [];
+        // 逐条事务：单条失败不影响其他条，但失败的那条要从账本里撤回，
+        // 否则会出现「账本已入账、预约仍是待入账」的半成功状态。
+        for (const item of importedRecords) {
+            const ledgerRecord = (data.records || []).find(record => record.id === item.recordId);
+            if (!ledgerRecord || getReconciliationDiffs(item.lesson, ledgerRecord).length > 0) {
+                results.push({ ...item, committed: false, reason: 'amount-not-ready' });
+                continue;
             }
-        }));
+            let committed = false;
+            for (let attempt = 0; attempt < 2 && !committed; attempt += 1) {
+                try {
+                    const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
+                        const original = latestReservations[item.lesson.resKey];
+                        if (!canPostImportedReservation(current, original, item.recordId)) return;
+                        current.feeStatus = 'posted';
+                        current.feePostedAt = postedAt;
+                        current.feeRecordId = item.recordId;
+                        current.feeDismissedAt = null;
+                        return current;
+                    });
+                    committed = result.committed;
+                } catch (error) {
+                    console.error('预约入账状态同步失败:', error);
+                    committed = false;
+                }
+            }
+            results.push({ ...item, committed });
+        }
         successfulImports = results.filter(item => item.committed);
         const failedImports = results.filter(item => !item.committed);
         if (failedImports.length > 0) {
             statusSynced = false;
+            // 只撤回「预约状态没写成」的记录；金额不一致的保留给人工核对。
+            const revertible = failedImports.filter(item => item.reason !== 'amount-not-ready');
+            if (revertible.length > 0) {
+                const revertIds = new Set(revertible.map(item => String(item.recordId)));
+                const removed = (data.records || []).filter(record => revertIds.has(String(record.id)));
+                if (removed.length > 0) {
+                    data.records = (data.records || []).filter(record => !revertIds.has(String(record.id)));
+                    saveData();
+                    const uploaded = await cloudPushChain.catch(() => false);
+                    if (uploaded) {
+                        rolledBackCount = removed.length;
+                    } else {
+                        // 撤回没能上传：把记录原样放回，交给下次刷新继续核对，避免本机与云端各持一半
+                        data.records.push(...removed);
+                        saveData();
+                        rolledBackCount = 0;
+                    }
+                }
+            }
         }
     }
     const importedCount = successfulImports.length;
-    const ledgerImportedCount = importedRecords.length;
+    const ledgerImportedCount = importedRecords.length - rolledBackCount;
     const warn = noProfile.size > 0
         ? `\n\n以下学生未建档（已按¥0导入，请到「管理学生」设置课时费）：\n  ${[...noProfile].join('、')}`
         : '';
-    const syncMessage = statusSynced ? '' : '\n\n账本记录已安全保留；部分预约状态尚未标记为已入账，刷新后系统会继续核对。未建档或金额不一致的记录需要先补齐学生档案。';
+    const rolledBackMessage = rolledBackCount > 0
+        ? `\n\n其中 ${rolledBackCount} 条预约状态没写成功，已从账本撤回并重新上传，账本与预约保持一致；稍后刷新即可再次导入。`
+        : '';
+    const syncMessage = statusSynced ? '' : (rolledBackCount > 0 ? rolledBackMessage
+        : '\n\n部分预约状态尚未标记为已入账，账本记录已保留，刷新后系统会继续核对。金额不一致的记录需要先补齐学生档案。');
     if (auto) {
         if (importedCount > 0) showToast(`已自动入账 ${importedCount} 条完成课程${noProfile.size ? `；${noProfile.size} 名学生未建档` : ''}`);
-        if (!statusSynced) showToast('部分账本已保存，预约状态待核对');
+        if (!statusSynced) showToast(rolledBackCount > 0 ? `${rolledBackCount} 条预约状态未同步，已撤回账本` : '部分账本已保存，预约状态待核对');
     } else {
-        alert(`账本已保存 ${ledgerImportedCount} 条，预约端已标记入账 ${importedCount} 条${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}。${warn}${syncMessage}`);
+        alert(`账本已保存 ${ledgerImportedCount} 条，预约端已标记入账 ${importedCount} 条`
+            + `${alreadyImportedCount ? `（跳过 ${alreadyImportedCount} 条已存在记录）` : ''}`
+            + `${skippedPostedCount ? `（跳过 ${skippedPostedCount} 条已在别处入账）` : ''}。${warn}${syncMessage}`);
     }
     await refreshPendingList(statusSynced ? {} : { skipAutoPost: true });
     return statusSynced;
@@ -4331,7 +4503,7 @@ async function saveEditPendingLesson(i) {
     const hours = parseFloat(document.getElementById('edit-hours-' + i).value);
     if (!date || !isValidLedgerDate(date, activeYear)) return alert('请选择有效日期');
     if (!(hours > 0)) return alert('请输入有效课时');
-    const nextLesson = { ...p, date, hours: Number(Number(hours).toFixed(2)) };
+    const nextLesson = { ...p, date, hours: roundHours(hours) };
     const synced = await syncReservationTime(nextLesson);
     if (!synced) return;
 

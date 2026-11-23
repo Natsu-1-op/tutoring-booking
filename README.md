@@ -73,6 +73,18 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 - 发往模型的内容：题号、学科、模块、考点、题干、检索转录、核对说明、备注、备考依据、学生作答，以及该题原页/裁切图（经现有按需解密接口取出后压缩），提示词要求先给「得分：X/Y」再逐点分析。
 - 需要服务商允许浏览器直连（CORS）。OpenAI 官方接口、DeepSeek、通义、豆包等 OpenAI 兼容端点多数可用；若接口拦截跨域，页面会提示具体原因。
 
+## 课时费账本：金额、同步与入账口径
+
+**金额口径**：单条金额只有一个算法 `computeTotal(rate, hours)`（`rate × hours` 四舍五入到分），课时也统一到两位小数。日合计、年度合计、按学生汇总与图表全部按「分」的整数累加（`toCents` / `moneySum` / `fromCents`）后再转回两位小数，不再逐笔 `toFixed(2)` 后用浮点相加，因此明细相加与汇总永远一致。
+
+**学年与时间**：记录归属学年只看 `date` 的年份。手工记账必须落在当前 `activeYear`（`isValidLedgerDate(date, activeYear)`），预约入账前也会先过滤日期不在本学年的预约并提示切换学年；否则记录会进内存却被云端切片排除（列表有、云端没有）。新建记录写 `createdAt`，修改记录写 `updatedAt`；`amountConfirmedAt` 属本机确认时间，不参与账本指纹，也不会制造多设备冲突。
+
+**版本不因重加密空转**：同步状态里新增 `baseFingerprint`（上一次成功同步的账本指纹）。内容与基线一致时直接返回成功，不重新加密、不写云端、不消耗 `revision`——避免「同一份账本每保存一次就换个版本号」让另一台设备误判成冲突。只有内容真的变化才写入，且 `revision` 只 +1。
+
+**口令校验**：解密缓存绑定当时使用的口令（`passUsed`），换口令后不会命中旧明文；解密失败立即丢弃该年缓存并提示「云端账本口令与本机不一致：本机修改已保留，不会覆盖云端」，需要点「重新输入云端口令」重试。写入前必定先用当前口令解开现有云端版本，口令不一致不会发生任何覆盖。
+
+**预约入账一致性**：同一时间只允许一个导入流程（手动/自动互斥）；入账前按 `reservationImportFingerprint` 复核预约是否仍存在、仍完成；按 `sourceId`/`reservationId` 去重，预约端已指向其他账本记录时跳过。预约状态事务失败会自动重试一次，仍失败则该条账本记录撤回并重新上传，避免「账本已入账、预约仍是待入账」的半成功状态；撤回上传也失败时把记录放回本机，交给刷新后的核对流程。删除账本记录并解除预约关联后会立即刷新待入账列表。
+
 ## 题库发布流程（重要）
 
 公开仓库的 `question-bank/` 是**产物目录**：`index.html`、`access.js`、`account.js`、`study.js`、`ai-tutor.js`、`manage/`、`content/*.bin` 都由私有题库仓库的 `docs/index.html` 与 `delivery/` 脚本生成。直接改公开仓库能立即上线，但**下次执行发布脚本会被覆盖**。
@@ -94,5 +106,5 @@ python3 delivery/publish-internal.py <公开仓 question-bank 路径> <settings.
 ## 本地检查与发布
 
 - 从仓库根目录运行 `python3 -m http.server 8000`，通过 HTTP 打开页面检查资源和导航。当前配置指向线上数据库，本地检查时请使用只读流程，或换成独立测试项目。
-- 运行 `node --test tests/*.test.js` 执行回归测试。`firebase.emulator.test.json` 和 `tests/database-rules.integration.cjs` 用于本地 Realtime Database 规则测试。
-- 静态文件随 GitHub Pages 发布。数据库规则独立部署：`firebase deploy --only database --project class-optic`。部署会以本文件整体替换线上规则；本文件已保留共用同一数据库的 `blinkConsole`（眨眼控制台）节点规则，其余与本系统无关的节点（如 `ieltsReading`）已移除——若这些节点对应的其他应用仍在使用同一数据库，请先在 Firebase 控制台核对其规则并在部署前合并，避免误删。修改规则前先比对 Firebase 当前生效的版本。
+- 运行 `node --test tests/*.test.js` 执行回归测试（题库两条为 `tests/*.test.mjs`：`node --test tests/bank-redeem.test.mjs tests/bank-manage-codes.test.mjs`）。`tests/fee-sync-regression.test.js` 覆盖课时费的加密同步、金额口径、口令缓存与预约入账回滚。`firebase.emulator.test.json` 和 `tests/database-rules.integration.cjs` 用于本地 Realtime Database 规则测试。
+- 静态文件随 GitHub Pages 发布。数据库规则独立部署：`firebase deploy --only database --project class-optic`。**规则已按本文件部署到线上**（部署前逐节点比对过线上版本，差异仅本轮新增的三处：链接与激活码允许删除、激活码 `release` 可读），`blinkConsole` 节点规则保留，`ieltsReading` 已不在线上。若其他应用共用同一数据库，改规则前仍应先比对 Firebase 当前生效版本再合并。

@@ -9,19 +9,31 @@ const source = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
     .map(match => match[1])
     .sort((a, b) => b.length - a.length)[0];
 
-function extractFunction(name) {
-    let start = source.indexOf(`function ${name}(`);
+const allScripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+    .map(match => match[1])
+    .join('\n');
+
+function extractFunctionFrom(haystack, name) {
+    let start = haystack.indexOf(`function ${name}(`);
     if (start < 0) throw new Error(`Function not found: ${name}`);
-    if (source.slice(Math.max(0, start - 6), start) === 'async ') start -= 6;
-    const brace = source.indexOf('{', start);
+    if (haystack.slice(Math.max(0, start - 6), start) === 'async ') start -= 6;
+    // 跳过参数列表（可能有 options = {} 这类默认值），再定位函数体起始大括号
+    const paren = haystack.indexOf('(', start);
+    let parenDepth = 0;
+    let cursor = paren;
+    for (; cursor < haystack.length; cursor += 1) {
+        if (haystack[cursor] === '(') parenDepth += 1;
+        else if (haystack[cursor] === ')' && --parenDepth === 0) break;
+    }
+    const brace = haystack.indexOf('{', cursor);
     let depth = 0;
     let quote = '';
     let escaped = false;
     let lineComment = false;
     let blockComment = false;
-    for (let index = brace; index < source.length; index += 1) {
-        const char = source[index];
-        const next = source[index + 1];
+    for (let index = brace; index < haystack.length; index += 1) {
+        const char = haystack[index];
+        const next = haystack[index + 1];
         if (lineComment) {
             if (char === '\n') lineComment = false;
             continue;
@@ -54,10 +66,13 @@ function extractFunction(name) {
             continue;
         }
         if (char === '{') depth += 1;
-        else if (char === '}' && --depth === 0) return source.slice(start, index + 1);
+        else if (char === '}' && --depth === 0) return haystack.slice(start, index + 1);
     }
     throw new Error(`Unterminated function: ${name}`);
 }
+
+const extractFunction = name => extractFunctionFrom(source, name);
+const extractAnyScript = name => extractFunctionFrom(allScripts, name);
 
 function createContext(extra = {}) {
     const context = {
@@ -77,6 +92,15 @@ function createContext(extra = {}) {
                 return !!aStart && !!aEnd && !!bStart && !!bEnd && aStart < bEnd && bStart < aEnd;
             }
         },
+        // 云端同步里 pushCloudNow 依赖的少量状态函数，默认给安全实现，用例可覆盖
+        getYearSyncState: () => ({ dirty: false, changeId: 0, baseRevision: null, baseFingerprint: '' }),
+        markYearSynced: () => {},
+        markYearSyncError: () => {},
+        hasLedgerSliceContent: slice => !!(slice && (
+            (Array.isArray(slice.records) && slice.records.length)
+            || (Array.isArray(slice.students) && slice.students.length))),
+        clearCloudConflict: () => {},
+        currentFeePassphraseSync: () => '',
         ...extra
     };
     vm.createContext(context);
@@ -96,6 +120,9 @@ function createContext(extra = {}) {
         'applyStudentProfileToLedgerData',
         'findLessonConflicts'
     ].forEach(name => vm.runInContext(extractFunction(name), context));
+    // 金额/学年口径函数在第一个 script 块里，统一按全量脚本抽取
+    ['toCents', 'fromCents', 'moneySum', 'moneyText', 'roundHours', 'computeTotal', 'ledgerYearOf', 'recordBelongsToActiveYear']
+        .forEach(name => vm.runInContext(extractAnyScript(name), context));
     return context;
 }
 
@@ -412,7 +439,8 @@ test('first upload does not overwrite a vault created during the transaction', a
         lastCloudPushError: ''
     });
     vm.runInContext(extractFunction('pushCloudNow'), context);
-    const result = await context.pushCloudNow({ year: '2026', slice: { students: [], records: [] }, changeId: 1 });
+    // 本机有内容才会走写入事务；空账本现在直接跳过，不创建空 vault
+    const result = await context.pushCloudNow({ year: '2026', slice: { students: [], records: [{ id: 'r1', date: '2026-03-01', studentName: '小明', hours: 1, rate: 200, total: 200 }] }, changeId: 1 });
     assert.equal(result, false);
     assert.equal(overwritten, false);
     assert.equal(conflict.reason, 'remote-created');
@@ -487,4 +515,197 @@ test('rotation recovery validates every year before saving a recovery journal', 
     await context.recoverFeePassphraseRotation();
     assert.deepEqual(JSON.parse(journal), { oldPass: 'old', newPass: 'new' });
     assert.equal(resumed, 1);
+});
+
+test('金额按分位累加，逐笔 toFixed 的偏差不会累积到汇总', () => {
+    const context = createContext();
+    // 单价 × 课时的唯一算法
+    assert.equal(context.computeTotal(150.5, 1.5), 225.75);
+    assert.equal(context.computeTotal(33.33, 0.01), 0.33);
+    assert.equal(context.computeTotal(0.1, 3), 0.3);
+    // 逐笔四舍五入后再用浮点相加会得到 0.30000000000000004
+    const naive = 0.1 + 0.2;
+    assert.notEqual(naive, 0.3);
+    assert.equal(context.moneySum([0.1, 0.2]), 0.3);
+    assert.equal(context.moneySum([0.1, 0.2, 0.3, 0.4]), 1);
+    // 一天 9 节课、每节 33.33×0.5 的典型场景
+    const day = new Array(9).fill(context.computeTotal(33.33, 0.5));
+    assert.equal(context.computeTotal(33.33, 0.5), 16.67);
+    assert.equal(context.moneySum(day), 150.03);
+    assert.equal(context.moneyText(context.moneySum(day)), '150.03');
+});
+
+test('记录归属学年只看 date 的年份', () => {
+    const context = createContext();
+    assert.equal(context.ledgerYearOf('2026-01-05'), '2026');
+    assert.equal(context.ledgerYearOf(''), '');
+    assert.equal(context.recordBelongsToActiveYear({ date: '2026-12-31' }), true);
+    assert.equal(context.recordBelongsToActiveYear({ date: '2025-12-31' }), false);
+});
+
+test('账本没有变化时不再重新加密，也不消耗新 revision', async () => {
+    let vault = { revision: 5, updatedAt: 100, cipher: 'c5', salt: 's', kdfIterations: 250000 };
+    let encryptCalls = 0;
+    let transactions = 0;
+    let fingerprint = '';
+    const slice = {
+        students: [],
+        records: [{ id: 'r1', date: '2026-03-01', studentName: '小明', hours: 1, rate: 200, total: 200 }],
+        lessonOverrides: {},
+        dismissedLessons: []
+    };
+    const context = createContext({
+        db: { ref: () => ({ once: async () => ({ val: () => null }) }) },
+        cloudDeleteInProgress: false,
+        cloudVersionsByYear: { 2026: { revision: 5, updatedAt: 100 } },
+        cloudDecryptedByYear: {},
+        getCloudConflict: () => null,
+        setCloudConflict: () => {},
+        clearCloudConflict: () => {},
+        getYearSyncState: () => ({ dirty: true, changeId: 1, baseRevision: 5, baseFingerprint: fingerprint }),
+        vaultRefFor: () => ({
+            once: async () => ({ val: () => vault }),
+            transaction: async update => {
+                transactions += 1;
+                const next = update(vault);
+                if (!next) return { committed: false };
+                vault = next;
+                return { committed: true, snapshot: { val: () => vault } };
+            }
+        }),
+        encryptFeeData: async () => {
+            encryptCalls += 1;
+            return { cipher: 'c6', salt: 's2', kdfIterations: 250000 };
+        },
+        markYearSynced: () => {},
+        markYearSyncError: () => {},
+        showToast: () => {},
+        setLedgerSaveStatus: () => {},
+        readRemoteLedgerData: async () => ({ students: [], records: [] }),
+        hasLedgerSliceContent: () => true,
+        lastCloudPushError: ''
+    });
+    vm.runInContext(extractFunction('pushCloudNow'), context);
+    fingerprint = context.ledgerSliceFingerprint(slice);
+    assert.equal(await context.pushCloudNow({ year: '2026', slice, changeId: 1 }), true);
+    assert.equal(encryptCalls, 0, '内容与基线一致时不应重新加密');
+    assert.equal(transactions, 0, '内容与基线一致时不应发起写入');
+    assert.equal(vault.revision, 5, 'revision 不应变化');
+
+    // 内容真的变了才写入，并且只涨一个版本
+    fingerprint = '';
+    assert.equal(await context.pushCloudNow({ year: '2026', slice, changeId: 2 }), true);
+    assert.equal(encryptCalls, 1);
+    assert.equal(transactions, 1);
+    assert.equal(vault.revision, 6);
+});
+
+test('解密缓存绑定当前口令，换口令后不会命中旧明文', async () => {
+    let pass = 'old-pass';
+    let decryptCalls = 0;
+    let fail = false;
+    const context = createContext({
+        cloudDecryptedByYear: {},
+        activeYear: '2026',
+        currentFeePassphraseSync: () => pass,
+        decryptFeeData: async () => {
+            decryptCalls += 1;
+            if (fail) throw new Error('bad key');
+            return { records: [{ id: 'r1' }] };
+        }
+    });
+    vm.runInContext(extractFunction('readRemoteLedgerData'), context);
+    const remote = { revision: 3, updatedAt: 30, cipher: 'c', salt: 's', kdfIterations: 250000 };
+    await context.readRemoteLedgerData('2026', remote);
+    await context.readRemoteLedgerData('2026', remote);
+    assert.equal(decryptCalls, 1, '同一口令应命中缓存');
+
+    pass = 'new-pass';
+    await context.readRemoteLedgerData('2026', remote);
+    assert.equal(decryptCalls, 2, '换口令后必须重新解密，不能被旧明文掩盖');
+
+    pass = 'third-pass';
+    fail = true;
+    await assert.rejects(context.readRemoteLedgerData('2026', remote), error => error.code === 'fee-passphrase-mismatch');
+    assert.equal(context.cloudDecryptedByYear['2026'], undefined, '解密失败要丢掉旧缓存');
+});
+
+test('预约导入：预约状态写不成功时撤回该条账本记录，不留半成功状态', async () => {
+    const reservations = {
+        r1: {
+            nickname: '小明', slotId: 's1', status: 'completed', feeStatus: 'pending',
+            time: '3/1 18:00-19:00',
+            slotSnapshot: { date: '2026-03-01', startTime: '18:00', endTime: '19:00' }
+        }
+    };
+    const alerts = [];
+    let pushes = 0;
+    const context = createContext({
+        activeYear: '2026',
+        data: { students: [{ id: 's1', name: '小明', rate: 200 }], records: [], lessonOverrides: {}, dismissedLessons: [] },
+        db: {
+            ref: path => ({
+                once: async () => ({ val: () => (String(path).endsWith('/reservations') ? reservations : null) }),
+                transaction: async () => { throw new Error('network down'); }
+            })
+        },
+        cloudPushChain: Promise.resolve(true),
+        saveData: () => {},
+        showToast: () => {},
+        alert: message => alerts.push(message),
+        confirm: () => true,
+        refreshPendingList: async () => true,
+        importPendingBusy: false
+    });
+    context.cloudPushChain = { then: () => ({ catch: async () => { pushes += 1; return true; } }), catch: async () => { pushes += 1; return true; } };
+    [
+        'reservationImportFingerprint', 'canPostImportedReservation', 'isRecordExisting',
+        'importPendingLessons', 'importPendingLessonsImpl'
+    ].forEach(name => vm.runInContext(extractFunction(name), context));
+
+    const reservation = reservations.r1;
+    const lesson = {
+        resKey: 'r1', sourceId: 'imported_r1', studentName: '小明', date: '2026-03-01',
+        hours: 1, startTime: '18:00', endTime: '19:00', hasProfile: true, conflicts: [],
+        reservationFingerprint: context.reservationImportFingerprint(reservation)
+    };
+    const ok = await context.importPendingLessons([lesson], {});
+    assert.equal(ok, false);
+    assert.equal(context.data.records.length, 0, '预约状态没写成，账本记录必须撤回');
+    assert.match(alerts.join('\n'), /撤回/);
+});
+
+test('预约导入：不属于当前学年的预约不会写进账本', async () => {
+    const reservations = {
+        r1: {
+            nickname: '小明', slotId: 's1', status: 'completed', feeStatus: 'pending',
+            time: '12/31 18:00-19:00',
+            slotSnapshot: { date: '2025-12-31', startTime: '18:00', endTime: '19:00' }
+        }
+    };
+    const alerts = [];
+    const context = createContext({
+        activeYear: '2026',
+        data: { students: [{ id: 's1', name: '小明', rate: 200 }], records: [], lessonOverrides: {}, dismissedLessons: [] },
+        db: { ref: () => ({ once: async () => ({ val: () => reservations }) }) },
+        cloudPushChain: Promise.resolve(true),
+        saveData: () => {},
+        showToast: () => {},
+        alert: message => alerts.push(message),
+        confirm: () => true,
+        refreshPendingList: async () => true,
+        importPendingBusy: false
+    });
+    [
+        'reservationImportFingerprint', 'canPostImportedReservation', 'isRecordExisting',
+        'importPendingLessons', 'importPendingLessonsImpl'
+    ].forEach(name => vm.runInContext(extractFunction(name), context));
+    const lesson = {
+        resKey: 'r1', sourceId: 'imported_r1', studentName: '小明', date: '2025-12-31',
+        hours: 1, hasProfile: true, conflicts: [],
+        reservationFingerprint: context.reservationImportFingerprint(reservations.r1)
+    };
+    assert.equal(await context.importPendingLessons([lesson], {}), false);
+    assert.equal(context.data.records.length, 0);
+    assert.match(alerts.join('\n'), /不属于 2026 学年/);
 });
