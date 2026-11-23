@@ -28,7 +28,7 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 
 ## 历史遗留与回退
 
-- `papers/`（原模拟卷公开领取与答案分享页及其附件）已从工作树删除，站点页面与脚本不再引用。
+- `papers/`（模拟卷领取登记页 `papers/index.html`，含 A/B 卷答案 PDF、补充说明 PDF 与 8 张答案页图片）**暂时保留**。主站页面与脚本（`index.html`、`app.js`、`admin.js` 等）均不链接到它，只能通过 `/papers/` 直接访问；页面内的领取登记指向两个腾讯文档表单，属站外链接。该目录与主站功能独立，后续要下线时直接删除即可，不影响预约、考试与题库。
 - `workers/`、`functions/`、`teacher-auth.js` 等 Worker / Cloud Functions / 教师登录相关文件已在回退提交 `910c730` 中移除，代码与页面不再引用（仅本段作为历史说明保留名称）。
 - `rollback/6654ea8/` 与 `rollback/README-回退步骤.md` 是 6654ea8 旧版（口令登录、无 Worker）的历史快照与回退说明，**仅作历史回退参考**，不属于当前运行架构；其中的旧版 `database.rules.json` 不应覆盖当前规则。
 

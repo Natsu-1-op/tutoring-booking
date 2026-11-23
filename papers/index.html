@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="华科 839 模拟卷领取登记、填写说明与参考答案">
+  <title>华科 839 模拟卷领取登记</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../student.css">
+  <style>
+    .paper-panel h2 { margin: 0 0 8px; padding: 0; border: 0; color: #1e293b; font-size: 16px; }
+    .paper-panel p { margin: 0; color: #64748b; font-size: 14px; line-height: 1.7; }
+    .paper-panel { margin: 18px 0 16px; }
+    .paper-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .paper-heading h2 { margin: 0; }
+    .paper-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+    .paper-choice { display: flex; flex-direction: column; min-width: 0; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    .paper-choice h3 { margin: 0 0 6px; color: #334155; font-size: 15px; }
+    .paper-choice ul { flex: 1; margin: 8px 0 18px; padding-left: 19px; color: #64748b; font-size: 13px; line-height: 1.8; }
+    .paper-action { display: block; width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 7px; background: #2563eb; color: #fff; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700; }
+    .paper-action:hover { background: #1d4ed8; }
+    .paper-action:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+    button.paper-action { border: 0; cursor: pointer; }
+    button.paper-action[aria-pressed="false"] { background: #e2e8f0; color: #334155; }
+    .paper-pages { margin-top: 16px; }
+    .paper-pages img { display: block; box-sizing: border-box; width: 100%; height: auto; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .paper-supplement { display: grid; gap: 8px; padding: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
+    .paper-panel .paper-answer-note { margin-top: 12px; }
+    [data-registration][hidden] { display: none; }
+    .paper-tips { margin: 0; padding: 0; list-style: none; }
+    .paper-tips li { padding: 12px 0; border-bottom: 1px solid #eef2f7; }
+    .paper-tips li:last-child { padding-bottom: 0; border-bottom: 0; }
+    .paper-tips strong { display: block; margin-bottom: 4px; color: #475569; font-size: 13px; }
+    .paper-footer { margin: 20px 0 0; text-align: center; color: #94a3b8; font-size: 12px; }
+    @media (max-width:640px) { .paper-choices { grid-template-columns: 1fr; gap: 10px; } .paper-choice { padding: 14px; } }
+  </style>
+</head>
+<body class="student-page">
+  <main class="container student-shell">
+    <h1 class="student-title" id="page-title">华科 839 模拟卷领取登记</h1>
+    <section class="student-panel paper-panel" aria-labelledby="methods-title" data-registration>
+      <div class="paper-heading"><h2 id="methods-title">选择领取方式</h2></div>
+      <p>请只填写与你的领取方式对应的一份表单。</p>
+      <div class="paper-choices">
+        <article class="paper-choice">
+          <h3>武汉 / 长春自取</h3>
+          <p>方便在武汉或长春领取的同学</p>
+          <ul><li>登记份数不限</li><li>武汉来工位领取前请先联系确认</li><li>长春领取安排另行通知</li></ul>
+          <a class="paper-action" href="https://docs.qq.com/form/page/DRk9yS3RpaWROVXhR" target="_blank" rel="noopener noreferrer">填写自取登记表</a>
+        </article>
+        <article class="paper-choice">
+          <h3>邮寄领取</h3>
+          <p>不方便自取的同学</p>
+          <ul><li>所有地区统一限提交 10 份</li><li>提交成功不等于审核通过</li><li>邮寄安排和运费另行通知</li></ul>
+          <a class="paper-action" href="https://docs.qq.com/form/page/DRlFkcVdZTG1NUXRx" target="_blank" rel="noopener noreferrer">填写邮寄登记表</a>
+        </article>
+      </div>
+    </section>
+    <section class="student-panel paper-panel" aria-labelledby="answers-title">
+      <h2 id="answers-title">参考答案</h2>
+      <p id="answers-notice">A 卷、B 卷参考答案将于 <time datetime="2026-11-20T00:00:00+08:00">11 月 20 日 00:00（北京时间）</time>开放在线查看。</p>
+      <template id="answers-preview">
+        <div class="paper-supplement">
+          <a class="paper-action" href="./ab-supplement.pdf?v=82cc571d8155" download="补充习题_模拟AB卷未涉及考点.pdf">下载 A、B 卷补充习题册</a>
+          <p>本习题册补充了华科 839 模拟 A、B 卷未涉及的内容。</p>
+        </div>
+        <p class="paper-answer-note">这套模拟卷的计算题确实比早些年的真题难一些。去年都出了那种「雷霆题」，大家也可以试着做做这种知识点都学过、看起来却很新鲜的题。不确定今年会不会考，万一呢？</p>
+        <div class="paper-choices" role="group" aria-label="选择参考答案">
+          <button type="button" class="paper-action" aria-controls="answer-a" aria-pressed="true">查看 A 卷参考答案</button>
+          <button type="button" class="paper-action" aria-controls="answer-b" aria-pressed="false">查看 B 卷参考答案</button>
+        </div>
+        <div class="paper-pages" id="answer-a">
+          <img src="./answer-pages/a-1.png" width="1191" height="1684" alt="A 卷参考答案第 1 页" loading="eager">
+          <img src="./answer-pages/a-2.png" width="1191" height="1684" alt="A 卷参考答案第 2 页" loading="lazy">
+          <img src="./answer-pages/a-3.png" width="1191" height="1684" alt="A 卷参考答案第 3 页" loading="lazy">
+          <img src="./answer-pages/a-4.png" width="1191" height="1684" alt="A 卷参考答案第 4 页" loading="lazy">
+        </div>
+        <div class="paper-pages" id="answer-b" hidden>
+          <img src="./answer-pages/b-1.png" width="1191" height="1684" alt="B 卷参考答案第 1 页" loading="lazy">
+          <img src="./answer-pages/b-2.png" width="1191" height="1684" alt="B 卷参考答案第 2 页" loading="lazy">
+          <img src="./answer-pages/b-3.png" width="1191" height="1684" alt="B 卷参考答案第 3 页" loading="lazy">
+          <img src="./answer-pages/b-4.png" width="1191" height="1684" alt="B 卷参考答案第 4 页" loading="lazy">
+        </div>
+      </template>
+      <noscript><p>请启用 JavaScript 以查看参考答案。</p></noscript>
+    </section>
+    <section class="student-panel paper-panel" aria-labelledby="help-title" data-registration>
+      <h2 id="help-title">填写须知</h2>
+      <ul class="paper-tips">
+        <li><strong>报名信息截图</strong><p>上传前先打码，遮住完整报名号、身份证号、考生编号和手机号等信息，按表单要求保留核对所需的信息。</p></li>
+        <li><strong>领取码与群昵称</strong><p>自取填写 A 加报名号后六位，邮寄填写 B 加报名号后六位。提交后请将小红书群昵称改成同一领取码；如有重复会联系调整。</p></li>
+        <li><strong>邮寄名额</strong><p>邮寄表最多接收 10 份提交，之后需要审核。寄送时间、收件信息收集及运费安排会在群里另行通知。</p></li>
+      </ul>
+    </section>
+    <p class="paper-footer" data-registration>祝大家备考顺利，考试加油！</p>
+  </main>
+  <script>
+    const answersNotice = document.getElementById('answers-notice');
+    const answersPreview = document.getElementById('answers-preview');
+    const answersOpenAt = Date.parse(answersNotice.querySelector('time').dateTime);
+    const previewRequested = new URLSearchParams(window.location.search).get('preview') === 'answers';
+    const previewEndsAt = answersOpenAt;
+
+    function openAnswersWhenReady() {
+      const now = Date.now();
+      const remaining = answersOpenAt - now;
+      const previewIsOpen = previewRequested && now < previewEndsAt;
+      if (remaining > 0 && !previewIsOpen) {
+        setTimeout(openAnswersWhenReady, Math.min(remaining, 60_000));
+        return;
+      }
+
+      for (const element of document.querySelectorAll('[data-registration]')) {
+        element.hidden = true;
+      }
+      document.title = '华科 839 模拟卷参考答案';
+      document.getElementById('page-title').textContent = '华科 839 模拟卷';
+
+      const preview = answersPreview.content;
+      const answers = Array.from(preview.querySelectorAll('[aria-controls]'), button => ({
+        button,
+        pages: preview.getElementById(button.getAttribute('aria-controls')),
+      }));
+      for (const { button } of answers) {
+        button.addEventListener('click', () => {
+          for (const answer of answers) {
+            const selected = answer.button === button;
+            answer.button.setAttribute('aria-pressed', String(selected));
+            answer.pages.hidden = !selected;
+          }
+        });
+      }
+      answersNotice.replaceWith(preview);
+      answersPreview.remove();
+    }
+
+    openAnswersWhenReady();
+  </script>
+</body>
+</html>
