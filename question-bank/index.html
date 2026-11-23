@@ -126,6 +126,7 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 .mem-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px;background:#b42318;vertical-align:middle}
 .mem-dot.star{background:#b45309}
 .mem-dot.mastered{background:#15803d}
+ .question-references{white-space:normal;margin-top:16px}.question-references figcaption{color:var(--muted);font:13px/1.5 var(--font);text-align:center;padding:6px 12px}.question-references img{object-fit:contain}.diagram>.action{display:block;margin:6px auto;font:13px/1.5 var(--font)}.diagram>.action[hidden]{display:none}#viewer .viewer-stage img.natural-size{max-width:none}
 </style></head>
 <body>
 <section id="internal-gate" aria-labelledby="internal-title">
@@ -527,6 +528,7 @@ function renderDetail(id) {
     const stem = element("div", undefined, "stem");
     const diagrams = bank.figures[id] || [];
     const scans = bank.scans?.[id] || [];
+    const references = bank.references?.[id] || [];
     const stemText = cleanStem(q["题干"],true);
     const links = q["图文附件"].filter(link => bank.assets[link["附件"]] && (bank.previews[link["附件"]] ||
         ["jpg","jpeg","png"].includes(extension(bank.assets[link["附件"]].name))));
@@ -547,11 +549,12 @@ function renderDetail(id) {
     } else {
         stem.textContent = stemText;
         const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
-        if (!originalMode && links.length && (!scans.length || refersToFigure) &&
-                (q["题面原页"] || refersToFigure || !bank.previews[links[0]["附件"]])) {
+        const originalAvailable = q["来源类型"] === "真题" && links.some(link => numericPages(link["页码或位置"]).length);
+        if (!originalMode && links.length &&
+                ((refersToFigure && !references.length) || originalAvailable || !bank.previews[links[0]["附件"]])) {
             const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
             const fold = element("details", undefined, "scan-fallback");
-            fold.append(element("summary",q["题面原页"] ? "查看本题扫描" : "查看原图"));
+            fold.append(element("summary",originalAvailable ? "核对试卷原页" : "查看原图"));
             fold.addEventListener("toggle", () => {
                 if (fold.open && fold.childElementCount === 1) {
                     fold.append(inlineOriginal(links, Math.max(0, known), q["题面原页"]));
@@ -568,6 +571,16 @@ function renderDetail(id) {
     body.hidden = !hasStemContent;
     const original = originalBlock(q, scans, links, originalMode);
     marks.replaceChildren(...[title, subtitle, hasStemContent ? body : null, original].filter(Boolean));
+    if (references.length) {
+        const block = element("section",undefined,"question-references");
+        block.setAttribute("aria-label","本题引用的图和公式");
+        for (const reference of references) {
+            const figure = diagramImage(reference.image,reference.caption);
+            figure.append(element("figcaption",reference.caption));
+            block.append(figure);
+        }
+        marks.append(block);
+    }
     if (window.renderMathInElement) {
         renderMathInElement(stem, {strict:"ignore",throwOnError:true,errorCallback:()=>{},
             delimiters:[{left:"$$",right:"$$",display:true},{left:"\\[",right:"\\]",display:true},
@@ -605,9 +618,26 @@ function diagramImage(id, label = "本题示意图") {
     const fig = element("figure",undefined,"diagram");
     const image = element("img");
     image.alt = label;
-    loadImage(image,id,id.startsWith("scan-") || id.startsWith("figure-extra-") || id==="figure-hecht-8-36" ? "image/webp" : "image/png");
-    fig.append(image);
+    loadImage(image,id,id.startsWith("scan-") || id.startsWith("ref-") || id.startsWith("figure-extra-") || id==="figure-hecht-8-36" ? "image/webp" : "image/png");
+    const enlarge = button("放大图片", () => openImagePreview(image));
+    enlarge.hidden = true;
+    image.addEventListener("load", () => {enlarge.hidden = false;}, {once:true});
+    fig.append(image,enlarge);
     return fig;
+}
+function openImagePreview(image) {
+    if (!image.naturalWidth) return;
+    const preview = element("img");
+    preview.alt = image.alt;
+    preview.src = image.src;
+    const zoom = button("按原尺寸查看", () => {
+        const expanded = preview.classList.toggle("natural-size");
+        zoom.textContent = expanded ? "适应窗口" : "按原尺寸查看";
+    });
+    $("viewer-title").textContent = image.alt;
+    $("viewer-controls").replaceChildren(zoom);
+    $("viewer-stage").replaceChildren(preview);
+    $("viewer").showModal();
 }
 // 题面原页块：单题裁切图优先；没有裁切图但有原页时，直接把原页放到题干位置
 function originalBlock(q, scans, links, mode) {
@@ -916,7 +946,7 @@ try {
 }
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-8b7f2f419ecdb981", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-2a7acaf08d4d9d41", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
