@@ -404,9 +404,9 @@ function renderDetail(id) {
         stem.textContent = stemText;
         const links = q["图文附件"].filter(link => bank.previews[link["附件"]] ||
             ["jpg","jpeg","png"].includes(extension(bank.assets[link["附件"]].name)));
-        const refersToFigure = /如图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText);
+        const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
         for (const scan of scans) stem.append(diagramImage(scan, "本题题面"));
-        if (links.length && (!scans.length || (q["图文附件"].length > 1 && refersToFigure)) &&
+        if (links.length && (!scans.length || refersToFigure) &&
                 (q["题面原页"] || refersToFigure || !bank.previews[links[0]["附件"]])) {
             const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
             const fold = element("details", undefined, "scan-fallback");
@@ -446,7 +446,7 @@ function diagramImage(id, label = "本题示意图") {
     const fig = element("figure",undefined,"diagram");
     const image = element("img");
     image.alt = label;
-    loadImage(image,id,id.startsWith("scan-") || id==="figure-hecht-8-36" ? "image/webp" : "image/png");
+    loadImage(image,id,id.startsWith("scan-") || id.startsWith("figure-extra-") || id==="figure-hecht-8-36" ? "image/webp" : "image/png");
     fig.append(image);
     return fig;
 }
@@ -725,5 +725,5 @@ readHash();
 
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-9703722616498763"}</script><script src="access.js?v=internal-v2-index"></script></body>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-bc5ec72acfabeef9"}</script><script src="access.js?v=internal-v2-index"></script></body>
 </html>
