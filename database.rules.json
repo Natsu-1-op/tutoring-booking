@@ -2,12 +2,12 @@
   "rules": {
   "questionBankAccess": {
     "settings": {
-      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'"
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'"
     },
     "links": {
-      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
       "$token": {
-        ".write": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+        ".write": "auth != null && auth.token.email === '1843499931@qq.com'",
         ".validate": "$token.matches(/^[A-Za-z0-9_-]{32}$/) && newData.hasChildren(['label','createdAt','delivery'])",
         "label": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
@@ -41,10 +41,10 @@
     }
   },
     "users": {
-      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
       "$uid": {
-        ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
-        ".write": "auth != null && (auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef' || (auth.uid === $uid && !data.exists()))",
+        ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
+        ".write": "auth != null && (auth.token.email === '1843499931@qq.com' || (auth.uid === $uid && !data.exists()))",
         ".validate": "newData.hasChildren(['email','createdAt'])",
         "email": {
           ".write": "auth != null && auth.uid === $uid",
@@ -60,12 +60,12 @@
         "bankAccess": {
           "active": {
             ".read": "auth != null && auth.uid === $uid",
-            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".write": "auth != null && (auth.uid === $uid || auth.token.email === '1843499931@qq.com')",
             ".validate": "newData.isBoolean()"
           },
           "expiresAt": {
             ".read": "auth != null && auth.uid === $uid",
-            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".write": "auth != null && (auth.uid === $uid || auth.token.email === '1843499931@qq.com')",
             ".validate": "newData.isNumber() && newData.val() <= now + 94608000000"
           },
           "days": {
@@ -74,7 +74,7 @@
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1095"
           },
           "updatedAt": {
-            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".write": "auth != null && (auth.uid === $uid || auth.token.email === '1843499931@qq.com')",
             ".validate": "newData.isNumber() && newData.val() <= now + 300000"
           },
           "key": {
@@ -96,7 +96,7 @@
           }
         },
         "bankMemory": {
-          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+          ".read": "auth != null && (auth.uid === $uid || auth.token.email === '1843499931@qq.com')",
           ".write": "auth != null && auth.uid === $uid",
           "$qid": {
             ".validate": "newData.hasChildren(['updatedAt']) && newData.child('updatedAt').isNumber()",
@@ -115,10 +115,10 @@
       }
     },
     "activation_codes": {
-      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
       ".indexOn": ["createdAt"],
       "$code": {
-        ".write": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+        ".write": "auth != null && auth.token.email === '1843499931@qq.com'",
         ".validate": "$code.matches(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/) && newData.hasChildren(['days','durationMs','note','createdAt','createdBy','release','key'])",
         "days": {
           ".read": "auth != null",

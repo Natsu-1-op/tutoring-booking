@@ -6,11 +6,11 @@ TutorBooking 为 1v1 辅导提供学生预约、教师排班和课时费管理�
 
 GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件。所有页面均在浏览器中运行，并通过 Firebase Web SDK 直连 Firebase 项目 `class-optic`（Authentication + Realtime Database，RTDB 区域为 `asia-southeast1`）。**当前架构不含 Cloudflare Worker、Firebase App Check、Cloud Functions，也不使用 Google 教师登录**；这些组件曾在历史提交中出现，已随回退提交 `910c730` 移除，仓库中不再保留引用。
 
-题库使用 Firebase Authentication 的 **Email/Password（邮箱密码）** 登录，不提供 Google 登录。学生注册邮箱账号后兑换管理员发放的激活码解锁题库；旧的「内部链接」发放方式仍然可用，两条通道互不影响。数据库规则按管理员 UID 限制链接列表、激活码和发布配置的访问。预约后台、命题评卷和课时费管理入口沿用管理口令，由各页面读取 Realtime Database 的 `admin_auth` 验证（口令命中的节点值为 `true` 即放行）。学生预约使用姓名和班级口令，凭预约码查询或取消。
+题库使用 Firebase Authentication 的 **Email/Password（邮箱密码）** 登录，不提供 Google 登录。学生注册邮箱账号后兑换管理员发放的激活码解锁题库；旧的「内部链接」发放方式仍然可用，两条通道互不影响。数据库规则按管理员邮箱（`auth.token.email`）限制链接列表、激活码和发布配置的访问；管理员身份绑定邮箱而非 UID，删号重建只要邮箱不变，规则无需改动。预约后台、命题评卷和课时费管理入口沿用管理口令，由各页面读取 Realtime Database 的 `admin_auth` 验证（口令命中的节点值为 `true` 即放行）。学生预约使用姓名和班级口令，凭预约码查询或取消。
 
 **题库用户与 1v1 约课学员是两套完全独立的名单**：题库账号存放在 `users/{uid}`，约课名单存放在 `years/{学年}/studentWhitelist`，互不写入、互不校验。
 
-数据库规则现状：`questionBankAccess` 按管理员 UID 限制；`users/{uid}` 仅本人可读自己的访问字段，密钥只有在激活且未过期、未被停用时才可读；`activation_codes/{code}` 由管理员创建，兑换申请只能原子写入一次；`admin_auth` 根节点禁止读写、仅按口令读取；`examRankings`、`submittedExamLocks` 用于成绩排名与交卷锁。`years/{学年}` 下的业务节点（`slots`、`reservations`、`settings`、`studentWhitelist`、`studentHours`、`operationLog`、`metadata`、`dailyLocks`、`feeVault`、`feeVaultDeletedAt`）保留匿名读写以支持无感约课与课时费加密同步，未显式声明的子节点一律拒绝非空写入；管理页面的口令校验只控制界面入口。实际数据库权限以已发布规则为准。
+数据库规则现状：`questionBankAccess` 按管理员邮箱限制；`users/{uid}` 仅本人可读自己的访问字段，密钥只有在激活且未过期、未被停用时才可读；`activation_codes/{code}` 由管理员创建，兑换申请只能原子写入一次；`admin_auth` 根节点禁止读写、仅按口令读取；`examRankings`、`submittedExamLocks` 用于成绩排名与交卷锁。`years/{学年}` 下的业务节点（`slots`、`reservations`、`settings`、`studentWhitelist`、`studentHours`、`operationLog`、`metadata`、`dailyLocks`、`feeVault`、`feeVaultDeletedAt`）保留匿名读写以支持无感约课与课时费加密同步，未显式声明的子节点一律拒绝非空写入；管理页面的口令校验只控制界面入口。实际数据库权限以已发布规则为准。
 
 ## 页面与代码
 
