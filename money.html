@@ -1219,6 +1219,41 @@
         return remaining.length === 0;
     }
 
+    // 删掉由预约入账的记录时，同时把该预约标为已忽略：否则下一轮刷新会把同一条
+    // 完成课程自动再导入一次，老师会觉得「删了又回来了」。
+    async function ignoreReservationAfterRecordDeleted(record) {
+        if (!db || !activeYear || !record) return false;
+        const resKey = String(record.reservationId
+            || String(record.sourceId || '').replace(/^imported_/, ''));
+        if (!resKey) return false;
+        try {
+            data.dismissedLessons = Array.isArray(data.dismissedLessons) ? data.dismissedLessons : [];
+            if (!data.dismissedLessons.some(item => item.resKey === resKey)) {
+                data.dismissedLessons.push({
+                    resKey,
+                    date: record.date,
+                    studentName: record.studentName,
+                    hours: roundHours(record.hours || 0)
+                });
+                saveData();
+                await cloudPushChain.catch(() => false);
+            }
+            await db.ref(`years/${activeYear}/reservations/${resKey}`).transaction(current => {
+                if (!current || current.status !== 'completed') return;
+                if (current.feeRecordId && String(current.feeRecordId) !== String(record.id)) return;
+                current.feeStatus = 'dismissed';
+                current.feeDismissedAt = Date.now();
+                current.feePostedAt = null;
+                current.feeRecordId = null;
+                return current;
+            });
+            return true;
+        } catch (error) {
+            console.error('删除记录后标记该预约已忽略失败:', error);
+            return false;
+        }
+    }
+
     async function deleteRecord(id) {
         if (!confirm('确定删除这条记录吗？')) return;
         const recordIndex = (data.records || []).findIndex(item => item.id === id);
@@ -1235,9 +1270,14 @@
                 return showToast('已在本机记录删除，云端恢复后会继续同步；预约关联暂未改变');
             }
             const unlinked = await flushPendingFeeUnlinks();
+            // 由预约入账的记录被删除后，把预约标为已忽略，避免自动入账又把它拉回来
+            const ignored = unlinked && (record.sourceId || record.reservationId)
+                ? await ignoreReservationAfterRecordDeleted(record)
+                : false;
             // 解除关联后立即重算待入账列表，避免日历里已删除、列表里还显示已入账
             await refreshPendingList({ skipAutoPost: true }).catch(() => false);
-            showToast(unlinked ? '已删除，相关预约已恢复为待入账' : '账本已删除，预约关联将在刷新后继续重试');
+            if (ignored) showToast('已删除，该预约已标为「已忽略」，不会自动再导入（可在已忽略时间段恢复）');
+            else showToast(unlinked ? '已删除，相关预约已恢复为待入账' : '账本已删除，预约关联将在刷新后继续重试');
         } catch (error) {
             console.error('删除课时记录并解除预约关联失败', error);
             showToast('删除操作已保存在本机，将在刷新后继续重试');
