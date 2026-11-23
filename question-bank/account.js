@@ -103,11 +103,11 @@
                 db.ref(`users/${user.uid}/bankAccess/release`).once("value"),
             ]);
         } catch {
-            return null;
+            return {state: "nokey"};
         }
         const key = keySnap.val();
         const release = releaseSnap.val();
-        if (typeof key !== "string" || !key) return null;
+        if (typeof key !== "string" || !key) return {state: "nokey"};
         if (release !== config.release) return {state: "outdated", release};
         return {key, release, expiresAt};
     }
@@ -128,13 +128,9 @@
             return {state: access.state, expiresAt: access.expiresAt, user};
         }
         const grant = await readGrant(user, access.expiresAt);
-        if (!grant) {
+        if (!grant || grant.state) {
             cachedGrant = null;
-            return {state: "inactive", user};
-        }
-        if (grant.state === "outdated") {
-            cachedGrant = null;
-            return {state: "outdated", release: grant.release, user};
+            return {state: grant?.state || "inactive", release: grant?.release, user};
         }
         cachedGrant = grant;
         cachedAt = Date.now();
@@ -160,6 +156,29 @@
         return `${plain.slice(0, 4)}-${plain.slice(4, 8)}-${plain.slice(8)}`;
     }
 
+    /**
+     * 读取激活码里的密钥。
+     * 规则只对「claim.usedBy === 本人」放行 key；release 本来就没有读取授权，
+     * 所以取不到时沿用当前页面版本，不能把一次成功的兑换判成失败。
+     */
+    async function readCodeSecret(code) {
+        let key;
+        try {
+            key = (await db.ref(`activation_codes/${code}/key`).once("value")).val();
+        } catch (error) {
+            console.warn("[qbank] activation key denied", error?.code);
+            throw new Error("激活码的密钥读取被拒绝，请把这串激活码发给管理员核对。");
+        }
+        if (typeof key !== "string" || !key) throw new Error("激活码缺少密钥配置，请联系管理员。");
+        let release = "";
+        try {
+            release = (await db.ref(`activation_codes/${code}/release`).once("value")).val() || "";
+        } catch {
+            release = ""; // 正常情况：学生账号没有读 release 的权限
+        }
+        return {key, release: release || config.release};
+    }
+
     async function redeem(rawCode) {
         const user = await currentUser();
         if (!user) throw new Error("请先登录后再兑换激活码。");
@@ -176,51 +195,62 @@
         if (!durationMs) throw new Error("激活码不存在，请核对后重试。");
         if (revokedSnap.val() === true) throw new Error("这个激活码已被停用。");
 
-        // 2) 原子兑换：claim 不存在时才写入，并发下由 transaction 保证只有一人成功
-        const claimRef = db.ref(`activation_codes/${code}/claim`);
-        const now = Date.now();
-        const claimExpiresAt = now + durationMs;
-        let result;
+        // 2) 是否已由本人兑换过。中途失败（比如密钥没写进个人档案）时，
+        //    这里能接管旧记录补齐，避免激活码被“吃掉”后学生毫无办法。
+        let ownClaim = null;
         try {
-            result = await claimRef.transaction(current => {
-                if (current !== null) return; // 已被兑换，终止
-                return {
-                    usedBy: user.uid,
-                    usedAt: now,
-                    expiresAt: claimExpiresAt,
-                    email: user.email || "",
-                };
-            });
-        } catch (error) {
-            // 已被他人兑换时读权限即被拒，SDK 抛出 PERMISSION_DENIED
-            if (String(error?.code || "").indexOf("PERMISSION_DENIED") >= 0) {
-                throw new Error("这个激活码已经被使用或已停用。");
-            }
-            throw error;
-        }
-        if (!result.committed) throw new Error("这个激活码已经被使用。");
-
-        // 3) 取密钥并写入个人档案（受规则约束：兑换成功后该码的 key 才对本人可读）
-        let key;
-        let release;
-        try {
-            const [keySnap, releaseSnap] = await Promise.all([
-                db.ref(`activation_codes/${code}/key`).once("value"),
-                db.ref(`activation_codes/${code}/release`).once("value"),
-            ]);
-            key = keySnap.val();
-            release = releaseSnap.val();
+            ownClaim = (await db.ref(`activation_codes/${code}/claim`).once("value")).val();
         } catch {
-            throw new Error("激活成功，但密钥读取被拒绝，请联系管理员。");
+            ownClaim = null; // 已被他人兑换时连读都不允许
         }
-        if (typeof key !== "string" || !key) throw new Error("激活码缺少密钥配置，请联系管理员。");
+        if (ownClaim && ownClaim.usedBy !== user.uid) throw new Error("这个激活码已经被使用。");
 
-        // 4) 叠加有效期：未过期则在原到期时间上叠加，已过期则从当前时间起算
-        const expiresRef = db.ref(`users/${user.uid}/bankAccess/expiresAt`);
-        const currentExpires = Number((await expiresRef.once("value")).val()) || 0;
-        const base = Math.max(Date.now(), currentExpires);
-        const expiresAt = base + durationMs;
+        // 3) 原子兑换：claim 不存在时才写入，并发下由 transaction 保证只有一人成功
+        let claimExpiresAt = Number(ownClaim?.expiresAt) || 0;
+        if (!ownClaim) {
+            const claimRef = db.ref(`activation_codes/${code}/claim`);
+            const now = Date.now();
+            claimExpiresAt = now + durationMs;
+            let result;
+            try {
+                result = await claimRef.transaction(current => {
+                    if (current !== null) return; // 已被兑换，终止
+                    return {
+                        usedBy: user.uid,
+                        usedAt: now,
+                        expiresAt: claimExpiresAt,
+                        email: user.email || "",
+                    };
+                });
+            } catch (error) {
+                // 已被他人兑换时读权限即被拒，SDK 抛出 PERMISSION_DENIED
+                if (String(error?.code || "").indexOf("PERMISSION_DENIED") >= 0) {
+                    throw new Error("这个激活码已经被使用或已停用。");
+                }
+                throw error;
+            }
+            if (!result.committed) throw new Error("这个激活码已经被使用。");
+        }
+
+        // 4) 取密钥（受规则约束：兑换成功后该码的 key 才对本人可读）
+        const {key, release} = await readCodeSecret(code);
         const days = Number(daysSnap.val()) || Math.round(durationMs / 86400000);
+
+        // 5) 有效期：首次兑换按叠加规则；补齐旧记录时以 claim 记录的到期时间为上限，
+        //    保证重复输入同一个码不会把天数越叠越多
+        const currentExpires = Number(
+            (await db.ref(`users/${user.uid}/bankAccess/expiresAt`).once("value")).val()) || 0;
+        let expiresAt;
+        let stacked = false;
+        if (ownClaim) {
+            expiresAt = Math.max(currentExpires, claimExpiresAt);
+            if (expiresAt <= Date.now()) {
+                throw new Error(`这个激活码您已于 ${dateText(claimExpiresAt)} 用完，请使用新的激活码。`);
+            }
+        } else {
+            stacked = currentExpires > Date.now();
+            expiresAt = Math.max(Date.now(), currentExpires) + durationMs;
+        }
 
         await db.ref(`users/${user.uid}/bankAccess`).update({
             active: true,
@@ -232,7 +262,7 @@
         });
         await db.ref(`users/${user.uid}/claimedCodes/${code}`).set(expiresAt);
         cachedGrant = null;
-        return {expiresAt, days, stacked: currentExpires > Date.now()};
+        return {expiresAt, days, stacked, resumed: Boolean(ownClaim)};
     }
 
     // ---------- 界面 ----------
@@ -272,6 +302,8 @@
             say(`题库权限已于 ${dateText(expiresAt)} 到期，请输入新的激活码续期。`);
         } else if (state === "outdated") {
             say("题库已更新到新版本，请联系管理员获取对应激活码。");
+        } else if (state === "nokey") {
+            say("激活信息不完整（缺少密钥），请把上次那串激活码再输入一次完成绑定。");
         } else {
             say("账号尚未激活，请输入激活码解锁题库。");
         }
@@ -387,9 +419,11 @@
             try {
                 const done = await redeem($("activate-code").value);
                 $("activate-code").value = "";
-                say(done.stacked
-                    ? `兑换成功，已在原有效期上叠加 ${done.days} 天，到期时间 ${dateText(done.expiresAt)}。`
-                    : `兑换成功，有效期 ${done.days} 天，到期时间 ${dateText(done.expiresAt)}。`);
+                say(done.resumed
+                    ? `已补齐激活信息，到期时间 ${dateText(done.expiresAt)}。`
+                    : done.stacked
+                        ? `兑换成功，已在原有效期上叠加 ${done.days} 天，到期时间 ${dateText(done.expiresAt)}。`
+                        : `兑换成功，有效期 ${done.days} 天，到期时间 ${dateText(done.expiresAt)}。`);
                 cachedGrant = null;
                 location.reload();
             } catch (error) {

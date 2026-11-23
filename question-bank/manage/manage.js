@@ -145,7 +145,7 @@ function showCodes() {
     const items = Object.entries(codes).sort((a,b)=>(b[1].createdAt||0)-(a[1].createdAt||0));
     if (!items.length) {
         const cell = host.insertRow().insertCell();
-        cell.colSpan = 6;
+        cell.colSpan = 7;
         cell.textContent = "还没有生成激活码。";
         return;
     }
@@ -164,10 +164,32 @@ function showCodes() {
         } else { state.textContent = "未使用"; state.className = "live"; }
         row.insertCell().textContent = claim?.email || claim?.usedBy || "";
         row.insertCell().textContent = claim ? date.format(claim.expiresAt) : "";
+        const ops = row.insertCell();
         if (!claim && !item.revoked) {
-            state.append(" ");
-            state.append(action("复制", () => copy(code, "已复制该激活码。")));
+            ops.append(action("复制", () => copy(code, "已复制该激活码。")));
+            ops.append(action("停用", async () => {
+                if (!confirm(`停用后激活码 ${code} 将无法再兑换。确认停用？`)) return;
+                try {
+                    await codesAPI("/" + code, "PATCH", {revoked: true});
+                    await loadCodes();
+                    notice(`已停用 ${code}。`);
+                } catch (e) { notice(e.message); }
+            }));
         }
+        ops.append(action("删除", async () => {
+            const tip = claim
+                ? `该码已被 ${claim.email || claim.usedBy} 使用，删除只清除这条记录，对方已获得的题库权限不受影响。\n确认删除 ${code}？`
+                : `删除后 ${code} 立即作废且无法恢复。\n确认删除？`;
+            if (!confirm(tip)) return;
+            try {
+                await codesAPI("/" + code, "DELETE");
+                delete codes[code];
+                showCodes();
+                notice(`已删除 ${code}。`);
+            } catch (e) {
+                notice("删除失败：" + e.message + "（若提示权限不足，请先把最新的 database.rules.json 更新到线上）");
+            }
+        }, "danger"));
     }
 }
 function unusedCodes() {

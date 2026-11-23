@@ -45,9 +45,11 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 | `activation_codes/{code}` | `days`、`durationMs`、`note`、`createdAt`、`createdBy`、`release`、`key`、`revoked` | 仅管理员 |
 | `activation_codes/{code}/claim` | `usedBy`、`usedAt`、`expiresAt`、`email` | 兑换者，且仅能写一次 |
 
-**兑换规则**：`claim` 用 `.transaction()` 原子写入，`usedBy == null` 时才成功，因此同一个码并发兑换只有一人成功；到期时间按「未过期则在原到期时间上叠加，已过期则从当前时间起算」计算。密钥放在激活码节点内，只有在 `claim.usedBy` 等于本人时才可读，未兑换的码读不到密钥。
+**兑换规则**：`claim` 用 `.transaction()` 原子写入，`usedBy == null` 时才成功，因此同一个码并发兑换只有一人成功；到期时间按「未过期则在原到期时间上叠加，已过期则从当前时间起算」计算。密钥放在激活码节点内，只有在 `claim.usedBy` 等于本人时才可读，未兑换的码读不到密钥。`release` 字段没有开放给学生的读取权限，客户端读不到时按当前页面版本处理（读它只是为了提示「码和题库版本不匹配」，不能因此把已成功的兑换判成失败）。
 
-**管理后台**（`question-bank/manage/`）：按数量、天数、备注批量生成激活码，一键复制本次生成或全部未使用的码；查看每个码的使用者与到期时间；查看题库用户列表并手动续期（叠加天数）或停用/启用。所有操作只作用于 `activation_codes` 与 `users`，不会读写 `years/{学年}/studentWhitelist`。
+**中断补齐**：兑换分「写 `claim`」和「写个人档案」两步。若第二步没写成（网络中断、规则校验失败），学生再次输入同一个码会走补齐流程：只为本人补齐 `key`/`release`/`days`，到期时间取「现有到期时间」和「`claim.expiresAt`」中较晚者，不会叠加第二次天数；若这个码本身已用完，则提示换新码而不是改到期时间。
+
+**管理后台**（`question-bank/manage/`）：按数量、天数、备注批量生成激活码，一键复制本次生成或全部未使用的码；查看每个码的使用者与到期时间；对未使用的码可「停用」（作废但保留记录）或「删除」（从 `activation_codes` 里移除），已使用的码也能删除，删除只清除这条记录，不影响对方已获得的题库权限。还可查看题库用户列表并手动续期（叠加天数）或停用/启用。所有操作只作用于 `activation_codes` 与 `users`，不会读写 `years/{学年}/studentWhitelist`。
 
 **已知边界（无服务端架构的固有上限）**：
 
@@ -55,7 +57,7 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 - 规则把本人可写的 `expiresAt` 限制在 `now + 1095 天` 以内作为硬上限；管理员侧以 `activation_codes` 的 `claim` 记录为审计依据。
 - 题库页新增 Firebase Auth（`firebase-auth.js`）与 `identitytoolkit` / `securetoken` 接口依赖；大陆网络若无法直连这些 Google 域名，邮箱登录会失败（错误提示会显示网络原因）。内部链接方式不依赖 Auth，仍可用。
 
-**上线前置**：Firebase 控制台 Authentication 需已启用「电子邮件/密码」提供商；规则需单独 `firebase deploy --only database --project class-optic` 才会生效。
+**上线前置**：Firebase 控制台 Authentication 需已启用「电子邮件/密码」提供商；规则需单独 `firebase deploy --only database --project class-optic` 才会生效。删除激活码依赖 `activation_codes/$code` 的 `.validate` 允许写入 `null`（形如 `newData.val() === null || (...)`），规则未更新时点「删除」会被拒，此时可先用「停用」。
 
 ## 题库做题记忆与本地批改
 

@@ -35,7 +35,7 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 <form id="gen-codes"><label>数量<input class="short" id="gen-count" type="number" min="1" max="50" step="1" value="5" required></label><label>有效天数<input class="short" id="gen-days" type="number" min="1" max="1095" step="1" value="365" required></label><label>备注<input id="gen-note" maxlength="60" placeholder="例如：2027 届第一批"></label><button class="primary" type="submit">批量生成</button></form>
 <p class="muted">激活码只用于题库账号（邮箱登录），与 1v1 约课名单互相独立。每个码只能兑换一次，续期按叠加天数计算。</p>
 <div id="gen-result" hidden><textarea id="gen-output" rows="4" readonly aria-label="本次生成的激活码"></textarea><button type="button" id="gen-copy">复制本次</button></div>
-<div class="area"><table><thead><tr><th>激活码</th><th>备注</th><th>天数</th><th>状态</th><th>使用者</th><th>到期时间</th></tr></thead><tbody id="code-rows"></tbody></table></div>
+<div class="area"><table><thead><tr><th>激活码</th><th>备注</th><th>天数</th><th>状态</th><th>使用者</th><th>到期时间</th><th>操作</th></tr></thead><tbody id="code-rows"></tbody></table></div>
 <button type="button" id="copy-unused">复制全部未使用激活码</button>
 </section>
 <section class="card">
@@ -48,6 +48,6 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 <p id="status" class="muted" role="status"></p>
 </main>
 <script type="application/json" id="admin-config">{"apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "ownerEmail": "1843499931@qq.com"}</script>
-<script src="manage.js?v=20261123-account-1"></script>
+<script src="manage.js?v=20261123-account-2"></script>
 </body>
 </html>
