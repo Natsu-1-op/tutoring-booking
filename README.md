@@ -21,6 +21,8 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 | `config/firebase-env.js`、`database.rules.json` | 前者初始化约课及考试的 Firebase 连接并提供按学年访问数据的路径。后者记录 Realtime Database 访问权限和数据校验。各管理页面的登录逻辑在对应脚本内。 |
 | `question-bank/index.html`、`question-bank/access.js` | 839 题库学生端。核验账号权限或内部链接，在浏览器中解密并显示题目、公式和图片。 |
 | `question-bank/account.js` | 题库邮箱注册、登录、找回密码、退出，以及激活码兑换与到期核验。题库用户档案写入 `users/{uid}`，与约课名单无关。 |
+| `question-bank/study.js` | 题库个人做题记忆。已掌握 / 错题 / 收藏 / 笔记先写本机 `localStorage`，再防抖同步到 `users/{uid}/bankMemory`，换设备登录同一邮箱时按题逐条合并。 |
+| `question-bank/ai-tutor.js` | 题库本地 BYOK 批改。接口地址、API Key、模型名只存本机，题目原页与学生作答直接发往学生自填的 OpenAI 兼容接口。 |
 | `question-bank/manage/index.html`、`question-bank/manage/manage.js` | 题库管理员后台。生成/复制/停用内部链接；批量生成激活码、查看使用情况；查看题库用户并手动续期或停用。 |
 | `exam_student.html`、`exam_student.js` | 导入学生卷、答题、交卷、下载答卷并查看复查包。Firebase 记录交卷状态和凭证，学生将下载的答卷 JSON 交给老师。 |
 | `exam_teacher.html`、`exam_teacher.js` | 命题、导出母卷和学生卷、导入答卷、评卷以及导出复查包。成绩排名可写入 Firebase。启用 AI 或 OCR 时，相关答题内容会发送到所配置的接口。 |
@@ -39,6 +41,7 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 | --- | --- | --- |
 | `users/{uid}` | `email`、`createdAt`、`disabled`、`claimedCodes/{code}` | 本人建档；`disabled` 仅管理员 |
 | `users/{uid}/bankAccess` | `active`、`expiresAt`、`days`、`key`、`release`、`updatedAt` | 本人兑换时写入；管理员可续期 |
+| `users/{uid}/bankMemory/{编号}` | `state`（`mastered`/`wrong`/空）、`star`、`note`、`updatedAt` | 仅本人 |
 | `activation_codes/{code}` | `days`、`durationMs`、`note`、`createdAt`、`createdBy`、`release`、`key`、`revoked` | 仅管理员 |
 | `activation_codes/{code}/claim` | `usedBy`、`usedAt`、`expiresAt`、`email` | 兑换者，且仅能写一次 |
 
@@ -53,6 +56,32 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 - 题库页新增 Firebase Auth（`firebase-auth.js`）与 `identitytoolkit` / `securetoken` 接口依赖；大陆网络若无法直连这些 Google 域名，邮箱登录会失败（错误提示会显示网络原因）。内部链接方式不依赖 Auth，仍可用。
 
 **上线前置**：Firebase 控制台 Authentication 需已启用「电子邮件/密码」提供商；规则需单独 `firebase deploy --only database --project class-optic` 才会生效。
+
+## 题库做题记忆与本地批改
+
+**筛选与题面展示**：在原有学科、模块、来源、年份、备考范围、实考状态之外，新增三个筛选项——「考点标签」（题库现有 80 个标签，按拼音排序）、「题面形态」（`题面原页` 有/无）、「审查状态」（有核对说明 / 有备注 / 题干以扫描为准），以及「我的标记」（已掌握 / 错题 / 收藏 / 有笔记 / 未标记）。搜索索引同时纳入 `核对说明`、`备注`、`题干状态`、`指定考点`。
+
+对 `题面原页 === true` 的题目，详情页在题干位置展示「本题原页」区块：有单题裁切图（`banks.scans`，717 题）时直接显示裁切图并可展开完整原页；只有完整原页时（约 600 题）直接把原页翻页控件放到题干位置，不再藏在折叠层里。题干为空的题不再渲染空白题干区。`核对说明` 与 `备注` 统一放进题干下方的独立提示块。
+
+**做题记忆**：每道题可标记「已掌握 / 错题待重做 / 收藏」并写个人笔记。写入顺序是先 `localStorage`（键 `hust839-bank-memory`），再 900ms 防抖写 `users/{uid}/bankMemory`。换设备登录同一邮箱时，按 `updatedAt` 逐题取较新的一份合并：云端有本地无则拉回，本地有云端无则回传，两边都有则本地较新的回传、云端较新的采纳，因此不会出现整份覆盖导致记录丢失。未登录（内部链接通道）时只存本机，页面会显示提示。
+
+**本地 BYOK 批改**：题目下方提供作答框、草稿图片上传（支持粘贴，自动压缩到 1280px 长边 / JPEG 0.72，最多 3 张）与批改按钮。设置弹窗填写接口地址（OpenAI 兼容，自动补 `/chat/completions`）、API Key、模型名。
+
+- **API Key 只写本机 `localStorage`（键 `hust839-ai-config`），不上传 Firebase，也不经过本站服务器**；请求由浏览器直接发往学生自己填写的接口。换浏览器或清空站点数据后需重新填写。
+- 发往模型的内容：题号、学科、模块、考点、题干、检索转录、核对说明、备注、备考依据、学生作答，以及该题原页/裁切图（经现有按需解密接口取出后压缩），提示词要求先给「得分：X/Y」再逐点分析。
+- 需要服务商允许浏览器直连（CORS）。OpenAI 官方接口、DeepSeek、通义、豆包等 OpenAI 兼容端点多数可用；若接口拦截跨域，页面会提示具体原因。
+
+## 题库发布流程（重要）
+
+公开仓库的 `question-bank/` 是**产物目录**：`index.html`、`access.js`、`account.js`、`study.js`、`ai-tutor.js`、`manage/`、`content/*.bin` 都由私有题库仓库的 `docs/index.html` 与 `delivery/` 脚本生成。直接改公开仓库能立即上线，但**下次执行发布脚本会被覆盖**。
+
+同步约定：题库前端改动需同时落到私有仓 `docs/index.html`（应用脚本）与 `delivery/`（`internal-client.js`、`account.js`、`study.js`、`ai-tutor.js`、`gate.html`、`gate.css`、`link-admin/`），发布命令为：
+
+```bash
+python3 delivery/publish-internal.py <公开仓 question-bank 路径> <settings.json> --release internal-v2
+```
+
+脚本会注入门禁页面与样式、Firebase SDK、四个前端脚本和 `internal-config`（`release`/`database`/`indexPath`/`apiKey`/`authDomain`），并复制 `manage/`。本轮改动已按此约定同步到私有仓。
 
 ## 历史遗留与回退
 

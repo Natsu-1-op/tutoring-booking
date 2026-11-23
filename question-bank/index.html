@@ -84,6 +84,48 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 #gate-signout{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;font:inherit;color:inherit;cursor:pointer}
 .gate-meta{margin:0;font-size:13px;color:#64748b}
 #internal-status[data-kind="error"]{color:#b42318}
+</style>
+<style>
+.original-page{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:12px 14px;margin:14px 0}
+.original-page h3{margin:0 0 6px;font-size:14px;color:#3c506a;font-weight:650}
+.original-page .diagram{margin:8px 0}
+.original-page .diagram img{max-height:460px}
+.original-meta{margin:0 0 8px;font-size:12px;color:var(--muted)}
+.review-notes{margin:12px 0;padding:10px 12px;border-left:3px solid #93b7f5;background:#f5f9ff;border-radius:0 6px 6px 0}
+.review-notes .note{margin:0;font-size:13px;color:#33465e;line-height:1.6}
+.review-notes .note+.note{margin-top:6px}
+.study-panel,.ai-panel{margin-top:16px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fff}
+.study-panel h3,.ai-panel h3{margin:0 0 8px;font-size:14px;color:#3c506a;font-weight:650;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ai-panel h3 button{border:1px solid var(--line);border-radius:6px;padding:3px 9px;background:#f8fafc;font-size:12px;font-weight:400}
+.memory-actions{display:flex;flex-wrap:wrap;gap:6px}
+.memory-actions button{border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:#f8fafc;font-size:13px}
+.memory-actions button[aria-pressed="true"]{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.memory-actions button[data-state="wrong"][aria-pressed="true"]{background:#b42318;border-color:#b42318}
+.memory-actions button[data-star="1"][aria-pressed="true"]{background:#b45309;border-color:#b45309}
+.study-panel textarea,.ai-panel textarea{width:100%;min-height:76px;border:1px solid #d6dfeb;border-radius:6px;padding:8px;font:14px/1.6 var(--font);resize:vertical;margin-top:8px;color:inherit;background:#fff}
+.study-hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+.study-hint[data-kind="warn"]{color:#8a5a10}
+.ai-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.ai-row button{border:1px solid var(--line);border-radius:6px;padding:5px 11px;background:#f8fafc;font-size:13px}
+.ai-row button.primary{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.ai-row button[disabled]{opacity:.55;cursor:default}
+.ai-result{margin-top:10px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.ai-result:empty{display:none}
+.ai-result p{margin:0 0 6px}
+.ai-result ul{margin:0 0 6px;padding-left:20px}
+.ai-result code{background:#f1f5f9;border-radius:3px;padding:0 3px;font-size:13px}
+.ai-score{font-weight:700;color:#1d4ed8}
+.ai-thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ai-thumbs figure{margin:0;position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;width:66px;height:66px}
+.ai-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-thumbs button{position:absolute;top:1px;right:1px;border:0;border-radius:50%;width:17px;height:17px;line-height:1;padding:0;background:#17243acc;color:#fff;font-size:12px}
+.ai-settings{display:grid;gap:9px}
+.ai-settings label{display:grid;gap:4px;font-size:13px;color:#475569}
+.ai-settings input{padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:inherit}
+.ai-note{font-size:12px;color:#7c5a12;background:#fff8e6;border:1px solid #f2dfae;border-radius:6px;padding:6px 9px;margin:10px 0 0;line-height:1.55}
+.mem-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:6px;background:#b42318;vertical-align:middle}
+.mem-dot.star{background:#b45309}
+.mem-dot.mastered{background:#15803d}
 </style></head>
 <body>
 <section id="internal-gate" aria-labelledby="internal-title">
@@ -139,7 +181,8 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <label>考点模块<select id="module"></select></label>
 <label>来源<select id="origin"></select></label><label>实考年份<select id="year"></select></label>
 <label>备考范围<select id="scope"></select></label><label>实考状态<select id="tested"></select></label>
-
+<label>考点标签<select id="tag"></select></label><label>题面形态<select id="scan"></select></label>
+<label>审查状态<select id="audit"></select></label><label>我的标记<select id="memory"></select></label>
 </div></details>
 <div class="active-filters" id="active-filters" aria-label="已选筛选条件" hidden></div>
 </div>
@@ -168,7 +211,8 @@ const shortcuts = {
     new: new Set(bank.index["备考范围内且未见同考点实考"]),
     excluded: new Set(bank.index["实考过但排除出备考"]),
 };
-const fields = {subject:"学科", module:"模块", origin:"来源类型", year:"实考年份", scope:"有没有可能考", tested:"是否考察过", material:"来源"};
+const fields = {subject:"学科", module:"模块", origin:"来源类型", year:"实考年份", scope:"有没有可能考", tested:"是否考察过", material:"来源",
+    tag:"考点标签", scan:"题面原页", audit:"核对说明", memory:""};
 const names = Object.keys(fields).filter(name => $(name));
 const limits = 18;
 const narrow = matchMedia("(max-width:820px)");
@@ -239,7 +283,8 @@ for (const q of questions) {
     yearsByQuestion.set(q["编号"], years);
     const author = $("material") && q["编号"].startsWith("HECHT-") ? "尤金 赫克特" : "";
     searchable.set(q["编号"], normalize([q["编号"],q["学科"],q["来源"],q["原题号"],author,
-        q["题干"],q["检索转录"],q["章节或原标签"],...q["考点标签"],...years].join(" ")));
+        q["题干"],q["检索转录"],q["章节或原标签"],q["核对说明"],q["备注"],q["题干状态"],
+        q["指定考点"],...q["考点标签"],...years].join(" ")));
 }
 function options(id, values, first) {
     const select = $(id);
@@ -255,6 +300,26 @@ for (const name of ["origin","year","scope","tested"]) {
         options(name, [...new Set(questions.map(q => q[fields[name]]))], "全部");
     }
 }
+// 审查与题面形态相关的筛选：考点标签、题面形态、审查状态、我的标记
+function fillReviewFilters() {
+    const tag = $("tag");
+    if (tag) {
+        const values = [...new Set(questions.flatMap(q => q["考点标签"] || []))]
+            .sort((a,b) => String(a).localeCompare(String(b), "zh-Hans-CN"));
+        options("tag", values, "全部考点");
+    }
+    const scan = $("scan");
+    if (scan) scan.replaceChildren(new Option("全部题面形态",""), new Option("题面原页：有","crop"),
+        new Option("题面原页：无","text"));
+    const audit = $("audit");
+    if (audit) audit.replaceChildren(new Option("全部审查状态",""), new Option("有核对说明","note"),
+        new Option("有备注","remark"), new Option("题干以扫描为准","scan"));
+    const memory = $("memory");
+    if (memory) memory.replaceChildren(new Option("全部标记",""), new Option("已掌握","mastered"),
+        new Option("错题待重做","wrong"), new Option("已收藏","star"), new Option("有笔记","note"),
+        new Option("未标记","unmarked"));
+}
+fillReviewFilters();
 function updateModules() {
     const subject = $("subject").value;
     const previous = $("module").value;
@@ -320,6 +385,14 @@ function refresh() {
         return terms.every(term => searchable.get(id).includes(term)) && filters.every(([name,val]) => {
             if (name === "year") return yearsByQuestion.get(id).has(Number(val));
             if (name === "module") return (q["模块"] || []).includes(val);
+            if (name === "tag") return (q["考点标签"] || []).includes(val);
+            if (name === "scan") return val === "crop" ? q["题面原页"] === true : q["题面原页"] !== true;
+            if (name === "audit") {
+                if (val === "note") return Boolean((q["核对说明"] || "").trim());
+                if (val === "remark") return Boolean((q["备注"] || "").trim());
+                return q["题干状态"] === "按题面扫描作答";
+            }
+            if (name === "memory") return window.qbankStudy ? window.qbankStudy.match(id, val) : true;
             return q[fields[name]] === val;
         });
     });
@@ -354,6 +427,11 @@ function renderList() {
             q["来源"] + " · " + q["原题号"];
         const snippet = cleanStem(q["题干"] || q["检索转录"] || "").replace(/\$|\\[()[\]]/g, "").replace(/\s+/g," ").slice(0,150);
         btn.append(element("small", top), element("span", snippet, "snippet"));
+        try {
+            window.qbankStudy?.decorate(btn, id);
+        } catch (error) {
+            console.error(error);
+        }
         item.append(btn);
         return item;
     });
@@ -450,6 +528,10 @@ function renderDetail(id) {
     const diagrams = bank.figures[id] || [];
     const scans = bank.scans?.[id] || [];
     const stemText = cleanStem(q["题干"],true);
+    const links = q["图文附件"].filter(link => bank.assets[link["附件"]] && (bank.previews[link["附件"]] ||
+        ["jpg","jpeg","png"].includes(extension(bank.assets[link["附件"]].name))));
+    // 题面原页：优先单题裁切图，其次完整原页；命中后题干区不再重复渲染扫描件
+    const originalMode = scans.length ? "crop" : (q["题面原页"] && links.length ? "page" : "");
     if (stemText.includes("@@FIG")) {
         for (const part of stemText.split(/(@@FIG\d+@@)/)) {
             const index = part.match(/^@@FIG(\d+)@@$/);
@@ -464,11 +546,8 @@ function renderDetail(id) {
         if (firstQuestion > 0) stem.append(document.createTextNode(stemText.slice(firstQuestion)));
     } else {
         stem.textContent = stemText;
-        const links = q["图文附件"].filter(link => bank.previews[link["附件"]] ||
-            ["jpg","jpeg","png"].includes(extension(bank.assets[link["附件"]].name)));
         const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
-        for (const scan of scans) stem.append(diagramImage(scan, "本题题面"));
-        if (links.length && (!scans.length || refersToFigure) &&
+        if (!originalMode && links.length && (!scans.length || refersToFigure) &&
                 (q["题面原页"] || refersToFigure || !bank.previews[links[0]["附件"]])) {
             const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
             const fold = element("details", undefined, "scan-fallback");
@@ -484,18 +563,36 @@ function renderDetail(id) {
     const body = element("section",undefined,"question-body");
     body.setAttribute("aria-label","题干");
     body.append(stem);
-    marks.replaceChildren(title,subtitle,body);
+    // 题干为空（题干即原页）时，原页块直接顶到最前，避免大片空白
+    const hasStemContent = Boolean(stemText.trim()) || diagrams.length > 0 || stem.childElementCount > 0;
+    body.hidden = !hasStemContent;
+    const original = originalBlock(q, scans, links, originalMode);
+    marks.replaceChildren(...[title, subtitle, hasStemContent ? body : null, original].filter(Boolean));
     if (window.renderMathInElement) {
         renderMathInElement(stem, {strict:"ignore",throwOnError:true,errorCallback:()=>{},
             delimiters:[{left:"$$",right:"$$",display:true},{left:"\\[",right:"\\]",display:true},
                 {left:"\\(",right:"\\)",display:false},{left:"$",right:"$",display:false}]});
     }
-    if (q["备注"]) marks.append(element("p",q["备注"],"note"));
+    const review = element("div", undefined, "review-notes");
+    if (q["核对说明"]) review.append(element("p","核对说明 · " + q["核对说明"],"note"));
+    if (q["备注"]) review.append(element("p","备注 · " + q["备注"],"note"));
+    if (review.childElementCount) marks.append(review);
     const tags = element("div",undefined,"pills");
     for (const label of q["考点标签"]) tags.append(element("span",label,"pill"));
     const notes = element("details",undefined,"block study-notes");
     notes.append(element("summary","考点与实考依据"),element("p",q["备考判断依据"],"source-details"),tags,renderEvidence(q));
     marks.append(notes);
+    // 新增能力：个人做题记忆 + 本地 BYOK 批改；任一模块异常都不影响题目本身渲染
+    for (const attach of [
+        () => window.qbankStudy?.mount(marks, q),
+        () => window.qbankAi?.mount(marks, q, {scans, links, stemText}),
+    ]) {
+        try {
+            attach();
+        } catch (error) {
+            console.error(error);
+        }
+    }
     const index = filtered.findIndex(item => item["编号"] === id);
     $("q-prev").disabled = index <= 0;
     $("q-next").disabled = index < 0 || index >= filtered.length - 1;
@@ -511,6 +608,30 @@ function diagramImage(id, label = "本题示意图") {
     loadImage(image,id,id.startsWith("scan-") || id.startsWith("figure-extra-") || id==="figure-hecht-8-36" ? "image/webp" : "image/png");
     fig.append(image);
     return fig;
+}
+// 题面原页块：单题裁切图优先；没有裁切图但有原页时，直接把原页放到题干位置
+function originalBlock(q, scans, links, mode) {
+    if (!mode) return null;
+    const block = element("section", undefined, "original-page");
+    block.append(element("h3", mode === "crop" ? "本题原页 · 单题裁切" : "本题原页"));
+    if (q["题干状态"]) block.append(element("p","题干状态：" + q["题干状态"],"original-meta"));
+    const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
+    if (mode === "crop") {
+        for (const scan of scans) block.append(diagramImage(scan, "本题原页"));
+        if (links.length) {
+            const fold = element("details", undefined, "scan-fallback");
+            fold.append(element("summary","查看完整原页"));
+            fold.addEventListener("toggle", () => {
+                if (fold.open && fold.childElementCount === 1) {
+                    fold.append(inlineOriginal(links, Math.max(0, known), true));
+                }
+            });
+            block.append(fold);
+        }
+    } else {
+        block.append(inlineOriginal(links, Math.max(0, known), true));
+    }
+    return block;
 }
 function inlineOriginal(links, initialLink, primary) {
     const preview = element("div",undefined,"page-preview in-stem");
@@ -771,6 +892,10 @@ if (bank.rules["大纲附件"]) $("about-body").append(button("查看内嵌考�
     openAsset({"附件":bank.rules["大纲附件"]});
 }));
 $("total").textContent = questions.length.toLocaleString("zh-CN");
+// 供记忆与批改模块复用：刷新列表、读取题库资源路径
+window.qbankRefresh = refresh;
+window.qbankBank = bank;
+window.qbankQuestion = id => lookup.get(id);
 function readHash() {
     let id;
     try { id = window.questionBankId?.() ?? decodeURIComponent(location.hash.slice(1)); }
@@ -784,7 +909,11 @@ updateModules();
 updateMaterials();
 refresh();
 readHash();
-
+try {
+    window.qbankStudy?.boot();
+} catch (error) {
+    console.error(error);
+}
 };</script>
 
 <script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-8b7f2f419ecdb981", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
@@ -792,5 +921,7 @@ readHash();
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="account.js?v=20261123-account-1"></script>
+<script src="study.js?v=20261123-study-1"></script>
+<script src="ai-tutor.js?v=20261123-ai-1"></script>
 <script src="access.js?v=20261123-account-1"></script></body>
 </html>

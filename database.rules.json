@@ -95,6 +95,22 @@
             ".validate": "newData.isNumber()"
           }
         },
+        "bankMemory": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+          ".write": "auth != null && auth.uid === $uid",
+          "$qid": {
+            ".validate": "newData.hasChildren(['updatedAt']) && newData.child('updatedAt').isNumber()",
+            "state": {
+              ".validate": "newData.isString() && (newData.val() === 'mastered' || newData.val() === 'wrong' || newData.val() === '')"
+            },
+            "star": { ".validate": "newData.isBoolean()" },
+            "note": { ".validate": "newData.isString() && newData.val().length <= 4000" },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 300000"
+            },
+            "$other": { ".validate": false }
+          }
+        },
         "$other": { ".validate": false }
       }
     },
