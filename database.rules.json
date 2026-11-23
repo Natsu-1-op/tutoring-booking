@@ -92,7 +92,19 @@
         },
         "operationLog": {},
         "metadata": {},
-        "dailyLocks": {}
+        "dailyLocks": {},
+        "studentHours": {
+          "$name": {
+            ".validate": "newData.isNumber() || newData.val() === null"
+          }
+        },
+        "feeVault": {
+          ".write": true
+        },
+        "feeVaultDeletedAt": {
+          ".validate": "newData.isNumber() || newData.val() === null"
+        },
+        "$other": { ".validate": false }
       }
     },
     "examRankings": {
@@ -121,69 +133,6 @@
           "submittedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
           "receiptId": { ".validate": "newData.isString() && newData.val().matches(/^EX-[A-Z2-9]{6}-[A-Z2-9]{6}$/)" },
           "$other": { ".validate": false }
-        }
-      }
-    },
-    "blinkConsole": {
-      "config": {
-        ".read": true,
-        ".write": true,
-        "noiseMultiplier": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 12" },
-        "refractoryMs": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 2000" },
-        "minDropCounts": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 200" },
-        "manualThresholdEnabled": { ".validate": "newData.isBoolean()" },
-        "manualDropCounts": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 2000" },
-        "oledText": { ".validate": "newData.isString() && newData.val().length <= 64" },
-        "oledBitmap": { ".validate": "newData.isString() && newData.val().length <= 1200" },
-        "updatedAt": { ".validate": "newData.isNumber()" },
-        "updatedBy": { ".validate": "newData.isString() && newData.val().length <= 100" }
-      }
-    },
-    "ieltsReading": {
-      "v2": {
-        ".read": true,
-        ".write": true,
-        ".validate": "newData.hasChildren(['version','updatedAt'])",
-        "version": {
-          ".validate": "newData.val() === 2"
-        },
-        "updatedAt": {
-          ".validate": "newData.isNumber()"
-        },
-        "progress": {
-          "$id": {
-            ".validate": "$id.matches(/^[A-Za-z0-9_-]{1,512}$/) && newData.hasChildren(['level','due','reviews']) && newData.child('level').isNumber() && newData.child('level').val() >= 0 && newData.child('level').val() <= 5 && newData.child('due').isNumber() && newData.child('due').val() >= 0 && newData.child('reviews').isNumber() && newData.child('reviews').val() >= 0 && (!newData.child('lastAnswer').exists() || (newData.child('lastAnswer').isString() && newData.child('lastAnswer').val().length <= 300))",
-            "history": {
-              "$index": {
-                ".validate": "$index.matches(/^([0-9]|[12][0-9])$/) && newData.hasChildren(['at','rate','level']) && newData.child('at').isNumber() && (newData.child('rate').val() === 'again' || newData.child('rate').val() === 'hard' || newData.child('rate').val() === 'good') && newData.child('level').isNumber() && newData.child('level').val() >= 0 && newData.child('level').val() <= 5"
-              }
-            }
-          }
-        },
-        "legacyProgress": {
-          "$id": {
-            ".validate": "$id.matches(/^[A-Za-z0-9_-]{1,512}$/) && newData.hasChildren(['level','due','reviews']) && newData.child('level').isNumber() && newData.child('level').val() >= 0 && newData.child('level').val() <= 5 && newData.child('due').isNumber() && newData.child('due').val() >= 0 && newData.child('reviews').isNumber() && newData.child('reviews').val() >= 0 && (!newData.child('lastAnswer').exists() || (newData.child('lastAnswer').isString() && newData.child('lastAnswer').val().length <= 300))",
-            "history": {
-              "$index": {
-                ".validate": "$index.matches(/^([0-9]|[12][0-9])$/) && newData.hasChildren(['at','rate','level']) && newData.child('at').isNumber() && (newData.child('rate').val() === 'again' || newData.child('rate').val() === 'hard' || newData.child('rate').val() === 'good') && newData.child('level').isNumber() && newData.child('level').val() >= 0 && newData.child('level').val() <= 5"
-              }
-            }
-          }
-        },
-        "$other": {
-          ".validate": false
-        }
-      },
-      "$other": {
-        ".validate": false
-      },
-      "catalog": {
-        ".read": true,
-        ".write": true,
-        "entries": {
-          "$id": {
-            ".validate": "$id.matches(/^[A-Za-z0-9_-]{1,512}$/) && newData.hasChildren(['id','book','term','meaning','source','sentence','translation','target','extensions']) && newData.child('id').isString() && newData.child('term').isString() && newData.child('sentence').isString() && newData.child('target').isString()"
-          }
         }
       }
     },
