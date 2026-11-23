@@ -68,8 +68,12 @@
     }
 
     function emit() {
-        for (const callback of listeners) {
-            try { callback(); } catch (error) { console.error(error); }
+        for (const subscriber of [...listeners]) {
+            if (!subscriber.panel.isConnected) {
+                listeners.delete(subscriber);
+                continue;
+            }
+            try { subscriber.paint(); } catch (error) { console.error(error); }
         }
     }
 
@@ -307,14 +311,11 @@
 
         paint();
         marks.append(panel);
-        const sync = () => {
-            if (!panel.isConnected) {
-                listeners.delete(sync);
-                return;
-            }
-            paint();
-        };
-        listeners.add(sync);
+        // 题目切换后旧面板会被替换，渲染时就地清掉失效监听，避免长会话里累积
+        for (const subscriber of [...listeners]) {
+            if (!subscriber.panel.isConnected) listeners.delete(subscriber);
+        }
+        listeners.add({ panel, paint });
     }
 
     function boot() {

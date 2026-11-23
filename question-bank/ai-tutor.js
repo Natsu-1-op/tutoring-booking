@@ -284,6 +284,17 @@
         return { dialog, refresh: () => { const next = readConfig(); for (const key of Object.keys(inputs)) inputs[key].value = next[key] || ""; } };
     }
 
+    // 设置弹窗全站复用一份，避免每渲染一道题就多一个 dialog
+    let settingsUI = null;
+    let settingsSaver = null;
+
+    function ensureSettings() {
+        if (settingsUI) return settingsUI;
+        settingsUI = settingsDialog(() => settingsSaver?.());
+        document.body.append(settingsUI.dialog);
+        return settingsUI;
+    }
+
     function mount(marks, question, context) {
         const panel = document.createElement("section");
         panel.className = "ai-panel";
@@ -327,11 +338,11 @@
         const attached = [];
         let controller = null;
 
-        const dialog = settingsDialog(() => paintHint());
-        document.body.append(dialog.dialog);
         settings.addEventListener("click", () => {
-            dialog.refresh();
-            dialog.dialog.showModal();
+            settingsSaver = paintHint;
+            const ui = ensureSettings();
+            ui.refresh();
+            ui.dialog.showModal();
         });
 
         function paintHint() {
@@ -403,7 +414,10 @@
             const config = readConfig();
             if (!config.key) {
                 paintHint();
-                dialog.dialog.showModal();
+                settingsSaver = paintHint;
+                const ui = ensureSettings();
+                ui.refresh();
+                ui.dialog.showModal();
                 return;
             }
             if (!area.value.trim() && !attached.length) {
