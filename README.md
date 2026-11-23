@@ -36,4 +36,4 @@ GitHub Pages 从公开仓库 `main` 分支的根目录直接发布静态文件�
 
 - 从仓库根目录运行 `python3 -m http.server 8000`，通过 HTTP 打开页面检查资源和导航。当前配置指向线上数据库，本地检查时请使用只读流程，或换成独立测试项目。
 - 运行 `node --test tests/*.test.js` 执行回归测试。`firebase.emulator.test.json` 和 `tests/database-rules.integration.cjs` 用于本地 Realtime Database 规则测试。
-- 静态文件随 GitHub Pages 发布。数据库规则独立部署：`firebase deploy --only database --project class-optic`。部署会以本文件整体替换线上规则；若同一数据库中仍有其他应用（例如历史遗留的 `blinkConsole`、`ieltsReading` 等节点）在用，请先在 Firebase 控制台核对其规则并在部署前合并，避免误删。修改规则前先比对 Firebase 当前生效的版本。
+- 静态文件随 GitHub Pages 发布。数据库规则独立部署：`firebase deploy --only database --project class-optic`。部署会以本文件整体替换线上规则；本文件已保留共用同一数据库的 `blinkConsole`（眨眼控制台）节点规则，其余与本系统无关的节点（如 `ieltsReading`）已移除——若这些节点对应的其他应用仍在使用同一数据库，请先在 Firebase 控制台核对其规则并在部署前合并，避免误删。修改规则前先比对 Firebase 当前生效的版本。

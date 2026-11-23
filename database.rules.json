@@ -136,6 +136,21 @@
         }
       }
     },
+    "blinkConsole": {
+      "config": {
+        ".read": true,
+        ".write": true,
+        "noiseMultiplier": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 12" },
+        "refractoryMs": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 2000" },
+        "minDropCounts": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 200" },
+        "manualThresholdEnabled": { ".validate": "newData.isBoolean()" },
+        "manualDropCounts": { ".validate": "newData.isNumber() && newData.val() >= 5 && newData.val() <= 2000" },
+        "oledText": { ".validate": "newData.isString() && newData.val().length <= 64" },
+        "oledBitmap": { ".validate": "newData.isString() && newData.val().length <= 1200" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "updatedBy": { ".validate": "newData.isString() && newData.val().length <= 100" }
+      }
+    },
     "admin_auth": {
       ".read": false,
       ".write": false,
