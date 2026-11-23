@@ -45,8 +45,14 @@
         "PERMISSION_DENIED": "权限校验未通过，请确认激活码或联系管理员。",
     };
     const fail = error => {
-        const code = String(error?.code || error?.message || "");
-        return messages[code] || "操作失败，请稍后重试。";
+        const code = String(error?.code || "");
+        if (messages[code]) return messages[code];
+        const raw = String(error?.message || messages[code] || "");
+        if (messages[raw]) return messages[raw];
+        // 代码里主动抛出的中文提示原样展示，不再被通用文案吞掉
+        if (/[\u4e00-\u9fa5]/.test(raw)) return raw;
+        if (raw) console.warn("[qbank]", code, raw);
+        return "操作失败，请稍后重试。";
     };
     const say = (text, kind) => {
         if (!status) return;
