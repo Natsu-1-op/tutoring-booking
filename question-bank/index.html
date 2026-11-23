@@ -151,7 +151,12 @@ function button(label, callback, cls = "action") {
 function cleanStem(text, inline = false) {
     let diagram = 0;
     let item = 0;
-    return text.replace(/\\begin\{center\}\s*\{\\zihao\{\d+\}\\bfseries[\s\S]*?\\end\{center\}/g, "")
+    return text.replace(/\\begin\{tabular\*?\}[\s\S]*?(A\.[\s\S]*?)\\end\{tabular\*?\}/g,
+            (_, options) => options.replace(/\\\\/g, "\n").replace(/\s*&\s*/g, "    "))
+        .replace(/\\hspace\*?\{[^{}]*\}/g, "")
+        .replace(/\\fontsize\{[^{}]*\}\{[^{}]*\}\\selectfont/g, "")
+        .replace(/\\(?:blank|blk)\b/g, "________")
+        .replace(/\\begin\{center\}\s*\{\\zihao\{\d+\}\\bfseries[\s\S]*?\\end\{center\}/g, "")
         .replace(/\\(?:begin|end)\{enumerate\}(?:\[[^\]]*\])?/g, "")
         .replace(/\\item\s*/g, () => "\n（" + ++item + "）")
         .replace(/\\(?:newpage|quad)\b/g, " ")
