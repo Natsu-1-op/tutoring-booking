@@ -150,7 +150,14 @@ function button(label, callback, cls = "action") {
 }
 function cleanStem(text, inline = false) {
     let diagram = 0;
-    return text.replace(
+    let item = 0;
+    return text.replace(/\\begin\{center\}\s*\{\\zihao\{\d+\}\\bfseries[\s\S]*?\\end\{center\}/g, "")
+        .replace(/\\(?:begin|end)\{enumerate\}(?:\[[^\]]*\])?/g, "")
+        .replace(/\\item\s*/g, () => "\n（" + ++item + "）")
+        .replace(/\\(?:newpage|quad)\b/g, " ")
+        .replace(/\\textbf\{([^{}]*)\}/g, "$1")
+        .replace(/\\zihao\{\d+\}|\\bfseries\b/g, "")
+        .replace(
         /(?:\\par)?(?:\\(?:vspace|addvspace)\{[^{}]*\})?\s*(?:(?:\{\\centering|\\begin\{center\})\s*)?(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})(?:\\par\}|\\end\{center\})?(?:\\vspace\{[^{}]*\})?/g,
         () => inline ? "\n@@FIG" + diagram++ + "@@\n" : " ")
         .replace(/\\(?:src|source)\{[^{}]*\}/g, "")
