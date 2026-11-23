@@ -40,6 +40,111 @@
       }
     }
   },
+    "users": {
+      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      "$uid": {
+        ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+        ".write": "auth != null && (auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef' || (auth.uid === $uid && !data.exists()))",
+        ".validate": "newData.hasChildren(['email','createdAt'])",
+        "email": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isString() && newData.val().length >= 5 && newData.val().length <= 200 && newData.val().matches(/^[^@ ]+@[^@ ]+$/)"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() >= now - 300000 && newData.val() <= now + 300000))"
+        },
+        "disabled": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isBoolean()"
+        },
+        "bankAccess": {
+          "active": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".validate": "newData.isBoolean()"
+          },
+          "expiresAt": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".validate": "newData.isNumber() && newData.val() <= now + 94608000000"
+          },
+          "days": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1095"
+          },
+          "updatedAt": {
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef')",
+            ".validate": "newData.isNumber() && newData.val() <= now + 300000"
+          },
+          "key": {
+            ".read": "auth != null && auth.uid === $uid && root.child('users').child($uid).child('bankAccess/active').val() === true && root.child('users').child($uid).child('bankAccess/expiresAt').val() > now && root.child('users').child($uid).child('disabled').val() !== true",
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isString() && newData.val().length <= 200"
+          },
+          "release": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isString() && newData.val().length <= 100"
+          },
+          "$other": { ".validate": false }
+        },
+        "claimedCodes": {
+          "$code": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isNumber()"
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "activation_codes": {
+      ".read": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+      ".indexOn": ["createdAt"],
+      "$code": {
+        ".write": "auth != null && auth.uid === 'hust839_ed7999752728dff862338f68d533fdfdbf1b5d97c12ef'",
+        ".validate": "$code.matches(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/) && newData.hasChildren(['days','durationMs','note','createdAt','createdBy','release','key'])",
+        "days": {
+          ".read": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1095"
+        },
+        "durationMs": {
+          ".read": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 86400000 && newData.val() <= 94608000000"
+        },
+        "note": {
+          ".validate": "newData.isString() && newData.val().length <= 60"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() >= now - 300000 && newData.val() <= now + 300000))"
+        },
+        "createdBy": {
+          ".validate": "newData.isString() && newData.val().length <= 100"
+        },
+        "revoked": {
+          ".read": "auth != null",
+          ".validate": "newData.isBoolean()"
+        },
+        "release": {
+          ".validate": "newData.isString() && newData.val() === root.child('questionBankAccess/settings/release').val()"
+        },
+        "key": {
+          ".read": "auth != null && root.child('activation_codes').child($code).child('claim/usedBy').val() === auth.uid",
+          ".validate": "newData.isString() && newData.val() === root.child('questionBankAccess/settings/key').val()"
+        },
+        "claim": {
+          ".read": "auth != null && (!data.exists() || data.child('usedBy').val() === auth.uid)",
+          ".write": "auth != null && root.child('activation_codes').child($code).child('revoked').val() !== true && (!data.exists() || data.child('usedBy').val() === auth.uid)",
+          ".validate": "newData.hasChildren(['usedBy','usedAt','expiresAt']) && newData.child('usedBy').val() === auth.uid && newData.child('usedAt').isNumber() && newData.child('usedAt').val() <= now + 300000 && newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() > now && newData.child('expiresAt').val() <= now + root.child('activation_codes').child($code).child('durationMs').val() + 900000",
+          "usedBy": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "usedAt": { ".validate": "newData.isNumber()" },
+          "expiresAt": { ".validate": "newData.isNumber()" },
+          "email": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "$other": { ".validate": false }
+        },
+        "$other": { ".validate": false }
+      }
+    },
     "system": {
       ".read": true,
       ".write": true,

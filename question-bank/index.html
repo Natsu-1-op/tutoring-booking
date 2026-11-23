@@ -68,12 +68,61 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <style>
 .bank-locked body>header,.bank-locked #layout{display:none}
 #internal-gate{min-height:85dvh;display:grid;place-items:center;padding:16px}
-#internal-gate>div{width:min(390px,100%);padding:24px;border:1px solid var(--line);border-radius:12px;background:white}
+#internal-gate>div{width:min(430px,100%);padding:24px;border:1px solid var(--line);border-radius:12px;background:white}
 #internal-gate h1{margin:0;font-size:22px}
+#gate-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:14px 0 12px}
+#gate-tabs button{padding:7px 4px;font-size:14px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer}
+#gate-tabs button[aria-selected="true"]{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.gate-form{display:grid;gap:10px}
+.gate-form[hidden]{display:none}
+.gate-form label{display:grid;gap:4px;font-size:13px;color:#475569}
+.gate-form input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:inherit}
+.gate-form button{padding:9px 12px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.gate-form button[disabled]{opacity:.55;cursor:default}
+#gate-signed-in{display:grid;gap:10px}
+#gate-signed-in[hidden],#gate-account[hidden]{display:none}
+#gate-signout{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;font:inherit;color:inherit;cursor:pointer}
+.gate-meta{margin:0;font-size:13px;color:#64748b}
+#internal-status[data-kind="error"]{color:#b42318}
 </style></head>
 <body>
 <section id="internal-gate" aria-labelledby="internal-title">
-<div><h1 id="internal-title">华科 839 题库</h1><p id="internal-status" role="status">请使用内部链接打开题库。</p><a href="../">返回预约页</a></div>
+<div>
+<h1 id="internal-title">华科 839 题库</h1>
+<p id="internal-status" role="status">请使用内部链接打开题库。</p>
+<div id="gate-account" hidden>
+<div id="gate-tabs" role="tablist">
+<button type="button" role="tab" data-tab="signin" aria-selected="true">登录</button>
+<button type="button" role="tab" data-tab="signup" aria-selected="false">注册</button>
+<button type="button" role="tab" data-tab="reset" aria-selected="false">找回密码</button>
+</div>
+<form class="gate-form" id="form-signin">
+<label>邮箱<input type="email" id="signin-email" autocomplete="username" maxlength="200" required></label>
+<label>密码<input type="password" id="signin-password" autocomplete="current-password" maxlength="128" required></label>
+<button type="submit">登录</button>
+</form>
+<form class="gate-form" id="form-signup" hidden>
+<label>邮箱<input type="email" id="signup-email" autocomplete="username" maxlength="200" required></label>
+<label>密码（至少 8 位）<input type="password" id="signup-password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+<label>确认密码<input type="password" id="signup-password2" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+<button type="submit">注册并继续</button>
+</form>
+<form class="gate-form" id="form-reset" hidden>
+<label>注册邮箱<input type="email" id="reset-email" autocomplete="username" maxlength="200" required></label>
+<button type="submit">发送重置邮件</button>
+</form>
+</div>
+<div id="gate-signed-in" hidden>
+<p class="gate-meta">当前账号：<span id="gate-email"></span></p>
+<p class="gate-meta" id="session-line" hidden>有效期至 <span id="session-expires"></span></p>
+<form class="gate-form" id="form-activate">
+<label>激活码<input id="activate-code" placeholder="XXXX-XXXX-XXXX" autocomplete="one-time-code" maxlength="20" required></label>
+<button type="submit">兑换并解锁题库</button>
+</form>
+<button type="button" id="gate-signout">退出登录</button>
+</div>
+<p class="gate-meta">激活码由管理员发放。题库账号与 1v1 约课名单互不影响。<a href="../">返回预约页</a></p>
+</div>
 </section>
 <header><div class="header-start"><button id="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar" aria-label="收起筛选栏" title="收起筛选栏"><span class="panel-icon" aria-hidden="true"></span></button><div><h1>华科 839 题库</h1><p>波动光学与激光原理 · <span id="total"></span> 条</p></div></div><div class="header-actions"><button id="about-open" type="button">标注说明</button></div></header>
 <div class="layout" id="layout" data-mobile="list">
@@ -738,5 +787,10 @@ readHash();
 
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-8b7f2f419ecdb981"}</script><script src="access.js?v=internal-v2-index"></script></body>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-8b7f2f419ecdb981", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="account.js?v=20261123-account-1"></script>
+<script src="access.js?v=20261123-account-1"></script></body>
 </html>
