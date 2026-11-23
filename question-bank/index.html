@@ -526,9 +526,9 @@ function renderDetail(id) {
     const subtitle = element("p", [q["编号"],q["题干状态"].replace("（保留公式及图代码）",""),q["年份"].length > 1 ? q["年份"].join("、") + " 年" : ""]
         .filter(Boolean).join(" · "), "source-details");
     const stem = element("div", undefined, "stem");
-    const diagrams = bank.figures[id] || [];
-    const scans = bank.scans?.[id] || [];
     const references = bank.references?.[id] || [];
+    const diagrams = references.length && /^R-202[1-4]-计算/.test(id) ? [] : bank.figures[id] || [];
+    const scans = bank.scans?.[id] || [];
     const stemText = cleanStem(q["题干"],true);
     const links = q["图文附件"].filter(link => bank.assets[link["附件"]] && (bank.previews[link["附件"]] ||
         ["jpg","jpeg","png"].includes(extension(bank.assets[link["附件"]].name))));
@@ -548,20 +548,20 @@ function renderDetail(id) {
         if (firstQuestion > 0) stem.append(document.createTextNode(stemText.slice(firstQuestion)));
     } else {
         stem.textContent = stemText;
-        const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
-        const originalAvailable = q["来源类型"] === "真题" && links.some(link => numericPages(link["页码或位置"]).length);
-        if (!originalMode && links.length &&
-                ((refersToFigure && !references.length) || originalAvailable || !bank.previews[links[0]["附件"]])) {
-            const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
-            const fold = element("details", undefined, "scan-fallback");
-            fold.append(element("summary",originalAvailable ? "核对试卷原页" : "查看原图"));
-            fold.addEventListener("toggle", () => {
-                if (fold.open && fold.childElementCount === 1) {
-                    fold.append(inlineOriginal(links, Math.max(0, known), q["题面原页"]));
-                }
-            });
-            stem.append(fold);
-        }
+    }
+    const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
+    const originalAvailable = q["来源类型"] === "真题" && links.some(link => numericPages(link["页码或位置"]).length);
+    if (!originalMode && links.length &&
+            ((refersToFigure && !references.length) || originalAvailable || !bank.previews[links[0]["附件"]])) {
+        const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
+        const fold = element("details", undefined, "scan-fallback");
+        fold.append(element("summary",originalAvailable ? "核对试卷原页" : "查看原图"));
+        fold.addEventListener("toggle", () => {
+            if (fold.open && fold.childElementCount === 1) {
+                fold.append(inlineOriginal(links, Math.max(0, known), q["题面原页"]));
+            }
+        });
+        stem.append(fold);
     }
     const body = element("section",undefined,"question-body");
     body.setAttribute("aria-label","题干");
