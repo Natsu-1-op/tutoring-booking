@@ -8,7 +8,7 @@
       ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
       "$token": {
         ".write": "auth != null && auth.token.email === '1843499931@qq.com'",
-        ".validate": "$token.matches(/^[A-Za-z0-9_-]{32}$/) && newData.hasChildren(['label','createdAt','delivery'])",
+        ".validate": "newData.val() === null || ($token.matches(/^[A-Za-z0-9_-]{32}$/) && newData.hasChildren(['label','createdAt','delivery']))",
         "label": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
         },

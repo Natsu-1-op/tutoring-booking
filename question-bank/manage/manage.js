@@ -125,6 +125,21 @@ function showRows() {
             },"danger");
             buttons.append(stop);
         }
+        buttons.append(action("删除",async()=>{
+            const tip = active
+                ? `删除后这条内部链接立即失效且无法恢复，持链接的人将无法进入题库。\n确认删除「${link.label}」？`
+                : `删除「${link.label}」这条记录？`;
+            if (!confirm(tip)) return;
+            try {
+                await database("links/" + key, "DELETE");
+                delete links[key];
+                if (currentLink===makeLink(key)) { $("generated").hidden=true; currentLink=""; }
+                showRows();
+                notice("已删除该内部链接。");
+            } catch (e) {
+                notice("删除失败：" + e.message + "（若提示权限不足，请先把最新的 database.rules.json 更新到线上）");
+            }
+        },"danger"));
     }
 }
 
