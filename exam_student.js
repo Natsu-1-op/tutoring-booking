@@ -173,13 +173,17 @@ function downloadExamReceipt() {
     setTimeout(() => URL.revokeObjectURL(url), 1200);
 }
 
-function runTransaction(ref, updateFn) {
-    return new Promise((resolve, reject) => {
-        ref.transaction(updateFn, (error, committed, snapshot) => {
-            if (error) reject(error);
-            else resolve({ committed, snapshot });
+async function runTransaction(ref, update) {
+    let keepCached;
+    try {
+        await new Promise((resolve, reject) => {
+            keepCached = snapshot => resolve(snapshot);
+            ref.on('value', keepCached, reject);
         });
-    });
+        return await ref.transaction(update);
+    } finally {
+        if (keepCached) ref.off('value', keepCached);
+    }
 }
 
 window.openGlobalLightbox = function(imgSrc) {

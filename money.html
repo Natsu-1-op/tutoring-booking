@@ -1167,6 +1167,19 @@
         updateSelectedDateView();
     }
 
+    async function runFeeTransaction(ref, update) {
+        let keepCached;
+        try {
+            await new Promise((resolve, reject) => {
+                keepCached = snapshot => resolve(snapshot);
+                ref.on('value', keepCached, reject);
+            });
+            return await ref.transaction(update);
+        } finally {
+            if (keepCached) ref.off('value', keepCached);
+        }
+    }
+
     async function clearBookingFeeLink(record, year) {
         const reservationsRef = db.ref(`years/${year}/reservations`);
         const resKey = record.reservationId;
@@ -1175,8 +1188,7 @@
             .map(([key]) => key);
         for (const key of candidates) {
             const reservationRef = reservationsRef.child(key);
-            if (resKey && !(await reservationRef.once('value')).exists()) continue;
-            await reservationRef.transaction(current => {
+            await runFeeTransaction(reservationRef, current => {
                 if (!current || current.status !== 'completed') return;
                 const linkedId = String(current.feeRecordId || '');
                 if (linkedId ? linkedId !== record.id : !resKey) return;
@@ -1609,7 +1621,7 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-11-23b'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-11-23c'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_ROTATION_JOURNAL_KEY = 'fee_vault_rotation_wrapped_v1';
@@ -2124,13 +2136,11 @@ async function syncStudentRateAcrossYears(previousStudent, nextStudent) {
         };
         let result;
         try {
-            // 预读使事务有本地快照；版本与密文校验仍在事务内完成。
-            await ref.once('value');
             const currentLocalState = getYearSyncState(activeYear);
             if (currentLocalState.dirty || currentLocalState.changeId !== activeChangeId) {
                 throw new Error('本机账本在修改期间发生变化');
             }
-            result = await ref.transaction(current => {
+            result = await runFeeTransaction(ref, current => {
                 if (entry.vault) {
                     if (!current || Number(current.revision || 0) !== Number(entry.vault.revision || 0)
                         || String(current.cipher || '') !== String(entry.vault.cipher || '')) return;
@@ -2404,7 +2414,7 @@ async function pushCloudNow(job, options) {
         const payload = { schemaVersion: 3, updatedAt, cipher: encrypted.cipher, salt: encrypted.salt, kdfIterations: encrypted.kdfIterations };
         const runTransaction = async () => {
             let conflictReason = '';
-            const result = await ref.transaction(existing => {
+            const result = await runFeeTransaction(ref, existing => {
                 conflictReason = '';
                 if (!options.force && !known && existing) {
                     conflictReason = 'remote-created';
@@ -2422,21 +2432,7 @@ async function pushCloudNow(job, options) {
             });
             return { result, conflictReason };
         };
-        let transaction = await runTransaction();
-        // Firebase 事务第一次可能只拿到本地空缓存；重新读取后仍存在才重试，避免误报删除。
-        if (!transaction.result.committed && transaction.conflictReason === 'remote-deleted' && !options.force) {
-            const retryRemote = (await ref.once('value')).val();
-            if (retryRemote && known && Number(retryRemote.revision || 0) === Number(known.revision || 0)) {
-                transaction = await runTransaction();
-            } else if (retryRemote) {
-                const conflict = { reason: 'remote-changed', remoteRevision: Number(retryRemote.revision || 0), localChangeId: Number(job.changeId || 0) };
-                setCloudConflict(year, conflict);
-                lastCloudPushError = `${year} 年云端账本已被其他设备修改，请选择保留哪一份。`;
-                markYearSyncError(year, lastCloudPushError);
-                showToast(lastCloudPushError);
-                return false;
-            }
-        }
+        const transaction = await runTransaction();
         const result = transaction.result;
         if (!result.committed) {
             const conflict = { reason: transaction.conflictReason || 'remote-changed', remoteRevision: null, localChangeId: Number(job.changeId || 0) };
@@ -3403,7 +3399,7 @@ async function applyReservationFeeUpdatesSafely(updates) {
         groups[groupKey].fields[field] = updates[path];
     });
     const results = await Promise.all(Object.values(groups).map(async group => {
-        const result = await db.ref(`years/${group.year}/reservations/${group.key}`).transaction(current => {
+        const result = await runFeeTransaction(db.ref(`years/${group.year}/reservations/${group.key}`), current => {
             if (!current || current.status !== 'completed') return;
             const nextStatus = group.fields.feeStatus;
             if (nextStatus === 'posted') {
@@ -4390,7 +4386,7 @@ async function importPendingLessonsImpl(checked, options) {
             let committed = false;
             for (let attempt = 0; attempt < 2 && !committed; attempt += 1) {
                 try {
-                    const result = await db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`).transaction(current => {
+                    const result = await runFeeTransaction(db.ref(`years/${activeYear}/reservations/${item.lesson.resKey}`), current => {
                         const original = latestReservations[item.lesson.resKey];
                         if (!canPostImportedReservation(current, original, item.recordId)) return;
                         current.feeStatus = 'posted';
@@ -4621,7 +4617,7 @@ async function dismissPendingLesson(i) {
         return showToast('忽略操作已保存在本机，云端恢复后会继续同步');
     }
     try {
-        const result = await db.ref(`years/${activeYear}/reservations/${p.resKey}`).transaction(current => {
+        const result = await runFeeTransaction(db.ref(`years/${activeYear}/reservations/${p.resKey}`), current => {
             if (!current || current.status !== 'completed' || current.feeStatus === 'posted' || current.feeRecordId) return;
             current.feeStatus = 'dismissed';
             current.feeDismissedAt = Date.now();
@@ -4681,7 +4677,7 @@ async function restoreDismissed(idx) {
         && reservation.feeStatus !== 'posted' && !reservation.feeRecordId;
     if (canResetReservation) {
         try {
-            const result = await db.ref(`years/${activeYear}/reservations/${item.resKey}`).transaction(current => {
+            const result = await runFeeTransaction(db.ref(`years/${activeYear}/reservations/${item.resKey}`), current => {
                 if (!current || current.status !== 'completed' || current.feeStatus === 'posted' || current.feeRecordId) return;
                 current.feeStatus = 'pending';
                 current.feeDismissedAt = null;
@@ -4754,7 +4750,7 @@ async function resumeFeePassphraseRotation() {
                 const updatedAt = Date.now();
                 const payload = { schemaVersion: 3, updatedAt, revision: Number(vault.revision || 0) + 1,
                     cipher: encrypted.cipher, salt: encrypted.salt, kdfIterations: encrypted.kdfIterations };
-                const result = await ref.transaction(current => {
+                const result = await runFeeTransaction(ref, current => {
                     if (!current || Number(current.revision || 0) !== Number(vault.revision || 0)
                         || current.cipher !== vault.cipher || current.salt !== vault.salt
                         || current.kdfIterations !== vault.kdfIterations) return;

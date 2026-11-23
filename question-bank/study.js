@@ -14,7 +14,6 @@
     const pending = new Set();
     const listeners = new Set();
     let scope = "";
-    let db = null;
     let timer = 0;
     let flushTimer = 0;
     let syncing = false;
@@ -96,24 +95,16 @@
         timer = setTimeout(push, SYNC_DELAY);
     }
 
+    function bankApp() {
+        return window.firebase?.apps?.find(app => app.name === "qbank");
+    }
+
     function service() {
-        if (db) return db;
-        const root = window.firebase;
-        if (!root || !root.database) return null;
-        if (!root.apps || !root.apps.length) return null;
-        db = root.database();
-        return db;
+        return bankApp()?.database() || null;
     }
 
     function currentUid() {
-        const auth = window.firebase?.auth;
-        if (!auth) return "";
-        try {
-            const instance = auth();
-            return instance.currentUser?.uid || "";
-        } catch {
-            return "";
-        }
+        return bankApp()?.auth().currentUser?.uid || "";
     }
 
     async function push() {
@@ -314,10 +305,10 @@
     }
 
     function boot() {
-        const auth = window.firebase?.auth;
+        const auth = bankApp()?.auth();
         if (!auth) return;
         try {
-            auth().onAuthStateChanged(account => {
+            auth.onAuthStateChanged(account => {
                 selectScope(account?.uid || "");
                 emit();
                 clearTimeout(flushTimer);

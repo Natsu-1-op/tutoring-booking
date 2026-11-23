@@ -21,7 +21,7 @@ test('question bank remembers account notes separately and syncs cleared notes',
         }
     }) };
     const context = vm.createContext({
-        window: { firebase: { auth: () => auth, database: () => database, apps: [{}] } },
+        window: { firebase: { apps: [{ name: "qbank", auth: () => auth, database: () => database }] } },
         localStorage: {
             getItem: key => store.get(key), setItem: (key, value) => store.set(key, value),
             removeItem: key => store.delete(key)
@@ -63,4 +63,32 @@ test('manual and automatic exam submissions cannot overlap', async () => {
     assert.equal(calls, 2);
     release();
     await retry;
+});
+
+test('booking, exam, and fee transactions retain the Firebase listener until the write settles', async () => {
+    for (const [file, start, end] of [
+        ['app.js', 'async function runBookingTransaction', 'async function releaseSlotAfterFailedBooking'],
+        ['exam_student.js', 'async function runTransaction', '\n}'],
+        ['money.html', 'async function runFeeTransaction', 'async function clearBookingFeeLink']
+    ]) {
+        const script = source(file);
+        const begin = script.indexOf(start);
+        const finish = script.indexOf(end, begin) + (end === '\n}' ? end.length : 0);
+        const context = vm.createContext({});
+        vm.runInContext(script.slice(begin, finish), context);
+        const run = context[start.split(' ').at(-1)];
+        let listener;
+        const ref = {
+            on(event, callback) { assert.equal(event, 'value'); listener = callback; callback(); },
+            off(event, callback) { assert.equal(event, 'value'); assert.equal(callback, listener); listener = null; },
+            async transaction(update) {
+                await Promise.resolve();
+                assert.ok(listener);
+                assert.equal(update({ status: 'pending' }), 'submitted');
+                return { committed: true };
+            }
+        };
+        assert.equal((await run(ref, record => record.status === 'pending' ? 'submitted' : undefined)).committed, true);
+        assert.equal(listener, null);
+    }
 });

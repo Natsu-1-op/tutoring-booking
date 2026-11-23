@@ -76,6 +76,7 @@ const extractAnyScript = name => extractFunctionFrom(allScripts, name);
 
 function createContext(extra = {}) {
     const context = {
+        runFeeTransaction: (ref, update) => ref.transaction(update),
         console,
         Date,
         JSON,

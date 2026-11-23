@@ -147,7 +147,7 @@
         }
     }
 
-    function buildPrompt(question, answer, images) {
+    function buildPrompt(question, answer, questionImageCount, answerImageCount) {
         const lines = [];
         lines.push("请按华科 839《物理光学》《激光原理》课程的阅卷口径批改这道题。");
         lines.push("");
@@ -163,7 +163,8 @@
         if (question["核对说明"]) lines.push("【审查说明】" + question["核对说明"]);
         if (question["备注"]) lines.push("【备注】" + question["备注"]);
         if (question["备考判断依据"]) lines.push("【备考依据】" + question["备考判断依据"]);
-        if (images.length) lines.push("【附图】随附 " + images.length + " 张图片，第一张是本题原页或题面截图。");
+        if (questionImageCount) lines.push("【题目附图】前 " + questionImageCount + " 张图片为题面原页、截图或示意图。");
+        if (answerImageCount) lines.push("【学生草稿】最后 " + answerImageCount + " 张图片为学生作答。");
         lines.push("");
         lines.push("【学生作答】");
         lines.push(answer.trim() || "（学生未提交文字作答，请从作答图片判断。）");
@@ -439,8 +440,10 @@
                         // 原页解密失败不阻塞文字批改
                     }
                 }
-                for (const item of attached) images.push(item.url);
-                const prompt = buildPrompt(question, area.value, images);
+                const questionImageCount = images.length;
+                const answerImages = attached.map(item => item.url);
+                images.push(...answerImages);
+                const prompt = buildPrompt(question, area.value, questionImageCount, answerImages.length);
                 const text = await request(config, prompt, images, controller.signal);
                 renderRich(result, text);
             } catch (error) {

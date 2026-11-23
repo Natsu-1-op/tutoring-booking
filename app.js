@@ -24,21 +24,29 @@ function safeJsArg(value) {
     return escapeHtml(JSON.stringify(String(value ?? '')));
 }
 
+async function runBookingTransaction(ref, update) {
+    let keepCached;
+    try {
+        await new Promise((resolve, reject) => {
+            keepCached = snapshot => resolve(snapshot);
+            ref.on('value', keepCached, reject);
+        });
+        return await ref.transaction(update);
+    } finally {
+        if (keepCached) ref.off('value', keepCached);
+    }
+}
+
 async function releaseSlotAfterFailedBooking(year, slotId, reservationId) {
     if (!slotId || !reservationId) return true;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const result = await new Promise((resolve, reject) => {
-                SystemRouter.getSlotsRef(year).child(slotId).transaction((slot) => {
-                    // 只回滚本次预约占用的排班，不能误释放后来者。
-                    if (!slot || slot.reservationId !== reservationId) return;
-                    slot.reserved = false;
-                    delete slot.reservationId;
-                    return slot;
-                }, (error, committed, snapshot) => {
-                    if (error) reject(error);
-                    else resolve({ committed, snapshot });
-                });
+            const ref = SystemRouter.getSlotsRef(year).child(slotId);
+            const result = await runBookingTransaction(ref, slot => {
+                if (!slot || slot.reservationId !== reservationId) return;
+                slot.reserved = false;
+                delete slot.reservationId;
+                return slot;
             });
             const latest = result.snapshot && result.snapshot.val();
             if (result.committed || !latest || latest.reservationId !== reservationId) return true;
@@ -394,7 +402,7 @@ async function submitBooking() {
         // 否则两边都可能读到相同的剩余课时并同时成功。
         bookingLockToken = generateSecureCode(16);
         bookingLockRef = db.ref(`years/${year}/dailyLocks/${nickname}`);
-        const lockResult = await bookingLockRef.transaction(current => {
+        const lockResult = await runBookingTransaction(bookingLockRef, current => {
             const now = Date.now();
             const currentExpiry = Number(current && current.expiresAt);
             if (current && current.token !== bookingLockToken && currentExpiry > now && currentExpiry <= now + 3 * 60 * 1000) return;
@@ -470,7 +478,7 @@ async function submitBooking() {
     } finally {
         if (bookingLockRef && bookingLockToken) {
             try {
-                await bookingLockRef.transaction(current => {
+                await runBookingTransaction(bookingLockRef, current => {
                     if (!current || current.token !== bookingLockToken) return;
                     return null;
                 });
@@ -686,14 +694,9 @@ async function requestCancelBooking(resKey) {
     if (!confirm('确定要取消这条预约吗？取消后该时段将重新开放给其他同学。')) return;
     const year = access.year;
     let reservationCanceled = false;
-
+    const reservationRef = SystemRouter.getReservationsRef(year).child(resKey);
     try {
-        const snap = await SystemRouter.getReservationsRef(year).child(resKey).once('value');
-        const r = snap.val();
-        if (!r) return alert('记录不存在。');
-
-        const reservationRef = SystemRouter.getReservationsRef(year).child(resKey);
-        const cancelResult = await reservationRef.transaction(current => {
+        const cancelResult = await runBookingTransaction(reservationRef, current => {
             // 学生端只允许取消仍在进行中的预约；已完成课程不能通过旧页面
             // 或重复点击被改回取消，避免影响课时统计和账本。
             if (!current || current.nickname !== access.name || current.cancelCode !== code
@@ -707,23 +710,22 @@ async function requestCancelBooking(resKey) {
         });
         if (!cancelResult.committed) return alert('预约记录已变化，请重新查询后再操作。');
         reservationCanceled = true;
-        const canceledReservation = cancelResult.snapshot && cancelResult.snapshot.val() || r;
+        const canceledReservation = cancelResult.snapshot.val();
 
         let slotReleased = null;
         if (canceledReservation.slotId) {
-            slotReleased = await new Promise((resolve, reject) => {
-                SystemRouter.getSlotsRef(year).child(canceledReservation.slotId).transaction(slot => {
-                    // 旧数据没有 reservationId 时不自动释放，避免误开放已被其他预约占用的时段。
-                    if (!slot || !slot.reserved || slot.reservationId !== resKey) return;
-                    slot.reserved = false;
-                    delete slot.reservationId;
-                    return slot;
-                }, (err, committed) => err ? reject(err) : resolve(committed));
+            const slotRef = SystemRouter.getSlotsRef(year).child(canceledReservation.slotId);
+            const result = await runBookingTransaction(slotRef, slot => {
+                if (!slot || !slot.reserved || slot.reservationId !== resKey) return;
+                slot.reserved = false;
+                delete slot.reservationId;
+                return slot;
             });
+            slotReleased = result.committed;
         }
 
         SystemRouter.getLogsRef(year).push({
-            action: `学生 [${canceledReservation.nickname || r.nickname}] 自行取消了预约: [${canceledReservation.time || r.time}]`,
+            action: `学生 [${canceledReservation.nickname}] 自行取消了预约: [${canceledReservation.time}]`,
             timestamp: firebase.database.ServerValue.TIMESTAMP
         }).catch(err => console.error('取消预约日志写入失败:', err));
         if (historyCancellation === access) {
