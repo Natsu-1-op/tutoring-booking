@@ -496,6 +496,9 @@ function switchView(view) {
     }
 }
 
+let historyQueryId = 0;
+let historyCancellation = null;
+
 function loadMyHistory() {
     let searchName = document.getElementById('history-search-name').value.trim();
     const searchCode = document.getElementById('history-search-code').value.trim().toUpperCase();
@@ -506,19 +509,24 @@ function loadMyHistory() {
     if (!searchCode) return alert('请输入5位取消凭证码！');
     if (!/^[A-Z2-9]{5}$/.test(searchCode)) return alert('取消凭证码格式不合法！');
 
+    const year = SystemRouter.activeYear;
+    const queryId = ++historyQueryId;
+    const isCurrentQuery = () => queryId === historyQueryId && year === SystemRouter.activeYear;
+    historyCancellation = null;
     container.innerHTML = '<p class="msg-hint">正在查询...</p>';
 
-    db.ref(`years/${SystemRouter.activeYear}/studentWhitelist`).once('value').then(snapshot => {
+    db.ref(`years/${year}/studentWhitelist`).once('value').then(snapshot => {
         const names = Object.values(snapshot.val() || {});
         const match = names.find(name => typeof name === 'string'
             && normalizeStudentName(name) === normalizeStudentName(searchName));
         if (match) searchName = match;
     }).catch(() => {
         // 名单暂不可用或学生已移除时，仍允许用原姓名和凭证查询。
-    }).then(() => SystemRouter.getReservationsRef(SystemRouter.activeYear)
+    }).then(() => SystemRouter.getReservationsRef(year)
         .orderByChild('nickname').equalTo(searchName).once('value')).then((snapshot) => {
+            if (!isCurrentQuery()) return;
             const reservations = snapshot.val();
-            const isAuthPassed = reservations ? Object.values(reservations).some(r => (r.cancelCode || '').toUpperCase() === searchCode) : false;
+            const isAuthPassed = reservations ? Object.values(reservations).some(r => r?.nickname === searchName && String(r.cancelCode || '').toUpperCase() === searchCode) : false;
             if (!isAuthPassed) {
                 // 统一提示信息，不区分「姓名不存在」和「凭证码错误」，防止信息泄露
                 container.innerHTML = `<p class="msg-error">姓名或凭证码错误！</p>`;
@@ -529,11 +537,11 @@ function loadMyHistory() {
             const list = [];
             Object.keys(reservations).forEach(key => {
                 const r = reservations[key];
-                if (r.nickname !== searchName) return;
+                if (!r || r.nickname !== searchName) return;
                 // 解析上课时间用于排序
                 let lessonTs = 0;
                 if (r.time) {
-                    const p = TimeParser.parseRawText(r.time, SystemRouter.activeYear);
+                    const p = TimeParser.parseRawText(r.time, year);
                     if (p && p.date) lessonTs = new Date(p.date + 'T' + p.startTime).getTime();
                 }
                 if (!lessonTs) lessonTs = r.timestamp || 0;
@@ -582,7 +590,7 @@ function loadMyHistory() {
                 const hoursText = hours > 0 ? ` <span class="text-gray" style="font-size:12px;">(${hours.toFixed(2)}h)</span>` : '';
                 // 统一日期格式：提取完整 YYYY-MM-DD
                 let fullTime = r.time || '';
-                const p = TimeParser.parseRawText(r.time, SystemRouter.activeYear);
+                const p = TimeParser.parseRawText(r.time, year);
                 if (p) fullTime = `${p.date} ${p.startTime}-${p.endTime}`;
 
                 // 日历下载按钮（传 time 字符串和 cancelCode，由 downloadICSFromTime 解析）
@@ -599,7 +607,12 @@ function loadMyHistory() {
             });
 
             // 剩余课时只在身份验证通过后读取并展示（避免输入姓名就泄露他人课时）
-            return db.ref(`years/${SystemRouter.activeYear}/studentHours/${searchName}`).once('value').then((hs) => {
+            return db.ref(`years/${year}/studentHours/${searchName}`).once('value').then((hs) => {
+                if (!isCurrentQuery()) return;
+                historyCancellation = {
+                    year, name: searchName,
+                    codes: new Map(list.filter(item => item.data.cancelCode).map(item => [item.key, item.data.cancelCode]))
+                };
                 const total = hs.val();
                 let remainingHtml = '';
                 if (total !== null && total !== undefined && Number(total) > 0) {
@@ -612,7 +625,7 @@ function loadMyHistory() {
             });
         }).catch((err) => {
             console.error('查询历史记录失败:', err);
-            container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
+            if (isCurrentQuery()) container.innerHTML = '<p class="msg-error">查询失败，请检查网络后重试。</p>';
         });
 }
 
@@ -667,8 +680,11 @@ function downloadICS(parsedTimeObj, cancelCode) {
 }
 
 async function requestCancelBooking(resKey) {
+    const access = historyCancellation;
+    const code = access?.codes.get(resKey);
+    if (!code || access.year !== SystemRouter.activeYear) return alert('请重新查询预约记录后再取消。');
     if (!confirm('确定要取消这条预约吗？取消后该时段将重新开放给其他同学。')) return;
-    const year = SystemRouter.activeYear;
+    const year = access.year;
     let reservationCanceled = false;
 
     try {
@@ -680,7 +696,8 @@ async function requestCancelBooking(resKey) {
         const cancelResult = await reservationRef.transaction(current => {
             // 学生端只允许取消仍在进行中的预约；已完成课程不能通过旧页面
             // 或重复点击被改回取消，避免影响课时统计和账本。
-            if (!current || !['booked', 'confirmed'].includes(current.status || 'booked')) return;
+            if (!current || current.nickname !== access.name || current.cancelCode !== code
+                || !['booked', 'confirmed'].includes(current.status || 'booked')) return;
             current.status = 'canceled';
             current.feeStatus = 'pending';
             current.feePostedAt = null;
@@ -688,7 +705,7 @@ async function requestCancelBooking(resKey) {
             current.feeRecordId = null;
             return current;
         });
-        if (!cancelResult.committed) return alert('这条预约已经取消、完成或不存在。');
+        if (!cancelResult.committed) return alert('预约记录已变化，请重新查询后再操作。');
         reservationCanceled = true;
         const canceledReservation = cancelResult.snapshot && cancelResult.snapshot.val() || r;
 
@@ -709,7 +726,10 @@ async function requestCancelBooking(resKey) {
             action: `学生 [${canceledReservation.nickname || r.nickname}] 自行取消了预约: [${canceledReservation.time || r.time}]`,
             timestamp: firebase.database.ServerValue.TIMESTAMP
         }).catch(err => console.error('取消预约日志写入失败:', err));
-        document.getElementById('history-container').innerHTML = '';
+        if (historyCancellation === access) {
+            historyCancellation = null;
+            document.getElementById('history-container').innerHTML = '';
+        }
         if (slotReleased === false) {
             alert('预约已取消，但原排班没有可验证的所有权标记，时段暂未自动释放，请联系老师处理。');
         } else {

@@ -1161,97 +1161,65 @@
         closeModal('modal-record');
 
         selectedDate = date;
-        currentDate = new Date(date);
+        const [year, month] = date.split("-").map(Number);
+        currentDate = new Date(year, month - 1, 1);
         renderCalendar();
         updateSelectedDateView();
     }
 
-    async function clearBookingFeeLink(record) {
-        if (!record || !db || !activeYear) return true;
-        const sourceId = String(record.sourceId || '');
-        const snapshot = await db.ref(`years/${activeYear}/reservations`).once('value');
-        const reservations = snapshot.val() || {};
-        const matchingKeys = Object.keys(reservations).filter(key => {
-            const reservation = reservations[key];
-            if (!reservation) return false;
-            const matches = (record.id && reservation.feeRecordId === record.id)
-                || (sourceId && sourceId === `imported_${key}`);
-            return matches;
-        });
-        const results = await Promise.all(matchingKeys.map(key => db.ref(`years/${activeYear}/reservations/${key}`).transaction(current => {
-            if (!current) return;
-            const stillMatches = (record.id && current.feeRecordId === record.id)
-                || (sourceId && sourceId === `imported_${key}` && (!current.feeRecordId || current.feeRecordId === record.id));
-            if (!stillMatches) return;
-            current.feeStatus = 'pending';
-            current.feePostedAt = null;
-            current.feeDismissedAt = null;
-            current.feeRecordId = null;
-            return current;
-        })));
-        if (results.some(result => !result.committed)) throw new Error('预约关联已经变化');
-        return true;
+    async function clearBookingFeeLink(record, year) {
+        const reservationsRef = db.ref(`years/${year}/reservations`);
+        const resKey = record.reservationId;
+        const candidates = resKey ? [resKey] : Object.entries((await reservationsRef.once('value')).val() || {})
+            .filter(([, reservation]) => reservation && record.id && reservation.feeRecordId === record.id)
+            .map(([key]) => key);
+        for (const key of candidates) {
+            const reservationRef = reservationsRef.child(key);
+            if (resKey && !(await reservationRef.once('value')).exists()) continue;
+            await reservationRef.transaction(current => {
+                if (!current || current.status !== 'completed') return;
+                const linkedId = String(current.feeRecordId || '');
+                if (linkedId ? linkedId !== record.id : !resKey) return;
+                if (current.feeStatus === 'dismissed' && !linkedId) return;
+                return { ...current, feeStatus: 'dismissed', feeDismissedAt: record.queuedAt || Date.now(),
+                    feePostedAt: null, feeRecordId: null };
+            });
+        }
     }
 
     function queuePendingFeeUnlink(record) {
         if (!record || !activeYear) return;
-        data.pendingFeeUnlinksByYear = data.pendingFeeUnlinksByYear && typeof data.pendingFeeUnlinksByYear === 'object'
-            ? data.pendingFeeUnlinksByYear : {};
-        const list = Array.isArray(data.pendingFeeUnlinksByYear[activeYear]) ? data.pendingFeeUnlinksByYear[activeYear] : [];
-        if (!list.some(item => item.id === record.id && item.sourceId === record.sourceId)) {
-            list.push({ id: String(record.id || ''), sourceId: String(record.sourceId || ''), queuedAt: Date.now() });
+        const sourceId = String(record.sourceId || '');
+        const reservationId = String(record.reservationId || (sourceId.startsWith('imported_') ? sourceId.slice(9) : ''));
+        const list = (data.pendingFeeUnlinksByYear ||= {})[activeYear] ||= [];
+        const id = String(record.id || '');
+        if (!list.some(item => item.id === id)) {
+            list.push({ id, sourceId, reservationId, queuedAt: Date.now() });
         }
-        data.pendingFeeUnlinksByYear[activeYear] = list;
+        if (!reservationId) return;
+        const dismissed = data.dismissedLessons ||= [];
+        if (!dismissed.some(item => item.resKey === reservationId)) {
+            dismissed.push({ resKey: reservationId, date: record.date, studentName: record.studentName, hours: roundHours(record.hours || 0) });
+        }
     }
 
     async function flushPendingFeeUnlinks() {
-        if (!db || !activeYear) return true;
-        const list = data.pendingFeeUnlinksByYear && Array.isArray(data.pendingFeeUnlinksByYear[activeYear])
-            ? data.pendingFeeUnlinksByYear[activeYear].slice() : [];
-        if (list.length === 0) return true;
-        const remaining = [];
-        for (const item of list) {
-            try { await clearBookingFeeLink(item); }
-            catch (error) { console.error('预约入账关联待重试:', error); remaining.push(item); }
-        }
-        data.pendingFeeUnlinksByYear[activeYear] = remaining;
-        persistLocalLedgerSnapshot();
-        return remaining.length === 0;
-    }
-
-    // 删掉由预约入账的记录时，同时把该预约标为已忽略：否则下一轮刷新会把同一条
-    // 完成课程自动再导入一次，老师会觉得「删了又回来了」。
-    async function ignoreReservationAfterRecordDeleted(record) {
-        if (!db || !activeYear || !record) return false;
-        const resKey = String(record.reservationId
-            || String(record.sourceId || '').replace(/^imported_/, ''));
-        if (!resKey) return false;
-        try {
-            data.dismissedLessons = Array.isArray(data.dismissedLessons) ? data.dismissedLessons : [];
-            if (!data.dismissedLessons.some(item => item.resKey === resKey)) {
-                data.dismissedLessons.push({
-                    resKey,
-                    date: record.date,
-                    studentName: record.studentName,
-                    hours: roundHours(record.hours || 0)
-                });
-                saveData();
-                await cloudPushChain.catch(() => false);
+        const year = activeYear;
+        if (!db || !year) return true;
+        const list = data.pendingFeeUnlinksByYear?.[year] || [];
+        for (const item of list.slice()) {
+            const reservationId = item.reservationId || (item.sourceId?.startsWith('imported_') ? item.sourceId.slice(9) : '');
+            try {
+                await clearBookingFeeLink({ ...item, reservationId }, year);
+                const current = data.pendingFeeUnlinksByYear?.[year];
+                const index = current?.indexOf(item) ?? -1;
+                if (index >= 0) current.splice(index, 1);
+            } catch (error) {
+                console.error('预约入账关联待重试:', error);
             }
-            await db.ref(`years/${activeYear}/reservations/${resKey}`).transaction(current => {
-                if (!current || current.status !== 'completed') return;
-                if (current.feeRecordId && String(current.feeRecordId) !== String(record.id)) return;
-                current.feeStatus = 'dismissed';
-                current.feeDismissedAt = Date.now();
-                current.feePostedAt = null;
-                current.feeRecordId = null;
-                return current;
-            });
-            return true;
-        } catch (error) {
-            console.error('删除记录后标记该预约已忽略失败:', error);
-            return false;
         }
+        persistLocalLedgerSnapshot();
+        return !data.pendingFeeUnlinksByYear?.[year]?.length;
     }
 
     async function deleteRecord(id) {
@@ -1260,8 +1228,6 @@
         if (recordIndex < 0) return showToast('记录已经不存在，请刷新后重试');
         const record = data.records[recordIndex];
         try {
-            // 先把删除和待解除关联写入本机 WAL。云端失败时保留待重试状态，
-            // 不再做可能二次失败的反向回滚。
             queuePendingFeeUnlink(record);
             data.records.splice(recordIndex, 1);
             saveData();
@@ -1270,14 +1236,8 @@
                 return showToast('已在本机记录删除，云端恢复后会继续同步；预约关联暂未改变');
             }
             const unlinked = await flushPendingFeeUnlinks();
-            // 由预约入账的记录被删除后，把预约标为已忽略，避免自动入账又把它拉回来
-            const ignored = unlinked && (record.sourceId || record.reservationId)
-                ? await ignoreReservationAfterRecordDeleted(record)
-                : false;
-            // 解除关联后立即重算待入账列表，避免日历里已删除、列表里还显示已入账
             await refreshPendingList({ skipAutoPost: true }).catch(() => false);
-            if (ignored) showToast('已删除，该预约已标为「已忽略」，不会自动再导入（可在已忽略时间段恢复）');
-            else showToast(unlinked ? '已删除，相关预约已恢复为待入账' : '账本已删除，预约关联将在刷新后继续重试');
+            showToast(unlinked ? '记录已删除；相关预约不再自动入账' : '账本已删除，预约关联将在刷新后继续重试');
         } catch (error) {
             console.error('删除课时记录并解除预约关联失败', error);
             showToast('删除操作已保存在本机，将在刷新后继续重试');
@@ -1285,7 +1245,7 @@
     }
 
     function changeMonth(delta) {
-        currentDate.setMonth(currentDate.getMonth() + delta);
+        currentDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1);
         renderCalendar();
     }
 
@@ -1649,7 +1609,7 @@ let pendingRefreshInProgress = false;
 const LEGACY_FEE_SALT = 'class-optic-fee-vault-v1';
 const FEE_KDF_ITERATIONS = 250000;
 const FEE_PASSPHRASE_KEY = 'fee_vault_pass_v2';
-const FEE_APP_VERSION = '2026-11-23a'; // 页面右上角显示，用于确认运行的是否为最新版本
+const FEE_APP_VERSION = '2026-11-23b'; // 页面右上角显示，用于确认运行的是否为最新版本
 const FEE_REMEMBERED_CIPHER_KEY = 'fee_vault_pass_wrapped_v1';
 const FEE_REMEMBERED_LEGACY_KEY = 'fee_vault_pass_remembered';
 const FEE_ROTATION_JOURNAL_KEY = 'fee_vault_rotation_wrapped_v1';

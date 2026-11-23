@@ -688,8 +688,18 @@ function resumeExamTimerIfAllowed(isForceSystemTimeout) {
     if (Date.now() < new Date(examPaperData.endTime).getTime()) startCountUpTimer();
 }
 
-async function triggerManualSubmit(isForceSystemTimeout) {
-    if (isForceSystemTimeout === undefined) isForceSystemTimeout = false;
+let examSubmissionInProgress = false;
+async function triggerManualSubmit(isForceSystemTimeout = false) {
+    if (examSubmissionInProgress) return;
+    examSubmissionInProgress = true;
+    try {
+        await submitExamOnce(isForceSystemTimeout);
+    } finally {
+        examSubmissionInProgress = false;
+    }
+}
+
+async function submitExamOnce(isForceSystemTimeout) {
     if (!isForceSystemTimeout && !confirm("确定要交卷吗？")) return;
     if (!examPaperData || !studentNameVerified) return alert('考试状态已失效，请保留本地答案并联系老师。');
 

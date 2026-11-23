@@ -709,3 +709,38 @@ test('预约导入：不属于当前学年的预约不会写进账本', async ()
     assert.equal(context.data.records.length, 0);
     assert.match(alerts.join('\n'), /不属于 2026 学年/);
 });
+
+test('a deleted booking stays queued through a failed sync and never clears a newer link', async () => {
+    let fail = true;
+    let reservation = { status: 'completed', feeStatus: 'posted', feeRecordId: 'fee1' };
+    const ref = {
+        once: async () => ({ exists: () => true }),
+        transaction: async update => {
+            if (fail) throw new Error('offline');
+            reservation = update(reservation) ?? reservation;
+        }
+    };
+    const ledger = { pendingFeeUnlinksByYear: {}, dismissedLessons: [] };
+    const context = createContext({
+        activeYear: '2026', data: ledger, console: { error() {} },
+        db: { ref: () => ({ child: key => { assert.equal(key, 'lesson1'); return ref; } }) },
+        roundHours: Number, persistLocalLedgerSnapshot() {}
+    });
+    for (const name of ['clearBookingFeeLink', 'queuePendingFeeUnlink', 'flushPendingFeeUnlinks']) {
+        vm.runInContext(extractAnyScript(name), context);
+    }
+    const record = { id: 'fee1', reservationId: 'lesson1', date: '2026-11-23', studentName: '小明', hours: 1 };
+    context.queuePendingFeeUnlink(record);
+    assert.equal(ledger.dismissedLessons[0].resKey, 'lesson1');
+    assert.equal(await context.flushPendingFeeUnlinks(), false);
+    assert.equal(ledger.pendingFeeUnlinksByYear[2026].length, 1);
+    fail = false;
+    assert.equal(await context.flushPendingFeeUnlinks(), true);
+    assert.equal(reservation.feeStatus, 'dismissed');
+    assert.equal(reservation.feeRecordId, null);
+
+    reservation = { status: 'completed', feeStatus: 'posted', feeRecordId: 'replacement' };
+    context.queuePendingFeeUnlink(record);
+    assert.equal(await context.flushPendingFeeUnlinks(), true);
+    assert.equal(reservation.feeRecordId, 'replacement');
+});

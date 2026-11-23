@@ -68,6 +68,7 @@
         if (locked) return;
         try {
             const grant = linkMode ? await validateLink() : await validateAccount(true);
+            if (locked) return;
             if (!grant) closeBank();
             else if (grant.expiresAt !== expiresAt) {
                 expiresAt = grant.expiresAt;
@@ -78,6 +79,7 @@
         }
     }
     function armExpiry() {
+        clearTimeout(deadline);
         const remaining = expiresAt - Date.now();
         deadline = setTimeout(() => {
             if (Date.now() >= expiresAt) closeBank();

@@ -13,22 +13,26 @@
     const memory = new Map();
     const pending = new Set();
     const listeners = new Set();
-    let user = null;
+    let scope = "";
     let db = null;
     let timer = 0;
     let flushTimer = 0;
     let syncing = false;
     let available = true;
 
-    try {
-        const raw = localStorage.getItem(STORE);
-        const parsed = raw ? JSON.parse(raw) : {};
-        for (const [id, entry] of Object.entries(parsed || {})) {
-            if (!entry || typeof entry !== "object") continue;
-            memory.set(id, normalizeEntry(entry));
-        }
-    } catch {
-        try { localStorage.removeItem(STORE); } catch { /* 隐私模式下忽略 */ }
+    function selectScope(uid) {
+        const next = uid ? STORE + ":" + uid : STORE;
+        if (next === scope) return;
+        scope = next;
+        clearTimeout(timer);
+        memory.clear();
+        pending.clear();
+        try {
+            const saved = JSON.parse(localStorage.getItem(scope) || "{}");
+            for (const [id, entry] of Object.entries(saved || {})) {
+                if (entry && typeof entry === "object") memory.set(id, normalizeEntry(entry));
+            }
+        } catch { /* 浏览器存储不可用时保留当前会话 */ }
     }
 
     function normalizeEntry(entry) {
@@ -46,6 +50,7 @@
     }
 
     function entry(id) {
+        selectScope(currentUid());
         return memory.get(id) || blank();
     }
 
@@ -56,12 +61,12 @@
     function persist() {
         if (!available) return;
         try {
-            const plain = {};
+            const plain = Object.create(null);
             for (const [id, value] of memory) {
-                if (!isEmpty(value)) plain[id] = value;
+                plain[id] = value;
             }
-            if (Object.keys(plain).length) localStorage.setItem(STORE, JSON.stringify(plain));
-            else localStorage.removeItem(STORE);
+            if (Object.keys(plain).length) localStorage.setItem(scope, JSON.stringify(plain));
+            else localStorage.removeItem(scope);
         } catch {
             available = false;
         }
@@ -78,9 +83,8 @@
     }
 
     function write(id, patch) {
-        const next = Object.assign(entry(id), patch, { updatedAt: Date.now() });
-        if (isEmpty(next)) memory.delete(id);
-        else memory.set(id, next);
+        const next = { ...entry(id), ...patch, updatedAt: Math.max(Date.now(), entry(id).updatedAt + 1) };
+        memory.set(id, next);
         persist();
         pending.add(id);
         if (currentUid()) schedulePush();
@@ -113,25 +117,34 @@
     }
 
     async function push() {
-        const ids = [...pending];
-        if (!ids.length || syncing) return;
         const uid = currentUid();
+        selectScope(uid);
         const database = uid ? service() : null;
-        if (!uid || !database) return;
+        if (!pending.size || syncing || !database) return;
         syncing = true;
-        const payload = {};
-        for (const id of ids) {
-            const value = memory.get(id);
-            payload[id] = value ? value : null;
-            pending.delete(id);
-        }
+        const work = [...pending].map(id => [id, memory.get(id)]);
+        pending.clear();
         try {
-            await database.ref("users/" + uid + "/bankMemory").update(payload);
+            for (const [id, value] of work) {
+                if (currentUid() !== uid) return;
+                const result = await database.ref("users/" + uid + "/bankMemory/" + id)
+                    .transaction(remote => {
+                        if (currentUid() !== uid || Number(remote?.updatedAt || 0) > value.updatedAt) return;
+                        return value;
+                    });
+                if (currentUid() !== uid) return;
+                if (!result.committed && memory.get(id) === value && result.snapshot.val()) {
+                    memory.set(id, normalizeEntry(result.snapshot.val()));
+                    persist();
+                    emit();
+                }
+            }
             setStatus("");
         } catch (error) {
-            // 失败回填，等下次触发再试
-            for (const id of ids) pending.add(id);
-            setStatus("云端同步失败：" + (error.message || "网络异常"), "warn");
+            if (currentUid() === uid) {
+                for (const [id] of work) pending.add(id);
+                setStatus("云端同步失败：" + (error.message || "网络异常"), "warn");
+            }
         } finally {
             syncing = false;
             if (pending.size) schedulePush();
@@ -151,6 +164,7 @@
 
     async function pull() {
         const uid = currentUid();
+        selectScope(uid);
         const database = uid ? service() : null;
         if (!uid || !database) {
             setStatus("未登录，记忆只保存在本机浏览器。", "warn");
@@ -164,40 +178,20 @@
             setStatus("云端记忆读取失败：" + (error.message || "网络异常"), "warn");
             return;
         }
-        const merged = new Map();
-        const upload = {};
-        const ids = new Set([...Object.keys(cloud), ...memory.keys()]);
-        for (const id of ids) {
+        if (currentUid() !== uid) return;
+        for (const id of new Set([...Object.keys(cloud), ...memory.keys()])) {
             const remote = cloud[id] ? normalizeEntry(cloud[id]) : null;
-            const local = memory.get(id) || null;
-            if (remote && local) {
-                // 逐题取较新的一份；本地更新则回传
-                if (local.updatedAt >= remote.updatedAt) {
-                    merged.set(id, local);
-                    if (local.updatedAt > remote.updatedAt) upload[id] = local;
-                } else {
-                    merged.set(id, remote);
-                }
-            } else if (remote) {
-                merged.set(id, remote);
+            const local = memory.get(id);
+            if (remote && (!local || remote.updatedAt >= local.updatedAt)) {
+                memory.set(id, remote);
+                pending.delete(id);
             } else if (local) {
-                merged.set(id, local);
-                upload[id] = local;
+                pending.add(id);
             }
-        }
-        memory.clear();
-        for (const [id, value] of merged) {
-            if (!isEmpty(value)) memory.set(id, value);
         }
         persist();
-        if (Object.keys(upload).length) {
-            try {
-                await database.ref("users/" + uid + "/bankMemory").update(upload);
-            } catch (error) {
-                setStatus("本机记忆上传失败：" + (error.message || "网络异常"), "warn");
-            }
-        }
-        setStatus(memory.size ? "已同步 " + memory.size + " 条本机记忆。" : "");
+        if (pending.size) schedulePush();
+        setStatus("");
         emit();
         if (typeof window.qbankRefresh === "function") window.qbankRefresh();
     }
@@ -295,6 +289,7 @@
             const current = entry(id);
             for (const [key, node] of buttons) node.setAttribute("aria-pressed", String(current.state === key));
             star.setAttribute("aria-pressed", String(current.star));
+            if (area.value !== current.note) area.value = current.note;
             if (currentUid()) {
                 hint.textContent = "已登录，记忆会自动同步到云端。";
                 delete hint.dataset.kind;
@@ -323,7 +318,8 @@
         if (!auth) return;
         try {
             auth().onAuthStateChanged(account => {
-                user = account || null;
+                selectScope(account?.uid || "");
+                emit();
                 clearTimeout(flushTimer);
                 // 登录态确定后再拉云端，避免读到别人的数据
                 flushTimer = setTimeout(() => {
