@@ -13,6 +13,24 @@ let codes = {};
 let users = {};
 const signURL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey);
 function notice(text) { $("status").textContent = text; }
+
+// 把 Firebase 的错误码翻译成能照着修的中文，避免一律“口令有误”让人无从下手
+const LOGIN_ERRORS = {
+    INVALID_LOGIN_CREDENTIALS: "邮箱或口令不正确。这里的口令是 Firebase 账号的密码，不是 QQ / 邮箱本身的登录密码。",
+    INVALID_PASSWORD: "口令不正确。",
+    EMAIL_NOT_FOUND: "Firebase Authentication 里没有这个邮箱账号。",
+    USER_DISABLED: "该账号已被停用。",
+    OPERATION_NOT_ALLOWED: "项目未启用「电子邮件/密码」登录方式。",
+    PASSWORD_LOGIN_DISABLED: "项目已关闭邮箱密码登录方式。",
+    TOO_MANY_ATTEMPTS_TRY_LATER: "尝试过于频繁，请稍后再试。",
+    API_KEY_INVALID: "admin-config 里的 API Key 无效。",
+    INVALID_EMAIL: "邮箱格式不正确。",
+};
+function loginError(code) {
+    return LOGIN_ERRORS[code] || ("登录失败（" + (code || "响应异常") + "）。");
+}
+// 把正在使用的登录邮箱直接显示出来，避免误以为是别的账号
+$("sign-in-as").textContent = "登录账号：" + alias + "（口令即该 Firebase 账号的密码）";
 async function token() {
     if (session.until - Date.now() > 60000) return session.id;
     if (!refreshTask) refreshTask = (async()=>{
@@ -254,12 +272,22 @@ $("sign-in").addEventListener("submit",async event=>{
     try {
         const password=$("password").value.trim();
         $("password").value="";
-        const r=await fetch(signURL,{
-            method:"POST",headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({email:alias,password,returnSecureToken:true}),
-            cache:"no-store",referrerPolicy:"no-referrer",
-        });
-        if (!r.ok) throw new Error("管理员个人口令有误，或验证服务暂时不可用。");
+        let r;
+        try {
+            r=await fetch(signURL,{
+                method:"POST",headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({email:alias,password,returnSecureToken:true}),
+                cache:"no-store",referrerPolicy:"no-referrer",
+            });
+        } catch(networkError) {
+            throw new Error("无法连接 Firebase 验证服务（identitytoolkit.googleapis.com），请检查网络环境。");
+        }
+        if (!r.ok) {
+            const detail=await r.json().catch(()=>({}));
+            const code=String(detail?.error?.message||"").split(" ")[0];
+            console.warn("[signInWithPassword]", r.status, code || "(无错误码)");
+            throw new Error(loginError(code) + "（账号：" + alias + "）");
+        }
         const d=await r.json();
         session={id:d.idToken,refresh:d.refreshToken,until:Date.now()+1000*Number(d.expiresIn)};
         await load();
