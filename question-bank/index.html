@@ -154,6 +154,7 @@ function cleanStem(text, inline = false) {
     return text.replace(/\\begin\{tabular\*?\}[\s\S]*?(A\.[\s\S]*?)\\end\{tabular\*?\}/g,
             (_, options) => options.replace(/\\\\/g, "\n").replace(/\s*&\s*/g, "    "))
         .replace(/\\hspace\*?\{[^{}]*\}/g, "")
+        .replace(/\\(?:sect|ReserveSpace)\{[^{}]*\}/g, "")
         .replace(/\\fontsize\{[^{}]*\}\{[^{}]*\}\\selectfont/g, "")
         .replace(/\\(?:blank|blk)\b/g, "________")
         .replace(/\\begin\{center\}\s*\{\\zihao\{\d+\}\\bfseries[\s\S]*?\\end\{center\}/g, "")
@@ -169,9 +170,9 @@ function cleanStem(text, inline = false) {
         .replace(/\\(?:vspace|addvspace)\{[^{}]*\}/g, "")
         .replace(/\\(?:centering|begin\{center\}|end\{center\})/g, "")
         .replace(/\\end\{(?:samepage|enumerate|itemize|multicols)\}/g, "")
-        .replace(/\\(?:sq|subq)\{(\d+)\}/g, "（$1）")
+        .replace(/\\(?:sq|subq|st)\{(\d+)\}/g, "（$1）")
         .replace(/\\(?:nopagebreak|noindent|ignorespaces|par|smallskip|medskip|bigskip)\b\s*/g, "\n")
-        .replace(/\\opts\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}/g, "\nA. $1\nB. $2\nC. $3\nD. $4")
+        .replace(/\\opts?\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}/g, "\nA. $1\nB. $2\nC. $3\nD. $4")
         .replace(/\\rule(?:\[[^\]]*\])?\{[^{}]*\}\{[^{}]*\}/g, "________")
         .replace(/\\mbox\{(\\\([\s\S]*?\\\))\}/g, "$1")
         .replace(/\\mbox\{([^{}]*?)\}/g, "$1")
@@ -737,5 +738,5 @@ readHash();
 
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-bc5ec72acfabeef9"}</script><script src="access.js?v=internal-v2-index"></script></body>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-14f9aa5f123196dd"}</script><script src="access.js?v=internal-v2-index"></script></body>
 </html>
