@@ -108,3 +108,12 @@ python3 delivery/publish-internal.py <公开仓 question-bank 路径> <settings.
 - 从仓库根目录运行 `python3 -m http.server 8000`，通过 HTTP 打开页面检查资源和导航。当前配置指向线上数据库，本地检查时请使用只读流程，或换成独立测试项目。
 - 运行 `node --test tests/*.test.js` 执行回归测试（题库两条为 `tests/*.test.mjs`：`node --test tests/bank-redeem.test.mjs tests/bank-manage-codes.test.mjs`）。`tests/fee-sync-regression.test.js` 覆盖课时费的加密同步、金额口径、口令缓存与预约入账回滚。`firebase.emulator.test.json` 和 `tests/database-rules.integration.cjs` 用于本地 Realtime Database 规则测试。
 - 静态文件随 GitHub Pages 发布。数据库规则独立部署：`firebase deploy --only database --project class-optic`。**规则已按本文件部署到线上**（部署前逐节点比对过线上版本，差异仅本轮新增的三处：链接与激活码允许删除、激活码 `release` 可读），`blinkConsole` 节点规则保留，`ieltsReading` 已不在线上。若其他应用共用同一数据库，改规则前仍应先比对 Firebase 当前生效版本再合并。
+
+
+### 题库个人通行证
+
+题库管理页可批量生成个人通行证。学生打开专属链接或在题库首页输入通行证，同一个通行证最多绑定两个浏览器，只能有一个在线会话。第二台可主动切换，旧会话在下次检查时退出。关闭页面或断网后，会话在最后一次续期的 90 秒后释放。换浏览器会占用新名额。学生可在题库「设备管理」解绑当前浏览器，教师可在题库管理页重置绑定或停用通行证。
+
+个人通行证沿用现有加密题库，使用单独的 `bankPersonalPasses` 授权规则。这一入口的笔记仅保存在当前浏览器。上线时先验证 Firebase 规则只新增该节点，再发布前端。
+
+在本地 Realtime Database 模拟器中运行 `tests/personal-pass-rules.integration.cjs`，可检查设备上限、同时登录、切换、释放和停用。

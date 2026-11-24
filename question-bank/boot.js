@@ -21,13 +21,25 @@
         });
     }
 
-    const linkToken = () => new URLSearchParams(location.hash.slice(1)).get("key");
-    const token = linkToken();
+    const credentials = () => {
+        const hash = new URLSearchParams(location.hash.slice(1));
+        return JSON.stringify([hash.get("key"), hash.get("pass")]);
+    };
+    const initialCredentials = credentials();
+    const hash = new URLSearchParams(location.hash.slice(1));
     addEventListener("hashchange", () => {
-        if (linkToken() !== token) location.reload();
+        if (credentials() !== initialCredentials) location.reload();
     });
-    const linkMode = Boolean(token);
-    if (!linkMode) {
+    const passMode = hash.has("pass");
+    const linkMode = hash.has("key");
+    try { await load(files.personalPass); }
+    catch {
+        if (passMode) {
+            status.textContent = "个人通行证组件无法加载，请刷新重试。";
+            return;
+        }
+    }
+    if (!linkMode && !passMode) {
         status.textContent = "正在连接邮箱登录服务…";
         const sdk = "https://www.gstatic.com/firebasejs/8.10.1/firebase-";
         try {

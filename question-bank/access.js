@@ -11,8 +11,9 @@
     const cache = new Map();
     const limit = 16 * 1024 * 1024;
     const denied = "链接已到期或停用，请向管理员获取新链接。";
-    const account = window.qbankAccount;
-    const linkMode = Boolean(token);
+    const personalMode = launch.has("pass");
+    const account = personalMode ? window.qbankPersonalPass : window.qbankAccount;
+    const linkMode = !personalMode && Boolean(token);
     let cacheSize = 0;
     let bank, key, expiresAt, pendingCheck, poll, deadline;
     let locked = false;
@@ -35,6 +36,7 @@
     // 账号模式：没有内部链接时走「邮箱账号 + 激活码」通道
     if (!linkMode) {
         if (!account) {
+            if (personalMode) return;
             status.textContent = "题库加载失败，请刷新页面或联系管理员。";
             return;
         }
@@ -73,6 +75,14 @@
         locked = true;
         clearTimeout(deadline);
         clearInterval(poll);
+        if (personalMode) {
+            account.lock();
+            document.getElementById("question-data").textContent = "";
+            document.documentElement.classList.add("bank-locked");
+            gate.hidden = false;
+            status.textContent = "在线会话已结束。请刷新重新登录。";
+            return;
+        }
         if (!linkMode) {
             location.reload();
             return;
@@ -105,7 +115,11 @@
         }, Math.max(0,Math.min(remaining,12*60*60*1000)));
     }
     async function decrypt(path,signal) {
-        if (locked || Date.now() >= expiresAt) throw new Error(linkMode ? denied : "题库权限已到期，请重新激活。");
+        if (locked || Date.now() >= expiresAt) throw new Error(linkMode ? denied : "题库权限已到期，请重新登录。");
+        if (personalMode && path !== (config.indexPath || "index") && !await account.verify()) {
+            closeBank();
+            throw new Error("当前设备的在线会话已结束。");
+        }
         let sealed;
         try {
             const url = new URL("content/" + config.release + "/" + path + ".bin", location.href);
@@ -142,7 +156,7 @@
         // 链接模式保留 key 参数以便刷新；账号模式的定位参数只带题目 id
         window.questionBankHash = id => "#" + (linkMode
             ? new URLSearchParams({key:token,q:id})
-            : new URLSearchParams({q:id}));
+            : new URLSearchParams(personalMode ? {pass:launch.get("pass"), q:id} : {q:id}));
         window.questionBankId = () => new URLSearchParams(location.hash.slice(1)).get("q") || "";
         window.loadProtectedAsset = async (id,type,signal) => {
             if (locked || Date.now() >= expiresAt) throw new Error(linkMode ? denied : "题库权限已到期，请重新激活。");
@@ -168,7 +182,7 @@
         document.documentElement.classList.remove("bank-locked");
         window.startQuestionBank();
         armExpiry();
-        poll = setInterval(recheck,60000);
+        poll = setInterval(recheck,personalMode ? 25000 : 60000);
         document.addEventListener("visibilitychange",()=>{ if (!document.hidden) recheck(); });
     } catch (error) {
         gate.hidden = false;

@@ -297,9 +297,90 @@ async function loadUsers() {
     users = (await usersAPI("")) || {};
     showUsers();
 }
+const personalPassAPI = (path, method, value) => request(config.database + "/bankPersonalPasses", path, method, value);
+
+function personalPassLink(pass) {
+    const url = new URL("../", location.href);
+    url.hash = new URLSearchParams({pass});
+    return url.href;
+}
+
+async function loadPersonalPasses() {
+    const host = $("personal-pass-rows");
+    if (!personalPassForm) return;
+    const passes = await personalPassAPI("") || {};
+    host.replaceChildren();
+    for (const [code, entry] of Object.entries(passes)) {
+        const row = host.insertRow();
+        row.insertCell().textContent = entry.label;
+        const devices = Object.values(entry.devices || {}).filter(device => device.released === false);
+        row.insertCell().textContent = devices.length + " / 2";
+        row.insertCell().textContent = entry.revoked ? "已停用" : date.format(entry.validUntil);
+        const controls = row.insertCell();
+        if (entry.revoked) continue;
+        controls.append(action("复制链接", () => copy(personalPassLink(code))));
+        controls.append(action("重置设备", async () => {
+            if (!confirm("解除此通行证的全部设备绑定，并结束当前会话？")) return;
+            try {
+                await personalPassAPI(code, "PATCH", {devices: null, lease: null});
+                await loadPersonalPasses();
+                notice("设备绑定已重置。");
+            } catch (error) { notice(error.message); }
+        }));
+        controls.append(action("停用", async () => {
+            if (!confirm("停用此通行证？")) return;
+            try {
+                await personalPassAPI(code, "PATCH", {revoked: true, lease: null});
+                await loadPersonalPasses();
+                notice("个人通行证已停用。");
+            } catch (error) { notice(error.message); }
+        }, "danger"));
+    }
+}
+
+const personalPassForm = $("gen-personal-passes");
+personalPassForm?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = event.submitter;
+    const count = $("personal-pass-count").valueAsNumber;
+    const days = $("personal-pass-days").valueAsNumber;
+    if (!Number.isInteger(count) || count < 1 || count > 50
+        || !Number.isInteger(days) || days < 1 || days > 365) return;
+    const label = $("personal-pass-label").value.trim() || "题库试用";
+    const output = $("personal-pass-output");
+    const generated = [];
+    button.disabled = true;
+    try {
+        for (let index = 0; index < count; index++) {
+            const code = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
+                .replaceAll("+", "-").replaceAll("/", "_");
+            await personalPassAPI(code, "PUT", {
+                label: count > 1 ? label + " " + (index + 1) : label,
+                validUntil: Date.now() + days * 86400000,
+                revoked: false,
+                delivery: {"~": {release: settings.release, key: settings.key}}
+            });
+            generated.push(personalPassLink(code));
+        }
+        notice("已生成 " + generated.length + " 份个人通行证。");
+    } catch (error) { notice(error.message + "（已生成 " + generated.length + " 份）"); }
+    finally {
+        if (generated.length) {
+            output.value = generated.join("\n");
+            output.hidden = false;
+        }
+        await loadPersonalPasses().catch(() => {});
+        button.disabled = false;
+    }
+});
+
 async function load() {
     await loadLinks();
     await Promise.all([loadCodes(), loadUsers()]);
+    // Older rules still allow the existing management pages to open during rollout.
+    await loadPersonalPasses().catch(() => {
+        if (personalPassForm) $("personal-pass-rows").textContent = "个人通行证规则尚未启用。";
+    });
 }
 
 $("sign-in").addEventListener("submit",async event=>{

@@ -68,6 +68,7 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <style>
 .bank-locked body>header,.bank-locked #layout{display:none}
 #internal-gate{min-height:85dvh;display:grid;place-items:center;padding:16px}
+#internal-gate[hidden]{display:none}
 #internal-gate>div{width:min(430px,100%);padding:24px;border:1px solid var(--line);border-radius:12px;background:white}
 #internal-gate h1{margin:0;font-size:22px}
 #gate-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:14px 0 12px}
@@ -133,6 +134,16 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <div>
 <h1 id="internal-title">华科 839 题库</h1>
 <p id="internal-status" role="status">请使用内部链接打开题库。</p>
+<form id="personal-pass-form" class="gate-form" hidden>
+<label>个人通行证<input id="personal-pass-input" type="password" autocomplete="off" maxlength="32" required></label>
+<button type="submit">用通行证进入</button>
+</form>
+<div id="personal-pass-tools" hidden>
+<button id="personal-pass-takeover" type="button" hidden>切换到这台设备</button>
+<button id="personal-pass-unlink" type="button" hidden>解绑这个浏览器</button>
+<button id="personal-pass-resume" type="button" hidden>继续学习</button>
+<button id="personal-pass-exit" type="button">返回登录</button>
+</div>
 <div id="gate-account" hidden>
 <div id="gate-tabs" role="tablist">
 <button type="button" role="tab" data-tab="signin" aria-selected="true">登录</button>
@@ -167,7 +178,7 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <p class="gate-meta">激活码由管理员发放。题库账号与 1v1 约课名单互不影响。<a href="../">返回预约页</a> · <a href="network.html" target="_blank" rel="noopener noreferrer">网络检测</a></p>
 </div>
 </section>
-<header><div class="header-start"><button id="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar" aria-label="收起筛选栏" title="收起筛选栏"><span class="panel-icon" aria-hidden="true"></span></button><div><h1>华科 839 题库</h1><p>波动光学与激光原理 · <span id="total"></span> 条</p></div></div><div class="header-actions"><button id="about-open" type="button">标注说明</button></div></header>
+<header><div class="header-start"><button id="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar" aria-label="收起筛选栏" title="收起筛选栏"><span class="panel-icon" aria-hidden="true"></span></button><div><h1>华科 839 题库</h1><p>波动光学与激光原理 · <span id="total"></span> 条</p></div></div><div class="header-actions"><button id="personal-pass-menu" type="button" hidden>设备管理</button><button id="about-open" type="button">标注说明</button></div></header>
 <div class="layout" id="layout" data-mobile="list">
 <aside id="sidebar" aria-label="题目搜索和结果">
 <div class="filter-box">
@@ -947,7 +958,7 @@ try {
 };</script>
 
 <script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-45b62c47203325e4", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
-<script src="study.js?v=20261123-study-3"></script>
+<script src="study.js?v=20261124-pass-1"></script>
 <script src="ai-tutor.js?v=20261123-ai-2"></script>
-<script src="boot.js?v=20261124-2" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-2"></script></body>
+<script src="boot.js?v=20261124-pass-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-pass-1" data-personal-pass="personal-pass.js?v=20261124-3"></script></body>
 </html>

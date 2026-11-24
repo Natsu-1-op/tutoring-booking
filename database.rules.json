@@ -40,6 +40,83 @@
       }
     }
   },
+    "bankPersonalPasses": {
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
+      "$pass": {
+        ".write": "auth != null && auth.token.email === '1843499931@qq.com'",
+        ".validate": "$pass.matches(/^[A-Za-z0-9_-]{32}$/) && newData.hasChildren(['label','validUntil','revoked','delivery'])",
+        "label": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+        },
+        "validUntil": {
+          ".validate": "newData.isNumber()"
+        },
+        "revoked": {
+          ".validate": "newData.isBoolean()"
+        },
+        "delivery": {
+          ".read": "root.child('bankPersonalPasses').child($pass).child('validUntil').val() > now && root.child('bankPersonalPasses').child($pass).child('revoked').val() === false && root.child('bankPersonalPasses').child($pass).child('lease').child('released').val() === false && root.child('bankPersonalPasses').child($pass).child('lease').child('seenAt').val() > now - 90000 && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease').child('slot').val()).child('released').val() === false && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease').child('slot').val()).child('proof').val() === root.child('bankPersonalPasses').child($pass).child('lease').child('proof').val() && query.orderByKey && query.startAt === root.child('bankPersonalPasses').child($pass).child('lease').child('session').val() && data.child('~').child('release').val() === root.child('questionBankAccess/settings/release').val()",
+          "~": {
+            ".validate": "newData.hasChildren(['key','release'])",
+            "key": {
+              ".validate": "newData.isString() && newData.val() === root.child('questionBankAccess/settings/key').val()"
+            },
+            "release": {
+              ".validate": "newData.isString() && newData.val() === root.child('questionBankAccess/settings/release').val()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "devices": {
+          "$slot": {
+            ".write": "(root.child('bankPersonalPasses').child($pass).child('validUntil').val() > now && root.child('bankPersonalPasses').child($pass).child('revoked').val() === false) && ($slot === '1' || $slot === '2') && newData.exists() && ((!data.exists() || data.child('released').val() === true) && newData.child('released').val() === false || newData.child('proof').val() === data.child('proof').val())",
+            ".validate": "($slot === '1' || $slot === '2') && newData.hasChildren(['proof','released']) && newData.child('proof').isString() && newData.child('proof').val().matches(/^[a-f0-9]{48}$/)",
+            "proof": {
+              ".validate": "newData.isString()"
+            },
+            "released": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "lease": {
+          ".write": "(root.child('bankPersonalPasses').child($pass).child('validUntil').val() > now && root.child('bankPersonalPasses').child($pass).child('revoked').val() === false) && newData.exists() && (newData.child('slot').val() === '1' || newData.child('slot').val() === '2') && (root.child('bankPersonalPasses').child($pass).child('devices').child(newData.child('slot').val()).child('proof').val() === newData.child('proof').val() && root.child('bankPersonalPasses').child($pass).child('devices').child(newData.child('slot').val()).child('released').val() === false) && ((newData.child('released').val() === true && (data.child('session').val() === newData.child('session').val() && data.child('proof').val() === newData.child('proof').val())) || (newData.child('released').val() === false && ((!data.exists() || data.child('released').val() === true || data.child('seenAt').val() <= now - 90000) || (data.child('session').val() === newData.child('session').val() && data.child('proof').val() === newData.child('proof').val()) || newData.child('takeover').val() === true)))",
+          ".validate": "newData.hasChildren(['proof','session','slot','seenAt','released','takeover']) && newData.child('proof').isString() && newData.child('proof').val().matches(/^[a-f0-9]{48}$/)",
+          "proof": {
+            ".validate": "newData.isString()"
+          },
+          "session": {
+            ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{48}$/)"
+          },
+          "slot": {
+            ".validate": "newData.val() === '1' || newData.val() === '2'"
+          },
+          "seenAt": {
+            ".validate": "newData.isNumber() && newData.val() >= now - 10000 && newData.val() <= now"
+          },
+          "released": {
+            ".validate": "newData.isBoolean()"
+          },
+          "takeover": {
+            ".validate": "newData.isBoolean()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "users": {
       ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
       "$uid": {

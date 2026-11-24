@@ -30,6 +30,18 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 <h2>已生成的链接</h2>
 <div class="area"><table><thead><tr><th>备注</th><th>到期时间（北京时间）</th><th>状态</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table></div>
 </section>
+<section class="card" id="personal-passes-card">
+<h2>个人通行证</h2>
+<p class="muted">可批量发放。每份最多绑定两个浏览器，同时仅一台在线。</p>
+<form id="gen-personal-passes">
+<label>份数<input id="personal-pass-count" class="short" type="number" min="1" max="50" value="1" required></label>
+<label>有效天数<input id="personal-pass-days" class="short" type="number" min="1" max="365" value="30" required></label>
+<label>批次备注<input id="personal-pass-label" maxlength="52" placeholder="例如：2027 试用"></label>
+<button class="primary" type="submit">生成通行证</button>
+</form>
+<textarea id="personal-pass-output" rows="3" readonly hidden aria-label="本批通行证链接"></textarea>
+<div class="area"><table><thead><tr><th>备注</th><th>绑定设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="personal-pass-rows"></tbody></table></div>
+</section>
 <section class="card">
 <h2>题库激活码</h2>
 <form id="gen-codes"><label>数量<input class="short" id="gen-count" type="number" min="1" max="50" step="1" value="5" required></label><label>有效天数<input class="short" id="gen-days" type="number" min="1" max="1095" step="1" value="365" required></label><label>备注<input id="gen-note" maxlength="60" placeholder="例如：2027 届第一批"></label><button class="primary" type="submit">批量生成</button></form>
@@ -48,6 +60,6 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 <p id="status" class="muted" role="status"></p>
 </main>
 <script type="application/json" id="admin-config">{"apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "ownerEmail": "1843499931@qq.com"}</script>
-<script src="manage.js?v=20261123-account-2"></script>
+<script src="manage.js?v=20261124-pass-1"></script>
 </body>
 </html>

@@ -20,7 +20,8 @@
     let available = true;
 
     function selectScope(uid) {
-        const next = uid ? STORE + ":" + uid : STORE;
+        const passScope = window.qbankPersonalPass?.storageScope;
+        const next = uid ? STORE + ":" + uid : passScope ? STORE + ":pass:" + passScope : STORE;
         if (next === scope) return;
         scope = next;
         clearTimeout(timer);
