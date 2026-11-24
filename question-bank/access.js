@@ -20,6 +20,21 @@
     let bank, key, expiresAt, pendingCheck, poll, deadline;
     let locked = false;
 
+    async function fetchWithTimeout(url, read, options = {}, timeout = 10000) {
+        const controller = new AbortController();
+        const cancel = () => controller.abort();
+        const originalSignal = options.signal;
+        if (originalSignal?.aborted) cancel();
+        originalSignal?.addEventListener("abort", cancel, {once:true});
+        const timer = setTimeout(() => controller.abort(), timeout);
+        try {
+            return await read(await fetch(url, {...options, signal:controller.signal}));
+        } finally {
+            clearTimeout(timer);
+            originalSignal?.removeEventListener("abort", cancel);
+        }
+    }
+
     // 账号模式：没有内部链接时走「邮箱账号 + 激活码」通道
     if (!linkMode) {
         if (!account) {
@@ -36,10 +51,16 @@
     async function validateLink() {
         if (pendingCheck) return pendingCheck;
         pendingCheck = (async () => {
-            const response = await fetch(grantURL,{cache:"no-store",referrerPolicy:"no-referrer"});
-            if (response.status === 401 || response.status === 403) return null;
-            if (!response.ok) throw new Error("暂时无法核验链接，请稍后刷新。");
-            const grant = await response.json();
+            let grant;
+            try {
+                grant = await fetchWithTimeout(grantURL, async response => {
+                    if (response.status === 401 || response.status === 403) return null;
+                    if (!response.ok) throw new Error("核验失败");
+                    return await response.json();
+                }, {cache:"no-store",referrerPolicy:"no-referrer"});
+            } catch {
+                throw new Error("题库授权数据库暂时无法连接。请运行网络检测，或稍后刷新重试。");
+            }
             if (!grant || grant.release !== config.release || grant.revoked || !/^[A-Za-z0-9_-]{43}$/.test(grant.key)) return null;
             return grant;
         })().finally(()=>{pendingCheck = null;});
@@ -88,9 +109,17 @@
     }
     async function decrypt(path,signal) {
         if (locked || Date.now() >= expiresAt) throw new Error(linkMode ? denied : "题库权限已到期，请重新激活。");
-        const response = await fetch(new URL("content/" + config.release + "/" + path + ".bin", location.href), {signal});
-        if (!response.ok) throw new Error("题库文件暂时无法读取。");
-        const sealed = new Uint8Array(await response.arrayBuffer());
+        let sealed;
+        try {
+            const url = new URL("content/" + config.release + "/" + path + ".bin", location.href);
+            sealed = new Uint8Array(await fetchWithTimeout(url, async response => {
+                if (!response.ok) throw new Error("题库文件读取失败");
+                return await response.arrayBuffer();
+            }, {signal}, 20000));
+        } catch (error) {
+            if (signal?.aborted) throw error;
+            throw new Error("题库文件下载失败或超时，请检查网站连接后重试。");
+        }
         if (sealed.length < 29) throw new Error("题库文件不完整。");
         return crypto.subtle.decrypt({
             name:"AES-GCM",iv:sealed.subarray(0,12),

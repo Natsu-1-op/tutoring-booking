@@ -20,6 +20,11 @@
     // 链接模式（带 #key=）沿用原有内部链接机制，不展示账号界面
     const linkMode = new URLSearchParams(location.hash.slice(1)).has("key");
 
+    const slowNotice = (message, ms = 10000) => setTimeout(() => {
+        const status = document.getElementById("internal-status");
+        if (status && !document.getElementById("internal-gate")?.hidden) status.textContent = message;
+    }, ms);
+
     const app = firebase.initializeApp({
         apiKey: config.apiKey,
         authDomain: config.authDomain,
@@ -355,6 +360,7 @@
             const button = event.submitter;
             button.disabled = true;
             say("正在登录…");
+            const warning = slowNotice("邮箱登录服务响应较慢。请运行网络检测；如需直接刷题，可向老师索取内部链接。");
             try {
                 await auth.signInWithEmailAndPassword($("signin-email").value.trim(), $("signin-password").value);
                 $("signin-password").value = "";
@@ -363,6 +369,7 @@
             } catch (error) {
                 say(fail(error), "error");
             } finally {
+                clearTimeout(warning);
                 button.disabled = false;
             }
         });
@@ -376,6 +383,7 @@
             }
             button.disabled = true;
             say("正在注册…");
+            const warning = slowNotice("注册请求仍在等待。网络恢复后先试登录，确认是否已注册。");
             try {
                 const credential = await auth.createUserWithEmailAndPassword(
                     $("signup-email").value.trim(), $("signup-password").value);
@@ -392,6 +400,7 @@
             } catch (error) {
                 say(fail(error), "error");
             } finally {
+                clearTimeout(warning);
                 button.disabled = false;
             }
         });
@@ -401,12 +410,14 @@
             const button = event.submitter;
             button.disabled = true;
             say("正在发送重置邮件…");
+            const warning = slowNotice("重置邮件请求仍在等待，请检查 Firebase 登录服务是否可达。");
             try {
                 await auth.sendPasswordResetEmail($("reset-email").value.trim());
                 say("重置邮件已发送，请查收邮箱（含垃圾邮件目录）并按邮件中的链接设置新密码。");
             } catch (error) {
                 say(fail(error), "error");
             } finally {
+                clearTimeout(warning);
                 button.disabled = false;
             }
         });
@@ -416,6 +427,7 @@
             const button = event.submitter;
             button.disabled = true;
             say("正在兑换激活码…");
+            const warning = slowNotice("题库授权数据库响应较慢。请勿重复兑换，网络恢复后先检查权限。");
             try {
                 const done = await redeem($("activate-code").value);
                 $("activate-code").value = "";
@@ -429,6 +441,7 @@
             } catch (error) {
                 say(fail(error), "error");
             } finally {
+                clearTimeout(warning);
                 button.disabled = false;
             }
         });
@@ -448,7 +461,10 @@
     window.qbankAccount = {getGrant, refresh, signOut, redeem};
 
     bind();
-    if (!linkMode) paint().catch(error => say(fail(error), "error"));
+    if (!linkMode) {
+        const warning = slowNotice("正在等待登录状态或题库授权数据库。请运行网络检测，或使用老师发的内部链接。");
+        paint().catch(error => say(fail(error), "error")).finally(() => clearTimeout(warning));
+    }
 
     // 邮箱验证不属于准入条件，这里只做提示，不阻断使用
     auth.onAuthStateChanged(() => {
