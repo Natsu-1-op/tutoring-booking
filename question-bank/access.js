@@ -4,9 +4,6 @@
     const status = document.getElementById("internal-status");
     const launch = new URLSearchParams(location.hash.slice(1));
     const token = launch.get("key");
-    addEventListener("hashchange", () => {
-        if (new URLSearchParams(location.hash.slice(1)).get("key") !== token) location.reload();
-    });
     const config = JSON.parse(document.getElementById("internal-config").textContent);
     const encoder = new TextEncoder();
     const fromBase64 = value => Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")), c=>c.charCodeAt(0));

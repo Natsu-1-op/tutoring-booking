@@ -21,7 +21,12 @@
         });
     }
 
-    const linkMode = Boolean(new URLSearchParams(location.hash.slice(1)).get("key"));
+    const linkToken = () => new URLSearchParams(location.hash.slice(1)).get("key");
+    const token = linkToken();
+    addEventListener("hashchange", () => {
+        if (linkToken() !== token) location.reload();
+    });
+    const linkMode = Boolean(token);
     if (!linkMode) {
         status.textContent = "正在连接邮箱登录服务…";
         const sdk = "https://www.gstatic.com/firebasejs/8.10.1/firebase-";
