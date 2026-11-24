@@ -85,6 +85,11 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 #gate-signout{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;font:inherit;color:inherit;cursor:pointer}
 .gate-meta{margin:0;font-size:13px;color:#64748b}
 #internal-status[data-kind="error"]{color:#b42318}
+.gate-links{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px}
+.gate-links a,.gate-links button{font:inherit;font-size:13px;color:#475569;padding:5px 0}
+.gate-links button{border:0;background:transparent;cursor:pointer;text-decoration:underline}
+#personal-pass-tools{display:flex;flex-wrap:wrap;gap:8px}
+#personal-pass-tools[hidden]{display:none}
 </style>
 <style>
 .original-page{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:12px 14px;margin:14px 0}
@@ -133,10 +138,10 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 <section id="internal-gate" aria-labelledby="internal-title">
 <div>
 <h1 id="internal-title">华科 839 题库</h1>
-<p id="internal-status" role="status">请使用内部链接打开题库。</p>
+<p id="internal-status" role="status">打开老师发来的链接，或输入个人通行证。</p>
 <form id="personal-pass-form" class="gate-form" hidden>
 <label>个人通行证<input id="personal-pass-input" type="password" autocomplete="off" maxlength="32" required></label>
-<button type="submit">用通行证进入</button>
+<button type="submit">进入题库</button>
 </form>
 <div id="personal-pass-tools" hidden>
 <button id="personal-pass-takeover" type="button" hidden>切换到这台设备</button>
@@ -175,7 +180,11 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 </form>
 <button type="button" id="gate-signout">退出登录</button>
 </div>
-<p class="gate-meta">激活码由管理员发放。题库账号与 1v1 约课名单互不影响。<a href="../">返回预约页</a> · <a href="network.html" target="_blank" rel="noopener noreferrer">网络检测</a></p>
+<div class="gate-links">
+<button id="gate-use-email" type="button" hidden>邮箱登录</button>
+<button id="gate-use-pass" type="button" hidden>使用通行证</button>
+<a href="network.html" target="_blank" rel="noopener noreferrer">网络检测</a>
+</div>
 </div>
 </section>
 <header><div class="header-start"><button id="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar" aria-label="收起筛选栏" title="收起筛选栏"><span class="panel-icon" aria-hidden="true"></span></button><div><h1>华科 839 题库</h1><p>波动光学与激光原理 · <span id="total"></span> 条</p></div></div><div class="header-actions"><button id="personal-pass-menu" type="button" hidden>设备管理</button><button id="about-open" type="button">标注说明</button></div></header>
@@ -960,5 +969,5 @@ try {
 <script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-9f97b6b8cb83407a", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
 <script src="study.js?v=20261124-pass-1"></script>
 <script src="ai-tutor.js?v=20261123-ai-2"></script>
-<script src="boot.js?v=20261124-pass-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-pass-1" data-personal-pass="personal-pass.js?v=20261124-3"></script></body>
+<script src="boot.js?v=20261124-simple-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-pass-1" data-personal-pass="personal-pass.js?v=20261124-3"></script></body>
 </html>

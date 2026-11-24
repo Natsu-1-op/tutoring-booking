@@ -40,18 +40,43 @@
         }
     }
     if (!linkMode && !passMode) {
-        status.textContent = "正在连接邮箱登录服务…";
-        const sdk = "https://www.gstatic.com/firebasejs/8.10.1/firebase-";
-        try {
-            // Auth 和 Database 都依赖 firebase-app。
-            await load(sdk + "app.js");
-            await Promise.all([load(sdk + "auth.js"), load(sdk + "database.js")]);
-            await load(files.account);
-            if (!window.qbankAccount) throw new Error("account initialization failed");
-        } catch {
-            status.textContent = "邮箱登录组件加载失败。可运行网络检测，或向老师索取有效的题库内部链接。";
-            return;
+        const email = document.getElementById("gate-use-email");
+        const pass = document.getElementById("gate-use-pass");
+        const passForm = document.getElementById("personal-pass-form");
+        const preference = "qbank-email-entry";
+        async function enterWithEmail() {
+            email.disabled = true;
+            status.textContent = "正在连接邮箱登录服务…";
+            const sdk = "https://www.gstatic.com/firebasejs/8.10.1/firebase-";
+            try {
+                if (!window.firebase) await load(sdk + "app.js");
+                await Promise.all([
+                    window.firebase.auth || load(sdk + "auth.js"),
+                    window.firebase.database || load(sdk + "database.js")
+                ]);
+                if (!window.qbankAccount) await load(files.account);
+                if (!window.qbankAccount) throw new Error("account initialization failed");
+                await load(files.access);
+                try { sessionStorage.setItem(preference, "1"); } catch {}
+                passForm.hidden = true;
+                email.hidden = true;
+                pass.hidden = false;
+            } catch {
+                status.textContent = "邮箱服务连接失败。可重试，或使用通行证进入。";
+            } finally {
+                email.disabled = false;
+            }
         }
+        email.hidden = false;
+        email.addEventListener("click", enterWithEmail);
+        pass.addEventListener("click", () => {
+            try { sessionStorage.removeItem(preference); } catch {}
+            location.reload();
+        });
+        let resumeEmail;
+        try { resumeEmail = sessionStorage.getItem(preference); } catch {}
+        if (resumeEmail) await enterWithEmail();
+        return;
     }
     try {
         await load(files.access);

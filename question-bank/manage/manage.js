@@ -30,7 +30,7 @@ function loginError(code) {
     return LOGIN_ERRORS[code] || ("登录失败（" + (code || "响应异常") + "）。");
 }
 // 把正在使用的登录邮箱直接显示出来，避免误以为是别的账号
-$("sign-in-as").textContent = "登录账号：" + alias + "（口令即该 Firebase 账号的密码）";
+$("sign-in-as").textContent = "登录账号：" + alias;
 async function token() {
     if (session.until - Date.now() > 60000) return session.id;
     if (!refreshTask) refreshTask = (async()=>{
