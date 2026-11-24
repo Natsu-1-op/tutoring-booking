@@ -550,12 +550,12 @@ function renderDetail(id) {
         stem.textContent = stemText;
     }
     const refersToFigure = /如图|题图|图示|见图|图中|参见图|所示|图\s*\d+[.．–—-]\d+/.test(stemText || q["检索转录"] || "");
-    const originalAvailable = q["来源类型"] === "真题" && links.some(link => numericPages(link["页码或位置"]).length);
+    const originalAvailable = (q["来源类型"] === "真题" || q["题干状态"] === "据原考点改编") && links.some(link => numericPages(link["页码或位置"]).length);
     if (!originalMode && links.length &&
             ((refersToFigure && !references.length) || originalAvailable || !bank.previews[links[0]["附件"]])) {
         const known = links.findIndex(link => numericPages(link["页码或位置"]).length || !bank.previews[link["附件"]]);
         const fold = element("details", undefined, "scan-fallback");
-        fold.append(element("summary",originalAvailable ? "核对试卷原页" : "查看原图"));
+        fold.append(element("summary",originalAvailable ? "核对原题" : "查看原图"));
         fold.addEventListener("toggle", () => {
             if (fold.open && fold.childElementCount === 1) {
                 fold.append(inlineOriginal(links, Math.max(0, known), q["题面原页"]));
@@ -946,7 +946,7 @@ try {
 }
 };</script>
 
-<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-bc1401ff8748baf6", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
+<script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-45b62c47203325e4", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
 <script src="study.js?v=20261123-study-3"></script>
 <script src="ai-tutor.js?v=20261123-ai-2"></script>
 <script src="boot.js?v=20261124-2" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-2"></script></body>
