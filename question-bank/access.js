@@ -12,7 +12,7 @@
     const limit = 16 * 1024 * 1024;
     const denied = "链接已到期或停用，请向管理员获取新链接。";
     const personalMode = launch.has("pass");
-    const account = personalMode ? window.qbankPersonalPass : window.qbankAccount;
+    const account = personalMode ? window.qbankPersonalPass : null;
     const linkMode = !personalMode && Boolean(token);
     let cacheSize = 0;
     let bank, key, expiresAt, pendingCheck, poll, deadline;
@@ -33,11 +33,11 @@
         }
     }
 
-    // 账号模式：没有内部链接时走「邮箱账号 + 激活码」通道
+    // 通行证模式：没有内部链接时走「个人通行证」通道
     if (!linkMode) {
         if (!account) {
             if (personalMode) return;
-            status.textContent = "题库加载失败，请刷新页面或联系管理员。";
+            status.textContent = "请使用个人通行证或限时链接进入题库。";
             return;
         }
     } else if (!/^[A-Za-z0-9_-]{32}$/.test(token)) {

@@ -12,18 +12,15 @@ h1{font-size:1.45rem} li{margin:.45rem 0} button{font:inherit;padding:.35rem .8r
 </head>
 <body>
 <h1>题库网络检测</h1>
-<p>用出现问题的设备和网络打开本页。检测无需登录，也不会发送邮箱、密码或激活码。</p>
+<p>用出现问题的设备和网络打开本页。检测无需登录，也不会发送任何个人通行证或口令。</p>
 <button id="check" type="button">开始检测</button>
 <ul id="results" aria-live="polite"></ul>
-<p>邮箱登录服务连不上、授权数据库可用时，可向老师索取限时内部链接。若本页也打不开，先检查站点本身能否访问。</p>
+<p>若本页提示授权数据库超时，请稍后切换网络重试；若本页本身打不开，请检查站点访问网络。</p>
 <p><a href="./">返回题库</a></p>
 <script>
 "use strict";
 const checks = [
     ["网站静态文件", "./boot.js", false],
-    ["Firebase 脚本（gstatic）", "https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js", true],
-    ["邮箱登录（identitytoolkit）", "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword", true],
-    ["登录续期（securetoken）", "https://securetoken.googleapis.com/v1/token", true],
     ["授权数据库（Realtime Database）", "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app/system/activeYear.json", false]
 ];
 const button = document.getElementById("check");
@@ -32,7 +29,7 @@ button.onclick = async () => {
     button.disabled = true;
     results.replaceChildren();
     try {
-        await Promise.all(checks.map(async ([label, url, opaque]) => {
+        await Promise.all(checks.map(async ([label, url]) => {
             const row = document.createElement("li");
             row.textContent = label + "：检测中";
             results.append(row);
@@ -40,11 +37,10 @@ button.onclick = async () => {
             const timer = setTimeout(() => controller.abort(), 8000);
             try {
                 const response = await fetch(url, {
-                    mode: opaque ? "no-cors" : "cors",
+                    mode: "cors",
                     cache:"no-store", credentials:"omit", signal:controller.signal
                 });
-                const status = opaque ? "域名有响应，仅验证连通性"
-                    : response.ok ? "读取成功" : "收到响应，HTTP " + response.status;
+                const status = response.ok ? "读取成功" : "收到响应，HTTP " + response.status;
                 row.textContent = label + "：" + status;
             } catch (error) {
                 row.textContent = label + "：" + (error.name === "AbortError" ? "8 秒未响应" : "连接失败或响应被浏览器拦截");

@@ -72,23 +72,15 @@ body>header{position:sticky;top:0;z-index:5}.header-actions{display:flex;align-i
 #internal-gate[hidden]{display:none}
 #internal-gate>div{width:min(430px,100%);padding:24px;border:1px solid var(--line);border-radius:12px;background:white}
 #internal-gate h1{margin:0;font-size:22px}
-#gate-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:14px 0 12px}
-#gate-tabs button{padding:7px 4px;font-size:14px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer}
-#gate-tabs button[aria-selected="true"]{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
 .gate-form{display:grid;gap:10px}
 .gate-form[hidden]{display:none}
 .gate-form label{display:grid;gap:4px;font-size:13px;color:#475569}
 .gate-form input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:inherit}
 .gate-form button{padding:9px 12px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;font-weight:600;cursor:pointer}
 .gate-form button[disabled]{opacity:.55;cursor:default}
-#gate-signed-in{display:grid;gap:10px}
-#gate-signed-in[hidden],#gate-account[hidden]{display:none}
-#gate-signout{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;font:inherit;color:inherit;cursor:pointer}
-.gate-meta{margin:0;font-size:13px;color:#64748b}
 #internal-status[data-kind="error"]{color:#b42318}
 .gate-links{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:14px}
-.gate-links a,.gate-links button{font:inherit;font-size:13px;color:#475569;padding:5px 0}
-.gate-links button{border:0;background:transparent;cursor:pointer;text-decoration:underline}
+.gate-links a{font:inherit;font-size:13px;color:#475569;padding:5px 0}
 #personal-pass-tools{display:flex;flex-wrap:wrap;gap:8px}
 #personal-pass-tools[hidden]{display:none}
 </style>
@@ -224,41 +216,8 @@ body[data-focus="1"] #sidebar-toggle{display:none}
 <button id="personal-pass-resume" type="button" hidden>继续学习</button>
 <button id="personal-pass-exit" type="button">返回登录</button>
 </div>
-<div id="gate-account" hidden>
-<div id="gate-tabs" role="tablist">
-<button type="button" role="tab" data-tab="signin" aria-selected="true">登录</button>
-<button type="button" role="tab" data-tab="signup" aria-selected="false">注册</button>
-<button type="button" role="tab" data-tab="reset" aria-selected="false">找回密码</button>
-</div>
-<form class="gate-form" id="form-signin">
-<label>邮箱<input type="email" id="signin-email" autocomplete="username" maxlength="200" required></label>
-<label>密码<input type="password" id="signin-password" autocomplete="current-password" maxlength="128" required></label>
-<button type="submit">登录</button>
-</form>
-<form class="gate-form" id="form-signup" hidden>
-<label>邮箱<input type="email" id="signup-email" autocomplete="username" maxlength="200" required></label>
-<label>密码（至少 8 位）<input type="password" id="signup-password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
-<label>确认密码<input type="password" id="signup-password2" autocomplete="new-password" minlength="8" maxlength="128" required></label>
-<button type="submit">注册并继续</button>
-</form>
-<form class="gate-form" id="form-reset" hidden>
-<label>注册邮箱<input type="email" id="reset-email" autocomplete="username" maxlength="200" required></label>
-<button type="submit">发送重置邮件</button>
-</form>
-</div>
-<div id="gate-signed-in" hidden>
-<p class="gate-meta">当前账号：<span id="gate-email"></span></p>
-<p class="gate-meta" id="session-line" hidden>有效期至 <span id="session-expires"></span></p>
-<form class="gate-form" id="form-activate">
-<label>激活码<input id="activate-code" placeholder="XXXX-XXXX-XXXX" autocomplete="one-time-code" maxlength="20" required></label>
-<button type="submit">兑换并解锁题库</button>
-</form>
-<button type="button" id="gate-signout">退出登录</button>
-</div>
 <div class="gate-links">
 <a href="apply.html">申请免费学生通行证</a>
-<button id="gate-use-email" type="button" hidden>邮箱登录</button>
-<button id="gate-use-pass" type="button" hidden>使用通行证</button>
 <a href="network.html" target="_blank" rel="noopener noreferrer">网络检测</a>
 </div>
 </div>
@@ -2184,7 +2143,7 @@ try {
 };</script>
 
 <script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-3fa21cb3b65fdd5d", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
-<script src="study.js?v=20261128-tier-1"></script>
+<script src="study.js?v=20261128-clean-1"></script>
 <script src="ai-tutor.js?v=20261123-ai-2"></script>
-<script src="boot.js?v=20261124-simple-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261128-tier-1" data-personal-pass="personal-pass.js?v=20261128-tier-1"></script></body>
+<script src="boot.js?v=20261128-clean-1" data-access="access.js?v=20261128-clean-1" data-personal-pass="personal-pass.js?v=20261128-clean-1"></script></body>
 </html>

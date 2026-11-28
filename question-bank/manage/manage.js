@@ -5,12 +5,9 @@ const alias = config.ownerEmail;
 const date = new Intl.DateTimeFormat("zh-CN",{
     timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",
 });
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 let session, refreshTask, settings;
 let currentLink = "";
 let links = {};
-let codes = {};
-let users = {};
 const signURL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey);
 function notice(text) { $("status").textContent = text; }
 
@@ -60,8 +57,6 @@ async function request(base, path, method="GET", value) {
     return reply.json();
 }
 const database = (path, method, value) => request(config.database + "/questionBankAccess/", path, method, value);
-const codesAPI = (path, method, value) => request(config.database + "/activation_codes/", path, method, value);
-const usersAPI = (path, method, value) => request(config.database + "/users/", path, method, value);
 
 function makeLink(key) {
     const url = new URL("../",location.href);
@@ -143,159 +138,11 @@ function showRows() {
     }
 }
 
-// ---------- 激活码 ----------
-
-function randomCode() {
-    const bytes = crypto.getRandomValues(new Uint8Array(12));
-    let code = "";
-    for (let i = 0; i < 12; i += 1) {
-        if (i === 4 || i === 8) code += "-";
-        code += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-    }
-    return code;
-}
-function showCodes() {
-    const host = $("code-rows");
-    host.replaceChildren();
-    const items = Object.entries(codes).sort((a,b)=>(b[1].createdAt||0)-(a[1].createdAt||0));
-    if (!items.length) {
-        const cell = host.insertRow().insertCell();
-        cell.colSpan = 7;
-        cell.textContent = "还没有生成激活码。";
-        return;
-    }
-    for (const [code, item] of items) {
-        const row = host.insertRow();
-        row.insertCell().textContent = code;
-        row.insertCell().textContent = item.note || "";
-        row.insertCell().textContent = item.days || "";
-        const state = row.insertCell();
-        const claim = item.claim;
-        if (item.revoked) { state.textContent = "已停用"; state.className = "off"; }
-        else if (claim) {
-            const live = Number(claim.expiresAt) > Date.now();
-            state.textContent = live ? "已使用（有效）" : "已使用（到期）";
-            state.className = live ? "live" : "off";
-        } else { state.textContent = "未使用"; state.className = "live"; }
-        row.insertCell().textContent = claim?.email || claim?.usedBy || "";
-        row.insertCell().textContent = claim ? date.format(claim.expiresAt) : "";
-        const ops = row.insertCell();
-        if (!claim && !item.revoked) {
-            ops.append(action("复制", () => copy(code, "已复制该激活码。")));
-            ops.append(action("停用", async () => {
-                if (!confirm(`停用后激活码 ${code} 将无法再兑换。确认停用？`)) return;
-                try {
-                    await codesAPI("/" + code, "PATCH", {revoked: true});
-                    await loadCodes();
-                    notice(`已停用 ${code}。`);
-                } catch (e) { notice(e.message); }
-            }));
-        }
-        ops.append(action("删除", async () => {
-            const tip = claim
-                ? `该码已被 ${claim.email || claim.usedBy} 使用，删除只清除这条记录，对方已获得的题库权限不受影响。\n确认删除 ${code}？`
-                : `删除后 ${code} 立即作废且无法恢复。\n确认删除？`;
-            if (!confirm(tip)) return;
-            try {
-                await codesAPI("/" + code, "DELETE");
-                delete codes[code];
-                showCodes();
-                notice(`已删除 ${code}。`);
-            } catch (e) {
-                notice("删除失败：" + e.message + "（若提示权限不足，请先把最新的 database.rules.json 更新到线上）");
-            }
-        }, "danger"));
-    }
-}
-function unusedCodes() {
-    return Object.entries(codes)
-        .filter(([, item]) => !item.claim && !item.revoked)
-        .map(([code]) => code);
-}
-
-// ---------- 题库用户 ----------
-
-function userState(item) {
-    if (item.disabled === true) return {text: "已停用", css: "off"};
-    const access = item.bankAccess || {};
-    const expiresAt = Number(access.expiresAt) || 0;
-    if (access.active !== true || !expiresAt) return {text: "未激活", css: "off"};
-    if (expiresAt <= Date.now()) return {text: "已过期", css: "off"};
-    return {text: "正常", css: "live"};
-}
-function showUsers() {
-    const host = $("user-rows");
-    host.replaceChildren();
-    const items = Object.entries(users)
-        .map(([uid, item]) => ({uid, ...item}))
-        .sort((a,b)=>(Number(b.bankAccess?.expiresAt)||0)-(Number(a.bankAccess?.expiresAt)||0));
-    if (!items.length) {
-        const cell = host.insertRow().insertCell();
-        cell.colSpan = 4;
-        cell.textContent = "还没有题库账号。";
-        return;
-    }
-    for (const item of items) {
-        const row = host.insertRow();
-        row.insertCell().textContent = item.email || item.uid;
-        const expiresAt = Number(item.bankAccess?.expiresAt) || 0;
-        row.insertCell().textContent = expiresAt ? date.format(expiresAt) : "—";
-        const state = row.insertCell();
-        const view = userState(item);
-        state.textContent = view.text;
-        state.className = view.css;
-        const buttons = row.insertCell();
-        const renew = action("续期", async () => {
-            const days = Number($("renew-days").valueAsNumber);
-            if (!Number.isInteger(days) || days < 1 || days > 1095) { notice("续期天数需为 1–1095 的整数。"); return; }
-            renew.disabled = true;
-            try {
-                const base = Math.max(Date.now(), expiresAt);
-                await usersAPI(`/${item.uid}/bankAccess`, "PATCH", {
-                    active: true,
-                    expiresAt: base + days * 86400000,
-                    updatedAt: Date.now(),
-                });
-                await loadUsers();
-                notice(`已为 ${item.email || item.uid} 续期 ${days} 天。`);
-            } catch (e) { notice(e.message); }
-            finally { renew.disabled = false; }
-        });
-        buttons.append(renew);
-        if (item.disabled === true) {
-            buttons.append(action("启用", async () => {
-                try {
-                    await usersAPI(`/${item.uid}`, "PATCH", {disabled: false});
-                    await loadUsers();
-                    notice("已启用该账号。");
-                } catch (e) { notice(e.message); }
-            }));
-        } else {
-            buttons.append(action("停用", async () => {
-                if (!confirm(`停用后 ${item.email || item.uid} 将立即无法进入题库。确认停用？`)) return;
-                try {
-                    await usersAPI(`/${item.uid}`, "PATCH", {disabled: true});
-                    await loadUsers();
-                    notice("已停用该账号。");
-                } catch (e) { notice(e.message); }
-            }, "danger"));
-        }
-    }
-}
-
 async function loadLinks() {
     [settings, links] = await Promise.all([database("settings"), database("links")]);
     links ||= {};
     if (!settings?.key || !settings.release) throw new Error("当前题库版本尚未配置。");
     showRows();
-}
-async function loadCodes() {
-    codes = (await codesAPI("")) || {};
-    showCodes();
-}
-async function loadUsers() {
-    users = (await usersAPI("")) || {};
-    showUsers();
 }
 const personalPassAPI = (path, method, value) => request(config.database + "/bankPersonalPasses", path, method, value);
 const appsAPI = (path, method, value) => request(config.database + "/bankApplications", path, method, value);
@@ -618,8 +465,6 @@ personalPassForm?.addEventListener("submit", async event => {
 
 async function load() {
     await loadLinks();
-    await Promise.all([loadCodes(), loadUsers()]);
-    // Older rules still allow the existing management pages to open during rollout.
     await loadPersonalPasses().catch(() => {
         if (personalPassForm) $("personal-pass-rows").textContent = "个人通行证规则尚未启用。";
     });
@@ -658,7 +503,7 @@ $("sign-in").addEventListener("submit",async event=>{
         $("manage").hidden=false;
         $("exit").hidden=false;
         notice("");
-        setInterval(()=>{ showRows(); showCodes(); },60000);
+        setInterval(()=>{ showRows(); },60000);
     } catch(e) {
         session=null;
         notice(e.message);
@@ -688,53 +533,5 @@ $("create").addEventListener("submit",async event=>{
     finally { go.disabled=false; }
 });
 $("copy-current").addEventListener("click",()=>copy(currentLink,"已复制内部链接。"));
-
-// 批量生成激活码
-$("gen-codes").addEventListener("submit", async event => {
-    event.preventDefault();
-    const count = $("gen-count").valueAsNumber;
-    const days = $("gen-days").valueAsNumber;
-    const note = $("gen-note").value.trim();
-    if (!Number.isInteger(count) || count < 1 || count > 50) { notice("数量需为 1–50 的整数。"); return; }
-    if (!Number.isInteger(days) || days < 1 || days > 1095) { notice("有效天数需为 1–1095 的整数。"); return; }
-    const go = event.submitter;
-    go.disabled = true;
-    const generated = [];
-    try {
-        for (let i = 0; i < count; i += 1) {
-            let code = randomCode();
-            while (codes[code]) code = randomCode();
-            const record = {
-                days,
-                durationMs: days * 86400000,
-                note,
-                createdAt: {".sv":"timestamp"},
-                createdBy: alias,
-                release: settings.release,
-                key: settings.key,
-            };
-            await codesAPI("/" + code, "PUT", record);
-            generated.push(code);
-        }
-        $("gen-output").value = generated.join("\n");
-        $("gen-result").hidden = false;
-        $("gen-note").value = "";
-        await loadCodes();
-        notice(`已生成 ${generated.length} 个激活码，每个可兑换 ${days} 天。`);
-    } catch (e) {
-        notice(e.message + (generated.length ? `（已生成 ${generated.length} 个，见下方列表）` : ""));
-        await loadCodes().catch(()=>{});
-    } finally { go.disabled = false; }
-});
-$("gen-copy").addEventListener("click", () => copy($("gen-output").value, "已复制本次生成的激活码。"));
-$("copy-unused").addEventListener("click", () => {
-    const list = unusedCodes();
-    if (!list.length) { notice("当前没有未使用的激活码。"); return; }
-    copy(list.join("\n"), `已复制 ${list.length} 个未使用激活码。`);
-});
-$("refresh").addEventListener("click", async () => {
-    try { await load(); notice("已刷新。"); }
-    catch (e) { notice(e.message); }
-});
 
 $("exit").addEventListener("click",()=>location.reload());

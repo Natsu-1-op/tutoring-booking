@@ -78,21 +78,10 @@ dialog::backdrop{background:#0f172a88}
 <div id="generated" hidden><input id="share" aria-label="刚生成的内部链接" readonly><button type="button" id="copy-current">复制链接</button></div>
 <div class="area"><table><thead><tr><th>备注</th><th>到期时间（北京时间）</th><th>状态</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table></div>
 </details>
-<details class="card manage-group">
-<summary>邮箱账号与激活码</summary>
-<h2>激活码</h2>
-<form id="gen-codes"><label>数量<input class="short" id="gen-count" type="number" min="1" max="50" step="1" value="5" required></label><label>有效天数<input class="short" id="gen-days" type="number" min="1" max="1095" step="1" value="365" required></label><label>备注<input id="gen-note" maxlength="60" placeholder="例如：2027 届第一批"></label><button class="primary" type="submit">批量生成</button></form>
-<div id="gen-result" hidden><textarea id="gen-output" rows="4" readonly aria-label="本次生成的激活码"></textarea><button type="button" id="gen-copy">复制本次</button></div>
-<div class="area"><table><thead><tr><th>激活码</th><th>备注</th><th>天数</th><th>状态</th><th>使用者</th><th>到期时间</th><th>操作</th></tr></thead><tbody id="code-rows"></tbody></table></div>
-<button type="button" id="copy-unused">复制全部未使用激活码</button>
-<h2>账号管理</h2>
-<form id="renew-form"><label>续期天数<input class="short" id="renew-days" type="number" min="1" max="1095" step="1" value="365" required></label><button type="button" id="refresh">刷新列表</button></form>
-<div class="area"><table><thead><tr><th>邮箱</th><th>到期时间（北京时间）</th><th>状态</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table></div>
-</details>
 </div>
 </main>
 <dialog id="photo-dialog"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><strong id="photo-dialog-title">学生证大图</strong><button type="button" id="photo-dialog-close">关闭</button></div><img id="photo-dialog-img" alt="学生证大图"></dialog>
 <script type="application/json" id="admin-config">{"apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "ownerEmail": "1843499931@qq.com"}</script>
-<script src="manage.js?v=20261128-app-1"></script>
+<script src="manage.js?v=20261128-clean-1"></script>
 </body>
 </html>

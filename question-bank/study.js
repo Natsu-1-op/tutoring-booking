@@ -2,26 +2,24 @@
 /**
  * 839 题库 · 个人做题记忆
  * 本地优先：每次操作立刻写入 localStorage，保证零延迟；
- * 登录后防抖同步到 users/{uid}/bankMemory，换设备登录同一邮箱自动合并。
- * 数据结构：{ [编号]: { state:"mastered"|"wrong"|"", star:true|false, note:string, updatedAt:number } }
+ * 付费通行证通过 RTDB REST 自动同步到 bankPersonalPasses/{pass}/bankMemory；
+ * 免费通行证与限时链接纯存本机浏览器，支持 JSON 导出/导入备份。
  */
 (() => {
     const STORE = "hust839-bank-memory";
-    const SYNC_DELAY = 900;
-    const PUSH_DELAY = 400;
+    const PUSH_DELAY = 1500;
 
     const memory = new Map();
     const pending = new Set();
     const listeners = new Set();
     let scope = "";
     let timer = 0;
-    let flushTimer = 0;
     let syncing = false;
     let available = true;
 
-    function selectScope(uid) {
+    function selectScope() {
         const passScope = window.qbankPersonalPass?.storageScope;
-        const next = uid ? STORE + ":" + uid : passScope ? STORE + ":pass:" + passScope : STORE;
+        const next = passScope ? STORE + ":pass:" + passScope : STORE;
         if (next === scope) return;
         scope = next;
         clearTimeout(timer);
@@ -29,19 +27,19 @@
         pending.clear();
         try {
             const saved = JSON.parse(localStorage.getItem(scope) || "{}");
-            for (const [id, entry] of Object.entries(saved || {})) {
-                if (entry && typeof entry === "object") memory.set(id, normalizeEntry(entry));
+            for (const [id, item] of Object.entries(saved || {})) {
+                if (item && typeof item === "object") memory.set(id, normalizeEntry(item));
             }
         } catch { /* 浏览器存储不可用时保留当前会话 */ }
     }
 
-    function normalizeEntry(entry) {
-        const state = entry.state === "mastered" || entry.state === "wrong" ? entry.state : "";
+    function normalizeEntry(item) {
+        const state = item.state === "mastered" || item.state === "wrong" ? item.state : "";
         return {
             state,
-            star: entry.star === true,
-            note: typeof entry.note === "string" ? entry.note.slice(0, 4000) : "",
-            updatedAt: Number(entry.updatedAt) || 0,
+            star: item.star === true,
+            note: typeof item.note === "string" ? item.note.slice(0, 4000) : "",
+            updatedAt: Number(item.updatedAt) || 0,
         };
     }
 
@@ -50,7 +48,7 @@
     }
 
     function entry(id) {
-        selectScope(currentUid());
+        selectScope();
         return memory.get(id) || blank();
     }
 
@@ -90,10 +88,6 @@
         return Boolean(window.qbankPersonalPass && window.qbankPersonalPass.tier === "free");
     }
 
-    function hasCloud() {
-        return Boolean(currentUid() || isPaidPass());
-    }
-
     function notifyChange(id) {
         try {
             window.dispatchEvent(new CustomEvent("qbank-study-change", { detail: { id: id || "" } }));
@@ -105,7 +99,7 @@
         if (isEmpty(next)) memory.delete(id);
         else memory.set(id, next);
         persist();
-        if (hasCloud()) {
+        if (isPaidPass()) {
             pending.add(id);
             schedulePush();
         }
@@ -124,57 +118,23 @@
 
     function schedulePush() {
         clearTimeout(timer);
-        timer = setTimeout(push, isPaidPass() ? 1500 : SYNC_DELAY);
-    }
-
-    function bankApp() {
-        return window.firebase?.apps?.find(app => app.name === "qbank");
-    }
-
-    function service() {
-        return bankApp()?.database() || null;
-    }
-
-    function currentUid() {
-        return bankApp()?.auth().currentUser?.uid || "";
+        timer = setTimeout(push, PUSH_DELAY);
     }
 
     async function push() {
-        const uid = currentUid();
-        const paidPass = !uid && isPaidPass();
-        selectScope(uid);
-        const database = uid ? service() : null;
-        if (!pending.size || syncing || (!database && !paidPass)) return;
+        selectScope();
+        if (!pending.size || syncing || !isPaidPass()) return;
         syncing = true;
         const work = [...pending].map(id => [id, memory.get(id) || null]);
         pending.clear();
         try {
-            if (paidPass) {
-                const payload = {};
-                for (const [id, value] of work) {
-                    payload[id] = value ? value : null;
-                }
-                const ok = await window.qbankPersonalPass.patchMemory(payload);
-                if (ok === null || ok === false) throw new Error("通行证云端写入被拒绝");
-            } else {
-                for (const [id, value] of work) {
-                    if (currentUid() !== uid) return;
-                    const result = await database.ref("users/" + uid + "/bankMemory/" + id)
-                        .transaction(remote => {
-                            if (currentUid() !== uid || Number(remote?.updatedAt || 0) > (value?.updatedAt || 0)) return;
-                            return value;
-                        });
-                    if (currentUid() !== uid) return;
-                    if (!result.committed && memory.get(id) === value && result.snapshot.val()) {
-                        memory.set(id, normalizeEntry(result.snapshot.val()));
-                        persist();
-                        emit();
-                    }
-                }
-            }
+            const payload = {};
+            for (const [id, value] of work) payload[id] = value ? value : null;
+            const ok = await window.qbankPersonalPass.patchMemory(payload);
+            if (ok === null || ok === false) throw new Error("通行证云端写入被拒绝");
             setStatus("");
         } catch (error) {
-            if (currentUid() === uid || paidPass) {
+            if (isPaidPass()) {
                 for (const [id] of work) pending.add(id);
                 setStatus("云端同步失败：" + (error.message || "网络异常"), "warn");
             }
@@ -187,36 +147,28 @@
     function flush() {
         clearTimeout(timer);
         if (!pending.size) return;
-        if (hasCloud()) {
+        if (isPaidPass()) {
             push();
             return;
         }
-        // 未登录 / 免费版只保留本机记录
         pending.clear();
     }
 
     async function pull() {
-        const uid = currentUid();
-        const paidPass = !uid && isPaidPass();
-        selectScope(uid);
-        const database = uid ? service() : null;
-        if (!database && !paidPass) {
-            setStatus(isFreePass() ? "免费版 · 记忆只保存在本机浏览器，可在顶部导出备份。" : "未登录，记忆只保存在本机浏览器。", "warn");
+        selectScope();
+        if (!isPaidPass()) {
+            setStatus(isFreePass()
+                ? "免费版 · 进度保存在本机浏览器，可在顶部“学习进度”导出备份。"
+                : "记忆只保存在本机浏览器，可在顶部“学习进度”导出备份。", "warn");
             return;
         }
         let cloud;
         try {
-            if (paidPass) {
-                cloud = (await window.qbankPersonalPass.readMemory()) || {};
-            } else {
-                const snapshot = await database.ref("users/" + uid + "/bankMemory").once("value");
-                cloud = snapshot.val() || {};
-            }
+            cloud = (await window.qbankPersonalPass.readMemory()) || {};
         } catch (error) {
             setStatus("云端记忆读取失败：" + (error.message || "网络异常"), "warn");
             return;
         }
-        if (uid && currentUid() !== uid) return;
         for (const id of new Set([...Object.keys(cloud), ...memory.keys()])) {
             const remote = cloud[id] ? normalizeEntry(cloud[id]) : null;
             const local = memory.get(id);
@@ -245,21 +197,21 @@
     }
 
     function match(id, value) {
-        const current = entry(id);
-        if (value === "mastered") return current.state === "mastered";
-        if (value === "wrong") return current.state === "wrong";
-        if (value === "star") return current.star === true;
-        if (value === "note") return Boolean(current.note.trim());
-        if (value === "unmarked") return isEmpty(current);
+        const cur = entry(id);
+        if (value === "mastered") return cur.state === "mastered";
+        if (value === "wrong") return cur.state === "wrong";
+        if (value === "star") return cur.star === true;
+        if (value === "note") return Boolean(cur.note.trim());
+        if (value === "unmarked") return isEmpty(cur);
         return true;
     }
 
     function decorate(button, id) {
-        const current = entry(id);
-        if (current.state === "wrong" || current.star || current.state === "mastered") {
+        const cur = entry(id);
+        if (cur.state === "wrong" || cur.star || cur.state === "mastered") {
             const dot = document.createElement("span");
-            dot.className = "mem-dot" + (current.state === "wrong" ? "" : current.state === "mastered" ? " mastered" : " star");
-            dot.title = current.state === "wrong" ? "错题" : current.state === "mastered" ? "已掌握" : "已收藏";
+            dot.className = "mem-dot" + (cur.state === "wrong" ? "" : cur.state === "mastered" ? " mastered" : " star");
+            dot.title = cur.state === "wrong" ? "错题" : cur.state === "mastered" ? "已掌握" : "已收藏";
             button.append(dot);
         }
     }
@@ -326,18 +278,18 @@
         panel.append(actions, area, hint);
 
         function paint() {
-            const current = entry(id);
-            for (const [key, node] of buttons) node.setAttribute("aria-pressed", String(current.state === key));
-            star.setAttribute("aria-pressed", String(current.star));
-            if (area.value !== current.note) area.value = current.note;
-            if (currentUid() || isPaidPass()) {
-                hint.textContent = "已连接专属通道，做题记忆会自动同步到云端。";
+            const cur = entry(id);
+            for (const [key, node] of buttons) node.setAttribute("aria-pressed", String(cur.state === key));
+            star.setAttribute("aria-pressed", String(cur.star));
+            if (area.value !== cur.note) area.value = cur.note;
+            if (isPaidPass()) {
+                hint.textContent = "已连接专属通行证，做题记忆会自动同步到云端。";
                 delete hint.dataset.kind;
             } else if (isFreePass()) {
                 hint.textContent = "免费版 · 进度保存在本机浏览器，可在顶部“学习进度”导出备份。";
                 hint.dataset.kind = "warn";
             } else {
-                hint.textContent = "未登录，记忆只保存在本机浏览器，可在顶部“学习进度”导出备份。";
+                hint.textContent = "记忆只保存在本机浏览器，可在顶部“学习进度”导出备份。";
                 hint.dataset.kind = "warn";
             }
         }
@@ -349,7 +301,6 @@
 
         paint();
         marks.append(panel);
-        // 题目切换后旧面板会被替换，渲染时就地清掉失效监听，避免长会话里累积
         for (const subscriber of [...listeners]) {
             if (!subscriber.panel.isConnected) listeners.delete(subscriber);
         }
@@ -357,7 +308,7 @@
     }
 
     function exportData() {
-        selectScope(currentUid());
+        selectScope();
         const plain = {};
         for (const [id, v] of memory) {
             if (!isEmpty(v)) plain[id] = v;
@@ -369,7 +320,7 @@
         if (!rawRecords || typeof rawRecords !== "object" || Array.isArray(rawRecords)) {
             throw new Error("无效的进度 JSON 结构");
         }
-        selectScope(currentUid());
+        selectScope();
         let mergedCount = 0;
         for (const [id, val] of Object.entries(rawRecords)) {
             if (!val || typeof val !== "object") continue;
@@ -378,31 +329,31 @@
             const existing = memory.get(id);
             if (!existing || incoming.updatedAt >= existing.updatedAt) {
                 memory.set(id, incoming);
-                if (hasCloud()) pending.add(id);
+                if (isPaidPass()) pending.add(id);
                 mergedCount++;
             }
         }
         persist();
-        if (hasCloud() && pending.size) schedulePush();
+        if (isPaidPass() && pending.size) schedulePush();
         emit();
         notifyChange("");
         return mergedCount;
     }
 
     function clearAll() {
-        selectScope(currentUid());
-        if (hasCloud()) {
+        selectScope();
+        if (isPaidPass()) {
             for (const id of memory.keys()) pending.add(id);
         }
         memory.clear();
         persist();
-        if (hasCloud() && pending.size) schedulePush();
+        if (isPaidPass() && pending.size) schedulePush();
         emit();
         notifyChange("");
     }
 
     function stats() {
-        selectScope(currentUid());
+        selectScope();
         let mastered = 0, wrong = 0, star = 0, note = 0;
         for (const v of memory.values()) {
             if (isEmpty(v)) continue;
@@ -415,29 +366,15 @@
     }
 
     function boot() {
-        selectScope(currentUid());
-        const auth = bankApp()?.auth();
-        if (auth) {
-            try {
-                auth.onAuthStateChanged(account => {
-                    selectScope(account?.uid || "");
-                    emit();
-                    clearTimeout(flushTimer);
-                    // 登录态确定后再拉云端，避免读到别人的数据
-                    flushTimer = setTimeout(() => {
-                        if (account) pull();
-                        else setStatus("未登录，记忆只保存在本机浏览器。", "warn");
-                    }, 0);
-                });
-            } catch (error) {
-                console.error(error);
-            }
-        } else if (isPaidPass()) {
+        selectScope();
+        if (isPaidPass()) {
             emit();
             pull();
         } else {
             emit();
-            setStatus(isFreePass() ? "免费版 · 进度保存在本机浏览器，可在顶部“学习进度”导出备份。" : "未登录，记忆只保存在本机浏览器。", "warn");
+            setStatus(isFreePass()
+                ? "免费版 · 进度保存在本机浏览器，可在顶部“学习进度”导出备份。"
+                : "记忆只保存在本机浏览器，可在顶部“学习进度”导出备份。", "warn");
         }
         for (const event of ["pagehide", "visibilitychange"]) {
             addEventListener(event, () => {
