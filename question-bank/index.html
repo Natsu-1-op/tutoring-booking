@@ -724,7 +724,7 @@ function inlineOriginal(links, initialLink, primary) {
             jump.addEventListener("change", () => {page=Number(jump.value)||1;draw();});
             controls.append(prev,jump,element("span","/ " + max + " 页"),next);
             if (recommended.length) {
-                const known = element("span",(link["定位方式"] || "题目位置") + " · " + recommended.join("、") + " 页","subtle");
+                const known = element("span",(link["定位方式"] || "关联页面") + " · " + recommended.join("、") + " 页","subtle");
                 controls.append(known);
                 for (const target of recommended) {
                     if (recommended.length > 1) controls.append(button("第 " + target + " 页", () => {page=target;draw();}));
