@@ -64,6 +64,9 @@
             "release": {
               ".validate": "newData.isString() && newData.val() === root.child('questionBankAccess/settings/release').val()"
             },
+            "tier": {
+              ".validate": "newData.isString() && (newData.val() === 'free' || newData.val() === 'paid')"
+            },
             "$other": {
               ".validate": false
             }
@@ -112,9 +115,46 @@
             ".validate": false
           }
         },
+        "bankMemory": {
+          ".read": "(auth != null && auth.token.email === '1843499931@qq.com') || (root.child('bankPersonalPasses').child($pass).child('validUntil').val() > now && root.child('bankPersonalPasses').child($pass).child('revoked').val() === false && root.child('bankPersonalPasses').child($pass).child('delivery/~/tier').val() !== 'free' && root.child('bankPersonalPasses').child($pass).child('lease/released').val() === false && root.child('bankPersonalPasses').child($pass).child('lease/seenAt').val() > now - 90000 && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease/slot').val()).child('released').val() === false && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease/slot').val()).child('proof').val() === root.child('bankPersonalPasses').child($pass).child('lease/proof').val())",
+          ".write": "(auth != null && auth.token.email === '1843499931@qq.com') || (root.child('bankPersonalPasses').child($pass).child('validUntil').val() > now && root.child('bankPersonalPasses').child($pass).child('revoked').val() === false && root.child('bankPersonalPasses').child($pass).child('delivery/~/tier').val() !== 'free' && root.child('bankPersonalPasses').child($pass).child('lease/released').val() === false && root.child('bankPersonalPasses').child($pass).child('lease/seenAt').val() > now - 90000 && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease/slot').val()).child('released').val() === false && root.child('bankPersonalPasses').child($pass).child('devices').child(root.child('bankPersonalPasses').child($pass).child('lease/slot').val()).child('proof').val() === root.child('bankPersonalPasses').child($pass).child('lease/proof').val())",
+          "$qid": {
+            ".validate": "newData.hasChildren(['updatedAt']) && newData.child('updatedAt').isNumber()",
+            "state": {
+              ".validate": "newData.isString() && (newData.val() === 'mastered' || newData.val() === 'wrong' || newData.val() === '')"
+            },
+            "star": { ".validate": "newData.isBoolean()" },
+            "note": { ".validate": "newData.isString() && newData.val().length <= 4000" },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 300000"
+            },
+            "$other": { ".validate": false }
+          }
+        },
         "$other": {
           ".validate": false
         }
+      }
+    },
+    "bankApplications": {
+      ".read": "auth != null && auth.token.email === '1843499931@qq.com'",
+      ".indexOn": ["status", "createdAt"],
+      "$appId": {
+        ".read": true,
+        ".write": "(auth != null && auth.token.email === '1843499931@qq.com') || (!data.exists() && newData.exists() && newData.child('status').val() === 'pending' && !newData.child('passCode').exists() && !newData.child('passValidUntil').exists() && !newData.child('reviewedAt').exists() && !newData.child('rejectReason').exists())",
+        ".validate": "newData.val() === null || ($appId.matches(/^[A-Za-z0-9_-]{16,32}$/) && newData.hasChildren(['name','school','contact','status','createdAt']))",
+        "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40" },
+        "school": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80" },
+        "contact": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80" },
+        "note": { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "photo": { ".validate": "newData.isString() && newData.val().length <= 160000" },
+        "status": { ".validate": "newData.isString() && (newData.val() === 'pending' || newData.val() === 'approved' || newData.val() === 'rejected')" },
+        "createdAt": { ".validate": "newData.isNumber() && ((data.exists() && newData.val() === data.val()) || (!data.exists() && newData.val() >= now - 120000 && newData.val() <= now + 120000))" },
+        "reviewedAt": { ".validate": "newData.isNumber()" },
+        "rejectReason": { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "passCode": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{32}$/)" },
+        "passValidUntil": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
       }
     },
     "users": {

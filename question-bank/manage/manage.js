@@ -298,12 +298,248 @@ async function loadUsers() {
     showUsers();
 }
 const personalPassAPI = (path, method, value) => request(config.database + "/bankPersonalPasses", path, method, value);
+const appsAPI = (path, method, value) => request(config.database + "/bankApplications", path, method, value);
+const AI_REV_STORE = "hust839-admin-ai-review";
+let applications = {};
+const aiVerdicts = new Map();
+
+function readAiRevConfig() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(AI_REV_STORE) || "{}");
+        return {
+            base: String(parsed.base || "https://api.openai.com/v1").trim(),
+            key: String(parsed.key || "").trim(),
+            model: String(parsed.model || "gpt-4o-mini").trim() || "gpt-4o-mini",
+        };
+    } catch {
+        return { base: "https://api.openai.com/v1", key: "", model: "gpt-4o-mini" };
+    }
+}
+function loadAiRevForm() {
+    const cfg = readAiRevConfig();
+    if ($("ai-rev-base")) $("ai-rev-base").value = cfg.base;
+    if ($("ai-rev-key")) $("ai-rev-key").value = cfg.key;
+    if ($("ai-rev-model")) $("ai-rev-model").value = cfg.model;
+}
+loadAiRevForm();
+$("ai-rev-save")?.addEventListener("click", () => {
+    const payload = {
+        base: ($("ai-rev-base")?.value || "").trim() || "https://api.openai.com/v1",
+        key: ($("ai-rev-key")?.value || "").trim(),
+        model: ($("ai-rev-model")?.value || "").trim() || "gpt-4o-mini",
+    };
+    try { localStorage.setItem(AI_REV_STORE, JSON.stringify(payload)); } catch {}
+    notice("AI 预审配置已保存在本机浏览器。");
+});
+$("photo-dialog-close")?.addEventListener("click", () => $("photo-dialog")?.close());
+$("photo-dialog")?.addEventListener("click", e => { if (e.target === $("photo-dialog")) $("photo-dialog").close(); });
+
+function randomPassCode() {
+    return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
+        .replaceAll("+", "-").replaceAll("/", "_");
+}
 
 function personalPassLink(pass) {
     const url = new URL("../", location.href);
     url.hash = new URLSearchParams({pass});
     return url.href;
 }
+
+async function loadApplications() {
+    if (!$("app-pending-rows")) return;
+    applications = (await appsAPI("")) || {};
+    renderApplications();
+}
+
+function renderApplications() {
+    const pendingHost = $("app-pending-rows");
+    const doneHost = $("app-done-rows");
+    if (!pendingHost || !doneHost) return;
+    pendingHost.replaceChildren();
+    doneHost.replaceChildren();
+    const list = Object.entries(applications).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+    let pendingCount = 0;
+    for (const [appId, rec] of list) {
+        if (!rec || typeof rec !== "object") continue;
+        if (rec.status === "pending") {
+            pendingCount++;
+            const row = pendingHost.insertRow();
+            row.insertCell().textContent = rec.createdAt ? date.format(rec.createdAt) : "—";
+            const infoCell = row.insertCell();
+            infoCell.textContent = `${rec.name} · ${rec.school}（${rec.contact}）` + (rec.note ? ` · ${rec.note}` : "");
+            const imgCell = row.insertCell();
+            if (rec.photo) {
+                const img = document.createElement("img");
+                img.className = "thumb";
+                img.src = rec.photo;
+                img.alt = "学生证";
+                img.title = "点击查看大图";
+                img.addEventListener("click", () => {
+                    $("photo-dialog-title").textContent = `${rec.name} · ${rec.school}`;
+                    $("photo-dialog-img").src = rec.photo;
+                    $("photo-dialog").showModal();
+                });
+                imgCell.append(img);
+            } else {
+                imgCell.textContent = "无照片";
+            }
+            const aiCell = row.insertCell();
+            const v = aiVerdicts.get(appId);
+            if (v) {
+                const b = document.createElement("span");
+                b.className = "badge " + (v.verdict === "pass" ? "pass" : v.verdict === "reject" ? "reject" : "review");
+                b.textContent = v.verdict === "pass" ? "建议通过" : v.verdict === "reject" ? "建议驳回" : "人工复核";
+                aiCell.append(b, document.createElement("br"), document.createTextNode(v.reason || ""));
+            } else {
+                aiCell.textContent = "未预审";
+            }
+            const ops = row.insertCell();
+            const approveBtn = action("通过发码", async () => {
+                const days = $("app-free-days")?.valueAsNumber || 180;
+                if (!Number.isInteger(days) || days < 1 || days > 365) { notice("有效天数需为 1-365。"); return; }
+                approveBtn.disabled = true;
+                try {
+                    const code = randomPassCode();
+                    const validUntil = Date.now() + days * 86400000;
+                    const label = ("免费-" + rec.name + "-" + rec.school).slice(0, 56);
+                    await personalPassAPI(code, "PUT", {
+                        label,
+                        validUntil,
+                        revoked: false,
+                        delivery: {"~": {release: settings.release, key: settings.key, tier: "free"}}
+                    });
+                    await appsAPI(appId, "PATCH", {
+                        status: "approved",
+                        passCode: code,
+                        passValidUntil: validUntil,
+                        reviewedAt: Date.now(),
+                        photo: null
+                    });
+                    await Promise.all([loadApplications(), loadPersonalPasses()]);
+                    notice(`已通过 ${rec.name} 的申请，生成免费通行证并清除证件照片。`);
+                } catch (err) {
+                    notice(err.message);
+                } finally {
+                    approveBtn.disabled = false;
+                }
+            });
+            const rejectBtn = action("驳回", async () => {
+                const reason = prompt("输入驳回原因（留空使用默认原因）：", "照片不清晰或无法核验在校学生身份");
+                if (reason === null) return;
+                rejectBtn.disabled = true;
+                try {
+                    await appsAPI(appId, "PATCH", {
+                        status: "rejected",
+                        rejectReason: (reason.trim() || "照片不清晰或无法核验在校学生身份").slice(0, 120),
+                        reviewedAt: Date.now(),
+                        photo: null
+                    });
+                    await loadApplications();
+                    notice(`已驳回 ${rec.name} 的申请并清除证件照片。`);
+                } catch (err) {
+                    notice(err.message);
+                } finally {
+                    rejectBtn.disabled = false;
+                }
+            }, "danger");
+            ops.append(approveBtn, rejectBtn);
+        } else {
+            const row = doneHost.insertRow();
+            row.insertCell().textContent = rec.reviewedAt ? date.format(rec.reviewedAt) : "—";
+            row.insertCell().textContent = `${rec.name} · ${rec.school}（${rec.contact}）`;
+            const stCell = row.insertCell();
+            const badge = document.createElement("span");
+            badge.className = "badge " + (rec.status === "approved" ? "pass" : "reject");
+            badge.textContent = rec.status === "approved" ? "已通过" : "已驳回";
+            stCell.append(badge);
+            row.insertCell().textContent = rec.status === "approved"
+                ? (rec.passCode ? rec.passCode.slice(0, 8) + "…" : "已发码")
+                : (rec.rejectReason || "—");
+            const ops = row.insertCell();
+            if (rec.passCode) ops.append(action("复制链接", () => copy(personalPassLink(rec.passCode))));
+            ops.append(action("删除记录", async () => {
+                if (!confirm("删除此申请记录？（已发放的通行证本身不受影响）")) return;
+                try {
+                    await appsAPI(appId, "DELETE");
+                    await loadApplications();
+                    notice("申请记录已删除。");
+                } catch (err) { notice(err.message); }
+            }, "danger"));
+        }
+    }
+    if (!pendingCount) {
+        const r = pendingHost.insertRow();
+        const c = r.insertCell();
+        c.colSpan = 5;
+        c.textContent = "暂无待审核的学生证申请。";
+    }
+    if ($("app-pending-badge")) $("app-pending-badge").textContent = pendingCount + " 待审";
+}
+
+$("app-refresh")?.addEventListener("click", () => loadApplications().then(() => notice("已刷新申请列表。")).catch(e => notice(e.message)));
+
+$("ai-review-run")?.addEventListener("click", async () => {
+    const cfg = readAiRevConfig();
+    if (!cfg.key) {
+        $("ai-review-box").open = true;
+        notice("请先在「AI 辅助预审配置」中填写 API Key 并保存。");
+        return;
+    }
+    const pendingEntries = Object.entries(applications).filter(([, r]) => r && r.status === "pending" && r.photo);
+    if (!pendingEntries.length) {
+        notice("当前没有带照片的待审申请。");
+        return;
+    }
+    const btn = $("ai-review-run");
+    btn.disabled = true;
+    let done = 0;
+    try {
+        for (const [appId, rec] of pendingEntries) {
+            notice(`AI 正在预审第 ${++done} / ${pendingEntries.length} 条（${rec.name}）…`);
+            const endpoint = cfg.base.replace(/\/+$/, "") + "/chat/completions";
+            const promptText = `你是一名辅助人工管理员核验“在校学生证免费题库申请”的助手。\n申请人填报姓名：${rec.name}\n填报学校/学院：${rec.school}\n请查看图片是否为真实有效的高校学生证或校园卡，并检查照片中的姓名、学校与填报信息是否一致。\n仅返回严格 JSON（不要 markdown 代码块）：{"verdict":"pass"|"review"|"reject","reason":"15字以内简明理由"}。`;
+            const res = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + cfg.key
+                },
+                body: JSON.stringify({
+                    model: cfg.model,
+                    temperature: 0.1,
+                    messages: [{
+                        role: "user",
+                        content: [
+                            { type: "text", text: promptText },
+                            { type: "image_url", image_url: { url: rec.photo } }
+                        ]
+                    }]
+                })
+            });
+            if (!res.ok) throw new Error("AI 接口返回 " + res.status);
+            const data = await res.json();
+            const rawText = String(data?.choices?.[0]?.message?.content || "");
+            const match = rawText.match(/\{[\s\S]*\}/);
+            let parsed = { verdict: "review", reason: "请人工复核" };
+            if (match) {
+                try {
+                    const obj = JSON.parse(match[0]);
+                    parsed = {
+                        verdict: ["pass", "review", "reject"].includes(obj.verdict) ? obj.verdict : "review",
+                        reason: String(obj.reason || "").slice(0, 40)
+                    };
+                } catch {}
+            }
+            aiVerdicts.set(appId, parsed);
+            renderApplications();
+        }
+        notice(`已完成 ${done} 条 AI 预审，请人工确认后放行或驳回。`);
+    } catch (error) {
+        notice("AI 预审中断：" + (error.message || "请求失败"));
+    } finally {
+        btn.disabled = false;
+    }
+});
 
 async function loadPersonalPasses() {
     const host = $("personal-pass-rows");
@@ -313,6 +549,12 @@ async function loadPersonalPasses() {
     for (const [code, entry] of Object.entries(passes)) {
         const row = host.insertRow();
         row.insertCell().textContent = entry.label;
+        const tier = entry.delivery?.["~"]?.tier === "free" ? "free" : "paid";
+        const tierCell = row.insertCell();
+        const tierBadge = document.createElement("span");
+        tierBadge.className = "badge " + tier;
+        tierBadge.textContent = tier === "free" ? "免费·本地" : "付费·云同步";
+        tierCell.append(tierBadge);
         const devices = Object.values(entry.devices || {}).filter(device => device.released === false);
         row.insertCell().textContent = devices.length + " / 2";
         row.insertCell().textContent = entry.revoked ? "已停用" : date.format(entry.validUntil);
@@ -344,25 +586,25 @@ personalPassForm?.addEventListener("submit", async event => {
     const button = event.submitter;
     const count = $("personal-pass-count").valueAsNumber;
     const days = $("personal-pass-days").valueAsNumber;
+    const tier = $("personal-pass-tier")?.value === "free" ? "free" : "paid";
     if (!Number.isInteger(count) || count < 1 || count > 50
         || !Number.isInteger(days) || days < 1 || days > 365) return;
-    const label = $("personal-pass-label").value.trim() || "题库试用";
+    const label = $("personal-pass-label").value.trim() || (tier === "free" ? "学生免费试用" : "题库试用");
     const output = $("personal-pass-output");
     const generated = [];
     button.disabled = true;
     try {
         for (let index = 0; index < count; index++) {
-            const code = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
-                .replaceAll("+", "-").replaceAll("/", "_");
+            const code = randomPassCode();
             await personalPassAPI(code, "PUT", {
                 label: count > 1 ? label + " " + (index + 1) : label,
                 validUntil: Date.now() + days * 86400000,
                 revoked: false,
-                delivery: {"~": {release: settings.release, key: settings.key}}
+                delivery: {"~": {release: settings.release, key: settings.key, tier}}
             });
             generated.push(personalPassLink(code));
         }
-        notice("已生成 " + generated.length + " 份个人通行证。");
+        notice("已生成 " + generated.length + " 份" + (tier === "free" ? "免费" : "付费") + "个人通行证。");
     } catch (error) { notice(error.message + "（已生成 " + generated.length + " 份）"); }
     finally {
         if (generated.length) {
@@ -380,6 +622,9 @@ async function load() {
     // Older rules still allow the existing management pages to open during rollout.
     await loadPersonalPasses().catch(() => {
         if (personalPassForm) $("personal-pass-rows").textContent = "个人通行证规则尚未启用。";
+    });
+    await loadApplications().catch(() => {
+        if ($("app-pending-rows")) $("app-pending-rows").textContent = "学生证审核规则尚未启用（请先更新 database.rules.json）。";
     });
 }
 

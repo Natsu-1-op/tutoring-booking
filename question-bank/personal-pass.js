@@ -30,20 +30,22 @@
     let lastSeen = 0;
     let pending;
     let revoked = false;
+    let tier = "paid";
     const takeover = $("personal-pass-takeover");
     const unlink = $("personal-pass-unlink");
     const exit = $("personal-pass-exit");
 
-    async function request(path, {query, value} = {}) {
+    async function request(path, {query, value, method} = {}) {
         const url = new URL(config.database + "/bankPersonalPasses/" + pass + "/" + path + ".json");
         if (query) url.search = new URLSearchParams(query);
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 10000);
         try {
+            const reqMethod = method || (value !== undefined ? "PUT" : "GET");
             const response = await fetch(url, {
-                method: value ? "PUT" : "GET",
-                headers: value ? {"Content-Type": "application/json"} : undefined,
-                body: value ? JSON.stringify(value) : undefined,
+                method: reqMethod,
+                headers: value !== undefined ? {"Content-Type": "application/json"} : undefined,
+                body: value !== undefined ? JSON.stringify(value) : undefined,
                 cache: "no-store", referrerPolicy: "no-referrer", signal: controller.signal
             });
             if (response.status === 401 || response.status === 403) return null;
@@ -111,6 +113,7 @@
                 status.textContent = "题库权限已失效或版本已更新，请联系老师。";
                 return null;
             }
+            tier = grant.tier === "free" ? "free" : "paid";
             lastSeen = Date.now();
             takeover.hidden = true;
             return {...grant, expiresAt: lastSeen + 90000};
@@ -166,10 +169,14 @@
     if ($("personal-pass-menu")) $("personal-pass-menu").hidden = false;
     window.qbankPersonalPass = {
         storageScope: pass,
+        watermarkLabel: pass.slice(-6),
+        get tier() { return tier; },
         getGrant: () => authenticate(),
         refresh: () => Date.now() - lastSeen >= 90000 ? Promise.resolve(null) : authenticate(),
         // Verify the lease before requesting new protected images.
         verify: async () => !revoked && Boolean(await authenticate()),
+        readMemory: () => tier === "free" ? Promise.resolve(null) : request("bankMemory"),
+        patchMemory: payload => tier === "free" ? Promise.resolve(false) : request("bankMemory", {method: "PATCH", value: payload}),
         lock: () => { revoked = true; }
     };
 })();

@@ -14,6 +14,16 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 #manage .area{margin-top:10px}
 .manage-group .area + h2,.manage-group button + h2{margin-top:20px}
 #status:empty{margin:0}
+.thumb{width:76px;height:52px;object-fit:cover;border:1px solid #cbd5e1;border-radius:6px;cursor:zoom-in;display:block;background:#f8fafc}
+.badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569}
+.badge.pass{background:#ecfdf3;border-color:#86efac;color:#166534}
+.badge.review{background:#fffbeb;border-color:#fde68a;color:#92400e}
+.badge.reject{background:#fef2f2;border-color:#fca5a5;color:#991b1b}
+.badge.free{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.badge.paid{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+dialog{border:1px solid #cbd5e1;border-radius:10px;padding:14px;max-width:min(760px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
+dialog::backdrop{background:#0f172a88}
+#photo-dialog img{display:block;max-width:100%;max-height:74dvh;margin:8px auto 0}
 </style>
 </head>
 <body>
@@ -26,17 +36,41 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 <form id="sign-in"><label>个人口令<input type="password" id="password" autocomplete="current-password" maxlength="128" required></label><button class="primary" type="submit">登录管理</button></form>
 </section>
 <div id="manage" hidden>
+<section class="card" id="applications-card">
+<h2>学生证免费申请审核 <span id="app-pending-badge" class="badge">0 待审</span></h2>
+<p class="muted">审核通过自动生成免费通行证（纯本机进度，不耗云同步额度）并**立即删除证件原图**；驳回同样自动删图。</p>
+<form id="app-toolbar" onsubmit="return false">
+<label>免费有效天数<input id="app-free-days" class="short" type="number" min="1" max="365" value="180" required></label>
+<button type="button" id="app-refresh">刷新申请</button>
+<button type="button" id="ai-review-run" class="primary">AI 辅助预审待审项</button>
+</form>
+<details class="manage-group" id="ai-review-box" style="margin-top:10px">
+<summary style="font-size:14px">AI 辅助预审配置（仅存本机浏览器）</summary>
+<form id="ai-review-form" onsubmit="return false">
+<label style="flex:1;min-width:220px">API Base URL<input id="ai-rev-base" placeholder="https://api.openai.com/v1" autocomplete="off"></label>
+<label style="flex:1;min-width:200px">API Key<input id="ai-rev-key" type="password" placeholder="sk-..." autocomplete="off"></label>
+<label style="min-width:150px">模型<input id="ai-rev-model" placeholder="gpt-4o-mini" value="gpt-4o-mini" autocomplete="off"></label>
+<button type="button" id="ai-rev-save">保存配置</button>
+</form>
+</details>
+<div class="area"><table><thead><tr><th>申请时间</th><th>学生信息</th><th>学生证</th><th>AI 预审</th><th>操作</th></tr></thead><tbody id="app-pending-rows"></tbody></table></div>
+<details class="manage-group" style="margin-top:14px">
+<summary style="font-size:14px">已审核记录（原图已自动删除）</summary>
+<div class="area"><table><thead><tr><th>审核时间</th><th>学生信息</th><th>结果</th><th>通行证/原因</th><th>操作</th></tr></thead><tbody id="app-done-rows"></tbody></table></div>
+</details>
+</section>
 <section class="card" id="personal-passes-card">
 <h2>个人通行证</h2>
-<p class="muted">每份可绑定两个浏览器，限一台同时在线。</p>
+<p class="muted">每份可绑定两个浏览器，限一台同时在线。付费版支持跨设备云端同步；免费版仅本地保存。</p>
 <form id="gen-personal-passes">
+<label>类型<select id="personal-pass-tier"><option value="paid">付费（云同步）</option><option value="free">免费（纯本地）</option></select></label>
 <label>份数<input id="personal-pass-count" class="short" type="number" min="1" max="50" value="1" required></label>
 <label>有效天数<input id="personal-pass-days" class="short" type="number" min="1" max="365" value="30" required></label>
 <label>批次备注<input id="personal-pass-label" maxlength="52" placeholder="例如：2027 试用"></label>
 <button class="primary" type="submit">生成通行证</button>
 </form>
 <textarea id="personal-pass-output" rows="3" readonly hidden aria-label="本批通行证链接"></textarea>
-<div class="area"><table><thead><tr><th>备注</th><th>绑定设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="personal-pass-rows"></tbody></table></div>
+<div class="area"><table><thead><tr><th>备注</th><th>类型</th><th>绑定设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="personal-pass-rows"></tbody></table></div>
 </section>
 <details class="card manage-group">
 <summary>内部链接</summary>
@@ -57,7 +91,8 @@ textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid #d7e2f0;borde
 </details>
 </div>
 </main>
+<dialog id="photo-dialog"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><strong id="photo-dialog-title">学生证大图</strong><button type="button" id="photo-dialog-close">关闭</button></div><img id="photo-dialog-img" alt="学生证大图"></dialog>
 <script type="application/json" id="admin-config">{"apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "ownerEmail": "1843499931@qq.com"}</script>
-<script src="manage.js?v=20261124-simple-1"></script>
+<script src="manage.js?v=20261128-app-1"></script>
 </body>
 </html>

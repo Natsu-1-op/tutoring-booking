@@ -182,7 +182,7 @@
         document.documentElement.classList.remove("bank-locked");
         window.startQuestionBank();
         armExpiry();
-        poll = setInterval(recheck,personalMode ? 25000 : 60000);
+        poll = setInterval(recheck,personalMode ? 25000 : 300000);
         document.addEventListener("visibilitychange",()=>{ if (!document.hidden) recheck(); });
     } catch (error) {
         gate.hidden = false;

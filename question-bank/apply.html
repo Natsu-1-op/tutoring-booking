@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>申请免费学生通行证 · 华科 839 题库</title>
+<style>
+:root{--ink:#17243a;--muted:#52657c;--line:#dce5f2;--blue:#1d4ed8;--soft:#eff6ff;--bg:#f8fafc}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header h1{margin:0;font-size:19px}
+header a{color:var(--blue);text-decoration:none;font-size:14px}
+main{max-width:720px;margin:22px auto;padding:0 14px 40px;display:grid;gap:16px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:0 1px 3px #0f172a0a}
+.card h2{margin:0 0 8px;font-size:17px}
+.muted{color:var(--muted);font-size:13px;margin:0 0 12px}
+form{display:grid;gap:12px}
+label{display:grid;gap:5px;font-size:14px;color:var(--ink);font-weight:500}
+input,textarea{width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;font:inherit;color:var(--ink);background:#fff}
+input:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media(max-width:600px){.row{grid-template-columns:1fr}}
+button{cursor:pointer;font:inherit;border:1px solid var(--line);border-radius:7px;padding:8px 14px;background:#fff;color:var(--ink)}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+button:disabled{opacity:.55;cursor:default}
+.preview-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc}
+.preview-wrap img{max-width:220px;max-height:150px;border-radius:6px;border:1px solid var(--line);object-fit:contain;background:#fff}
+.tip{font-size:12px;color:#7c5a12;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px 10px;line-height:1.55}
+.status-box{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#f8fafc;display:grid;gap:8px}
+.status-box.ok{background:#ecfdf3;border-color:#86efac}
+.status-box.err{background:#fef2f2;border-color:#fca5a5}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.code-pill{display:inline-block;padding:2px 8px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:5px;font-family:ui-monospace,monospace;font-size:13px;word-break:break-all}
+.msg{margin:0;font-size:13px;color:var(--muted)}
+.msg.err{color:#b42318}
+.msg.ok{color:#15803d}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+<h1>申请免费学生通行证</h1>
+<a href="./">返回题库首页</a>
+</header>
+<main>
+<section class="card" id="status-card">
+<h2>审核进度与通行证领取</h2>
+<p class="muted">提交后页面会自动记住你的查询码；也可以随时输入之前保存的查询码查看是否通过。</p>
+<div class="actions" style="margin-bottom:10px">
+<input id="query-id" placeholder="输入 24 位申请查询码" maxlength="40" style="flex:1;min-width:200px">
+<button type="button" id="query-btn">查询进度</button>
+</div>
+<div id="status-result" class="status-box" hidden></div>
+<p id="query-msg" class="msg"></p>
+</section>
+
+<section class="card" id="apply-card">
+<h2>填写学生身份核验申请</h2>
+<p class="muted">为防止恶意批量盗题，免费版需人工/辅助核验在校学生证，审核通过后发放本人专属免费通行证（限本人设备使用，做题进度保存在本机浏览器）。</p>
+<div class="tip">隐私保护：请上传学生证/校园卡照片，**可自行打码身份证号等无关敏感信息**，仅保留姓名、学校和有效标识。管理员审核完成（通过或驳回）后，系统会**立即删除**你的证件照片，仅保留脱敏记录。</div>
+<form id="apply-form">
+<div class="row">
+<label>姓名<input id="name" maxlength="36" placeholder="请与学生证一致" required></label>
+<label>学校 / 学院<input id="school" maxlength="72" placeholder="例如：华中科技大学 光学与电子信息学院" required></label>
+</div>
+<label>联系方式或学号后 4 位<input id="contact" maxlength="72" placeholder="例如：微信号 / QQ / 学号后 4 位（仅用于防重复）" required></label>
+<label>备考说明（可选）<input id="note" maxlength="160" placeholder="例如：2027考研备考839"></label>
+<label>上传学生证照片（自动压缩，≤ 110 KB）
+<input id="photo-input" type="file" accept="image/*" required>
+</label>
+<div id="preview-wrap" class="preview-wrap" hidden>
+<img id="photo-preview" alt="学生证预览">
+<div>
+<div id="photo-info" class="msg"></div>
+<div class="msg">已做本地等比缩放压缩，可直接提交。</div>
+</div>
+</div>
+<div class="actions">
+<button class="primary" type="submit" id="submit-btn">提交免费申请</button>
+<span id="submit-msg" class="msg"></span>
+</div>
+</form>
+</section>
+</main>
+<script type="application/json" id="apply-config">{"database":"https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app"}</script>
+<script>
+"use strict";
+(() => {
+const $ = id => document.getElementById(id);
+const DB = JSON.parse($("apply-config").textContent).database;
+const STORE_KEY = "hust839-apply-id";
+const VALID_ID = /^[A-Za-z0-9_-]{16,32}$/;
+let compressedDataUrl = "";
+
+function makeId() {
+    return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))))
+        .replaceAll("+", "-").replaceAll("/", "_");
+}
+
+function setMsg(el, text, cls = "") {
+    el.textContent = text;
+    el.className = cls ? "msg " + cls : "msg";
+}
+
+function readSavedId() {
+    try { return localStorage.getItem(STORE_KEY) || ""; } catch { return ""; }
+}
+
+function saveId(id) {
+    try {
+        if (id) localStorage.setItem(STORE_KEY, id);
+        else localStorage.removeItem(STORE_KEY);
+    } catch {}
+}
+
+async function compressImage(file) {
+    const imgUrl = URL.createObjectURL(file);
+    try {
+        const img = await new Promise((resolve, reject) => {
+            const el = new Image();
+            el.onload = () => resolve(el);
+            el.onerror = () => reject(new Error("无法读取所选图片"));
+            el.src = imgUrl;
+        });
+        const maxSide = 900;
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        for (const mime of ["image/webp", "image/jpeg"]) {
+            for (const q of [0.72, 0.56, 0.42]) {
+                const url = canvas.toDataURL(mime, q);
+                if (url.length <= 135000) return url;
+            }
+        }
+        throw new Error("图片压缩后仍过大，请裁剪后重试。");
+    } finally {
+        URL.revokeObjectURL(imgUrl);
+    }
+}
+
+$("photo-input").addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    compressedDataUrl = "";
+    $("preview-wrap").hidden = true;
+    setMsg($("submit-msg"), "");
+    if (!file) return;
+    try {
+        setMsg($("submit-msg"), "正在压缩照片…");
+        compressedDataUrl = await compressImage(file);
+        $("photo-preview").src = compressedDataUrl;
+        $("photo-info").textContent = "压缩完成，约 " + Math.round(compressedDataUrl.length * 0.75 / 1024) + " KB";
+        $("preview-wrap").hidden = false;
+        setMsg($("submit-msg"), "");
+    } catch (error) {
+        event.target.value = "";
+        setMsg($("submit-msg"), error.message || "图片处理失败", "err");
+    }
+});
+
+async function queryStatus(id) {
+    const clean = String(id || "").trim();
+    const box = $("status-result");
+    box.hidden = true;
+    box.className = "status-box";
+    setMsg($("query-msg"), "");
+    if (!VALID_ID.test(clean)) {
+        setMsg($("query-msg"), "请输入有效的查询码。", "err");
+        return;
+    }
+    saveId(clean);
+    $("query-id").value = clean;
+    setMsg($("query-msg"), "正在查询…");
+    try {
+        const res = await fetch(DB + "/bankApplications/" + clean + ".json", { cache: "no-store", referrerPolicy: "no-referrer" });
+        if (!res.ok) throw new Error("查询失败（" + res.status + "）");
+        const rec = await res.json();
+        if (!rec) {
+            setMsg($("query-msg"), "未找到该查询码对应的申请记录。", "err");
+            return;
+        }
+        setMsg($("query-msg"), "");
+        box.replaceChildren();
+        const title = document.createElement("strong");
+        const desc = document.createElement("div");
+        desc.className = "msg";
+        const codeLine = document.createElement("div");
+        codeLine.className = "msg";
+        codeLine.append(document.createTextNode("查询码："));
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "code-pill";
+        codeSpan.textContent = clean;
+        codeLine.append(codeSpan);
+        box.append(title, desc, codeLine);
+
+        if (rec.status === "pending") {
+            title.textContent = "审核中 · 请耐心等待";
+            desc.textContent = `${rec.name}（${rec.school}）的申请已提交，管理员核验后即可在本页领取通行证。`;
+        } else if (rec.status === "approved" && rec.passCode) {
+            box.className = "status-box ok";
+            title.textContent = "审核已通过！免费学生通行证已生成";
+            const expireStr = rec.passValidUntil ? new Date(rec.passValidUntil).toLocaleDateString("zh-CN") : "有效期内";
+            desc.textContent = `有效期至 ${expireStr}。免费版仅限本人设备使用，做题进度保存在本机浏览器（可在题库顶栏“学习进度”导出备份）。`;
+            const targetUrl = new URL("./", location.href);
+            targetUrl.hash = new URLSearchParams({ pass: rec.passCode });
+            const act = document.createElement("div");
+            act.className = "actions";
+            const enter = document.createElement("a");
+            enter.href = targetUrl.href;
+            enter.textContent = "一键进入免费题库";
+            enter.style.cssText = "display:inline-block;padding:8px 14px;border-radius:7px;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:600";
+            const copyBtn = document.createElement("button");
+            copyBtn.type = "button";
+            copyBtn.textContent = "复制专属链接";
+            copyBtn.addEventListener("click", async () => {
+                await navigator.clipboard?.writeText(targetUrl.href).catch(() => {});
+                copyBtn.textContent = "已复制";
+            });
+            act.append(enter, copyBtn);
+            box.append(act);
+        } else if (rec.status === "rejected") {
+            box.className = "status-box err";
+            title.textContent = "申请未通过";
+            desc.textContent = "驳回原因：" + (rec.rejectReason || "证件信息不清晰，请重新提交。");
+            const retry = document.createElement("button");
+            retry.type = "button";
+            retry.textContent = "清除记录并重新申请";
+            retry.addEventListener("click", () => {
+                saveId("");
+                $("query-id").value = "";
+                box.hidden = true;
+            });
+            box.append(retry);
+        }
+        box.hidden = false;
+    } catch (error) {
+        setMsg($("query-msg"), error.message || "网络超时，请重试。", "err");
+    }
+}
+
+$("query-btn").addEventListener("click", () => queryStatus($("query-id").value));
+
+$("apply-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!compressedDataUrl) {
+        setMsg($("submit-msg"), "请先选择并等待学生证图片压缩完成。", "err");
+        return;
+    }
+    const btn = $("submit-btn");
+    btn.disabled = true;
+    setMsg($("submit-msg"), "正在提交申请…");
+    const appId = makeId();
+    const payload = {
+        name: $("name").value.trim(),
+        school: $("school").value.trim(),
+        contact: $("contact").value.trim(),
+        note: $("note").value.trim(),
+        photo: compressedDataUrl,
+        status: "pending",
+        createdAt: { ".sv": "timestamp" }
+    };
+    try {
+        const res = await fetch(DB + "/bankApplications/" + appId + ".json", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            cache: "no-store",
+            referrerPolicy: "no-referrer"
+        });
+        if (!res.ok) throw new Error("提交失败（" + res.status + "），请确认 Firebase 规则已更新。");
+        saveId(appId);
+        $("apply-form").reset();
+        compressedDataUrl = "";
+        $("preview-wrap").hidden = true;
+        setMsg($("submit-msg"), "提交成功！请记住查询码：" + appId, "ok");
+        await queryStatus(appId);
+    } catch (error) {
+        setMsg($("submit-msg"), error.message || "提交失败，请检查网络。", "err");
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+const saved = readSavedId();
+if (saved && VALID_ID.test(saved)) {
+    $("query-id").value = saved;
+    queryStatus(saved);
+}
+})();
+</script>
+</body>
+</html>

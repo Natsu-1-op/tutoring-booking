@@ -205,6 +205,9 @@ body[data-focus="1"] #sidebar-toggle{display:none}
 .pip-body{flex:1;min-height:140px;max-height:calc(72dvh - 42px);overflow:auto;background:#ecf1f8;padding:8px}
 .pip-body img{display:block;max-width:100%;margin:auto;background:#fff}
 @media(max-width:820px){.pip-hide-mobile,.pip-viewer{display:none!important}.primary-grid{grid-template-columns:1fr}}
+.stem{user-select:none;-webkit-user-select:none}
+.question-body{position:relative}
+.question-body.has-wm::after{content:"";position:absolute;inset:0;pointer-events:none;background-repeat:repeat;background-image:var(--wm-img,none);z-index:1}
 </style></head>
 <body>
 <section id="internal-gate" aria-labelledby="internal-title">
@@ -253,6 +256,7 @@ body[data-focus="1"] #sidebar-toggle{display:none}
 <button type="button" id="gate-signout">退出登录</button>
 </div>
 <div class="gate-links">
+<a href="apply.html">申请免费学生通行证</a>
 <button id="gate-use-email" type="button" hidden>邮箱登录</button>
 <button id="gate-use-pass" type="button" hidden>使用通行证</button>
 <a href="network.html" target="_blank" rel="noopener noreferrer">网络检测</a>
@@ -2139,8 +2143,23 @@ window.qbankSyncMemoryCounts = () => {
     const filters = names.filter(name => $(name).value).map(name => [name, $(name).value]);
     updateOptionCounts(terms, filters);
 };
-window.qbankBank = bank;
-window.qbankQuestion = id => lookup.get(id);
+window.qbankBank = { assetPaths: bank.assetPaths, assets: bank.assets, previews: bank.previews };
+{
+    const wmLabel = window.qbankPersonalPass?.watermarkLabel
+        || (new URLSearchParams(location.hash.slice(1)).get("key") || "").slice(-6)
+        || "839";
+    const safeLabel = String(wmLabel).replace(/[^A-Za-z0-9_-]/g, "");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="140"><text x="110" y="70" text-anchor="middle" fill="#17243a" fill-opacity="0.045" font-size="15" font-family="sans-serif" transform="rotate(-24 110 70)">839-${safeLabel}</text></svg>`;
+    document.documentElement.style.setProperty("--wm-img", `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+    $("detail").addEventListener("copy", event => {
+        if (event.target.closest?.(".question-body")) event.preventDefault();
+    });
+    const mo = new MutationObserver(() => {
+        const qb = $("detail").querySelector(".question-body");
+        if (qb) qb.classList.add("has-wm");
+    });
+    mo.observe($("detail"), { childList: true });
+}
 function readHash() {
     let id;
     try { id = window.questionBankId?.() ?? decodeURIComponent(location.hash.slice(1)); }
@@ -2165,7 +2184,7 @@ try {
 };</script>
 
 <script type="application/json" id="internal-config">{"release": "internal-v2", "database": "https://class-optic-default-rtdb.asia-southeast1.firebasedatabase.app", "indexPath": "index-3fa21cb3b65fdd5d", "apiKey": "AIzaSyB6EbZElw7ahDN5rOK-keWlgr9JInVbnN4", "authDomain": "class-optic.firebaseapp.com"}</script>
-<script src="study.js?v=20261124-pass-1"></script>
+<script src="study.js?v=20261128-tier-1"></script>
 <script src="ai-tutor.js?v=20261123-ai-2"></script>
-<script src="boot.js?v=20261124-simple-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261124-pass-1" data-personal-pass="personal-pass.js?v=20261124-3"></script></body>
+<script src="boot.js?v=20261124-simple-1" data-account="account.js?v=20261124-1" data-access="access.js?v=20261128-tier-1" data-personal-pass="personal-pass.js?v=20261128-tier-1"></script></body>
 </html>
