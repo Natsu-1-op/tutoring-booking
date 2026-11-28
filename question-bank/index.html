@@ -262,10 +262,30 @@ function button(label, callback, cls = "action") {
     node.addEventListener("click", callback);
     return node;
 }
+function stripLayoutBraces(text) {
+    let out = "", math = "";
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i], next = text[i + 1];
+        if (ch === "$" && (i === 0 || text[i - 1] !== "\\")) {
+            const marker = next === "$" ? "$$" : "$";
+            if (!math) math = marker; else if (math === marker) math = "";
+            out += marker; if (marker.length === 2) i++; continue;
+        }
+        if (ch === "\\" && (next === "(" || next === "[")) {
+            if (!math) math = next === "(" ? "\\)" : "\\]";
+            out += ch + next; i++; continue;
+        }
+        if (ch === "\\" && math && ch + next === math) { out += ch + next; i++; math = ""; continue; }
+        if (!math && text.startsWith("\\ldots", i)) { out += "…"; i += 5; continue; }
+        if (!math && (ch === "{" || ch === "}")) continue;
+        out += ch;
+    }
+    return out;
+}
 function cleanStem(text, inline = false) {
     let diagram = 0;
     let item = 0;
-    return text.replace(/\\begin\{tabular\*?\}[\s\S]*?(A\.[\s\S]*?)\\end\{tabular\*?\}/g,
+    return stripLayoutBraces(text.replace(/\\begin\{tabular\*?\}[\s\S]*?(A\.[\s\S]*?)\\end\{tabular\*?\}/g,
             (_, options) => options.replace(/\\\\/g, "\n").replace(/\s*&\s*/g, "    "))
         .replace(/\\hspace\*?\{[^{}]*\}/g, "")
         .replace(/\\(?:sect|ReserveSpace)\{[^{}]*\}/g, "")
@@ -284,13 +304,13 @@ function cleanStem(text, inline = false) {
         .replace(/\\(?:vspace|addvspace)\{[^{}]*\}/g, "")
         .replace(/\\(?:centering|begin\{center\}|end\{center\})/g, "")
         .replace(/\\end\{(?:samepage|enumerate|itemize|multicols)\}/g, "")
-        .replace(/\\(?:sq|subq|st)\{(\d+)\}/g, "（$1）")
+        .replace(/\\(?:sqfirst|sq|subq|st)\{(\d+)\}/g, "（$1）")
         .replace(/\\(?:nopagebreak|noindent|ignorespaces|par|smallskip|medskip|bigskip)\b\s*/g, "\n")
-        .replace(/\\opts?\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}/g, "\nA. $1\nB. $2\nC. $3\nD. $4")
+        .replace(/\\opts?(?:long)?\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}\s*\{([^{}\n]*(?:\{[^{}]*\}[^{}\n]*)*)\}/g, "\nA. $1\nB. $2\nC. $3\nD. $4")
         .replace(/\\rule(?:\[[^\]]*\])?\{[^{}]*\}\{[^{}]*\}/g, "________")
         .replace(/\\mbox\{(\\\([\s\S]*?\\\))\}/g, "$1")
         .replace(/\\mbox\{([^{}]*?)\}/g, "$1")
-        .replace(/\n{3,}/g, "\n\n").trim();
+        .replace(/\n{3,}/g, "\n\n").trim());
 }
 function sortYear(q) {
     return q["来源类型"] === "真题" ? Math.max(0, ...q["年份"]) : 0;
